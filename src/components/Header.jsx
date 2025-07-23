@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNewNotifications } from '../contexts/NewNotificationContext';
+// 🔔 IMPORTAÇÃO DO NOTIFICATION BADGE
+import NotificationBadge from './NotificationBadge';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -112,7 +114,10 @@ const Header = ({ title = "Gestão de Chamados" }) => {
 
           {/* Ações do usuário */}
           <div className="flex items-center space-x-1 sm:space-x-3">
-            {/* Notificações */}
+            {/* 🔔 NOTIFICATION BADGE - SISTEMA PRINCIPAL DE NOTIFICAÇÕES */}
+            <NotificationBadge />
+
+            {/* Notificações (Sistema Legado - mantido para compatibilidade) */}
             <Popover open={notificationOpen} onOpenChange={setNotificationOpen}>
               <PopoverTrigger asChild>
                 <Button
