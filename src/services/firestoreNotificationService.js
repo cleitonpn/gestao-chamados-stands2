@@ -1,174 +1,278 @@
 import { 
   collection, 
   doc, 
-  getDocs, 
-  addDoc, 
+  setDoc, 
+  getDoc, 
+  getDocs,
   updateDoc, 
+  onSnapshot, 
   query, 
   where, 
   orderBy,
-  onSnapshot 
+  serverTimestamp,
+  addDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-export const firestoreNotificationService = {
-  // Adicionar notificação no Firestore
-  async addNotification(notificationData) {
+class FirestoreNotificationService {
+  constructor() {
+    this.listeners = new Map();
+  }
+
+  /**
+   * Criar uma nova notificação
+   */
+  async createNotification(notification) {
     try {
-      const docRef = await addDoc(collection(db, 'notifications'), {
-        ...notificationData,
-        timestamp: new Date(),
+      const notificationRef = await addDoc(collection(db, 'notifications'), {
+        ...notification,
+        criadoEm: serverTimestamp(),
         lida: false
       });
-      
-      console.log('📱 Notificação adicionada ao Firestore:', docRef.id);
-      return docRef.id;
+
+      console.log('✅ Notificação criada:', notificationRef.id);
+      return notificationRef.id;
     } catch (error) {
-      console.error('❌ Erro ao adicionar notificação:', error);
+      console.error('❌ Erro ao criar notificação:', error);
       throw error;
     }
-  },
+  }
 
-  // Buscar notificações não lidas por usuário e chamado
-  async getUnreadNotificationsByTicket(userId, ticketId) {
+  /**
+   * Buscar notificações de um usuário
+   */
+  async getUserNotifications(userId, limit = 50) {
     try {
       const q = query(
         collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('ticketId', '==', ticketId),
-        where('lida', '==', false)
+        where('destinatarioId', '==', userId),
+        orderBy('criadoEm', 'desc')
       );
-      
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.size; // Retorna a contagem
-    } catch (error) {
-      console.error('❌ Erro ao buscar notificações não lidas:', error);
-      return 0;
-    }
-  },
 
-  // Buscar todas as notificações não lidas por usuário
-  async getUnreadNotificationsByUser(userId) {
-    try {
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('lida', '==', false),
-        orderBy('timestamp', 'desc')
-      );
-      
-      const querySnapshot = await getDocs(q);
+      const snapshot = await getDocs(q);
       const notifications = [];
-      querySnapshot.forEach((doc) => {
+
+      snapshot.forEach((doc) => {
         notifications.push({
           id: doc.id,
           ...doc.data()
         });
       });
-      
+
+      console.log(`📱 ${notifications.length} notificações carregadas para usuário ${userId}`);
       return notifications;
     } catch (error) {
-      console.error('❌ Erro ao buscar notificações do usuário:', error);
+      console.error('❌ Erro ao buscar notificações:', error);
       return [];
     }
-  },
+  }
 
-  // Marcar notificações como lidas por chamado
-  async markTicketNotificationsAsRead(userId, ticketId) {
+  /**
+   * Marcar notificação como lida
+   */
+  async markAsRead(userId, notificationId) {
+    try {
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notificationRef, {
+        lida: true,
+        lidaEm: serverTimestamp()
+      });
+
+      console.log('✅ Notificação marcada como lida:', notificationId);
+    } catch (error) {
+      console.error('❌ Erro ao marcar notificação como lida:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Marcar notificação como não lida
+   */
+  async markAsUnread(userId, notificationId) {
+    try {
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notificationRef, {
+        lida: false,
+        lidaEm: null
+      });
+
+      console.log('✅ Notificação marcada como não lida:', notificationId);
+    } catch (error) {
+      console.error('❌ Erro ao marcar notificação como não lida:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Marcar todas as notificações como lidas
+   */
+  async markAllAsRead(userId) {
     try {
       const q = query(
         collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('ticketId', '==', ticketId),
+        where('destinatarioId', '==', userId),
         where('lida', '==', false)
       );
-      
-      const querySnapshot = await getDocs(q);
-      const updatePromises = [];
-      
-      querySnapshot.forEach((docSnapshot) => {
-        updatePromises.push(
-          updateDoc(doc(db, 'notifications', docSnapshot.id), {
+
+      const snapshot = await getDocs(q);
+      const promises = [];
+
+      snapshot.forEach((doc) => {
+        promises.push(
+          updateDoc(doc.ref, {
             lida: true,
-            dataLeitura: new Date()
+            lidaEm: serverTimestamp()
           })
         );
       });
-      
-      await Promise.all(updatePromises);
-      console.log(`✅ ${updatePromises.length} notificações marcadas como lidas para o chamado ${ticketId}`);
-      
-      return updatePromises.length;
+
+      await Promise.all(promises);
+      console.log(`✅ ${promises.length} notificações marcadas como lidas`);
     } catch (error) {
-      console.error('❌ Erro ao marcar notificações como lidas:', error);
+      console.error('❌ Erro ao marcar todas as notificações como lidas:', error);
       throw error;
     }
-  },
+  }
 
-  // Criar notificação para mudança de status
-  async notifyStatusChange(ticketId, userId, titulo, newStatus, observacao = '') {
+  /**
+   * Deletar uma notificação
+   */
+  async deleteNotification(userId, notificationId) {
     try {
-      const notificationData = {
-        userId: userId,
-        ticketId: ticketId,
-        tipo: 'status_change',
-        titulo: `Status atualizado: ${titulo}`,
-        mensagem: `Chamado alterado para: ${newStatus}${observacao ? ` - ${observacao}` : ''}`,
-        status: newStatus,
-        observacao: observacao
-      };
-      
-      return await this.addNotification(notificationData);
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await deleteDoc(notificationRef);
+
+      console.log('✅ Notificação deletada:', notificationId);
     } catch (error) {
-      console.error('❌ Erro ao criar notificação de status:', error);
+      console.error('❌ Erro ao deletar notificação:', error);
       throw error;
     }
-  },
+  }
 
-  // Criar notificação para nova mensagem
-  async notifyNewMessage(ticketId, userId, titulo, remetente, conteudo) {
-    try {
-      const notificationData = {
-        userId: userId,
-        ticketId: ticketId,
-        tipo: 'new_message',
-        titulo: `Nova mensagem: ${titulo}`,
-        mensagem: `${remetente}: ${conteudo.substring(0, 100)}${conteudo.length > 100 ? '...' : ''}`,
-        remetente: remetente
-      };
-      
-      return await this.addNotification(notificationData);
-    } catch (error) {
-      console.error('❌ Erro ao criar notificação de mensagem:', error);
-      throw error;
-    }
-  },
-
-  // Escutar notificações em tempo real
-  subscribeToUserNotifications(userId, callback) {
+  /**
+   * Escutar notificações em tempo real
+   */
+  subscribeToNotifications(userId, callback) {
     try {
       const q = query(
         collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('lida', '==', false),
-        orderBy('timestamp', 'desc')
+        where('destinatarioId', '==', userId),
+        orderBy('criadoEm', 'desc')
       );
-      
-      return onSnapshot(q, (querySnapshot) => {
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
         const notifications = [];
-        querySnapshot.forEach((doc) => {
+        
+        snapshot.forEach((doc) => {
           notifications.push({
             id: doc.id,
             ...doc.data()
           });
         });
-        
+
         callback(notifications);
       });
+
+      // Armazenar listener para cleanup
+      this.listeners.set(userId, unsubscribe);
+
+      console.log('👂 Listener de notificações ativado para usuário:', userId);
+      return unsubscribe;
     } catch (error) {
-      console.error('❌ Erro ao escutar notificações:', error);
-      return () => {}; // Retorna função vazia para cleanup
+      console.error('❌ Erro ao configurar listener de notificações:', error);
+      return () => {}; // Retorna função vazia em caso de erro
     }
   }
-};
+
+  /**
+   * Parar de escutar notificações
+   */
+  unsubscribeFromNotifications(userId) {
+    const unsubscribe = this.listeners.get(userId);
+    if (unsubscribe) {
+      unsubscribe();
+      this.listeners.delete(userId);
+      console.log('🔇 Listener de notificações desativado para usuário:', userId);
+    }
+  }
+
+  /**
+   * Enviar notificação para múltiplos usuários
+   */
+  async sendNotificationToUsers(userIds, notificationData) {
+    try {
+      const promises = userIds.map(userId => 
+        this.createNotification({
+          ...notificationData,
+          destinatarioId: userId
+        })
+      );
+
+      await Promise.all(promises);
+      console.log(`✅ Notificação enviada para ${userIds.length} usuários`);
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação para usuários:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Buscar usuários por função/área
+   */
+  async getUsersByRole(role) {
+    try {
+      const q = query(
+        collection(db, 'users'),
+        where('funcao', '==', role)
+      );
+
+      const snapshot = await getDocs(q);
+      const users = [];
+
+      snapshot.forEach((doc) => {
+        users.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+
+      return users;
+    } catch (error) {
+      console.error('❌ Erro ao buscar usuários por função:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Buscar usuários por área específica
+   */
+  async getUsersByArea(area) {
+    try {
+      const q = query(
+        collection(db, 'users'),
+        where('area', '==', area)
+      );
+
+      const snapshot = await getDocs(q);
+      const users = [];
+
+      snapshot.forEach((doc) => {
+        users.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+
+      return users;
+    } catch (error) {
+      console.error('❌ Erro ao buscar usuários por área:', error);
+      return [];
+    }
+  }
+}
+
+// Criar instância única do serviço
+export const firestoreNotificationService = new FirestoreNotificationService();
+export default firestoreNotificationService;
 
