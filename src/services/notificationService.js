@@ -1,11 +1,11 @@
-import { 
-  collection, 
-  doc, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  query, 
-  where, 
+import {
+  collection,
+  doc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  query,
+  where,
   orderBy,
   onSnapshot,
   writeBatch,
@@ -14,12 +14,11 @@ import {
 import { db } from '../config/firebase'; // Verifique se este caminho está correto
 
 class NotificationService {
-  
-  // ✅ FUNÇÕES DE ENVIO DE NOTIFICAÇÃO (TRIGGERS)
 
+  // Envia notificações para uma lista de usuários
   async #sendNotificationToUsers(userIds, notificationData) {
     if (!userIds || userIds.length === 0) return;
-    const uniqueUserIds = [...new Set(userIds)]; // Garante que não há duplicatas
+    const uniqueUserIds = [...new Set(userIds)];
     
     const batch = writeBatch(db);
     uniqueUserIds.forEach(userId => {
@@ -35,17 +34,7 @@ class NotificationService {
     await batch.commit();
   }
 
-  async #getRecipients(ticketData, initiatorId) {
-    const recipients = new Set();
-    if (ticketData.consultorId && ticketData.consultorId !== initiatorId) {
-      recipients.add(ticketData.consultorId);
-    }
-    if (ticketData.produtorId && ticketData.produtorId !== initiatorId) {
-      recipients.add(ticketData.produtorId);
-    }
-    return recipients;
-  }
-  
+  // Obtém usuários de uma área específica
   async getUsersByArea(area) {
     const users = [];
     const q = query(collection(db, "usuarios"), where("area", "==", area));
@@ -56,15 +45,20 @@ class NotificationService {
     return users;
   }
 
+  // Notifica sobre um novo chamado
   async notifyNewTicket(ticketId, ticketData, creatorId) {
     try {
-      const recipients = await this.#getRecipients(ticketData, creatorId);
-      if (ticketData.areaAtual) {
-        const areaUsers = await this.getUsersByArea(ticketData.areaAtual);
+      const recipients = new Set();
+      if (ticketData.consultorId && ticketData.consultorId !== creatorId) recipients.add(ticketData.consultorId);
+      if (ticketData.produtorId && ticketData.produtorId !== creatorId) recipients.add(ticketData.produtorId);
+      
+      if (ticketData.area) { // Corrigido para usar ticketData.area
+        const areaUsers = await this.getUsersByArea(ticketData.area);
         areaUsers.forEach(user => {
           if (user.id !== creatorId) recipients.add(user.id);
         });
       }
+
       await this.#sendNotificationToUsers(Array.from(recipients), {
         tipo: 'new_ticket',
         titulo: `Novo chamado: ${ticketData.titulo}`,
@@ -77,31 +71,52 @@ class NotificationService {
     }
   }
 
+  // Notifica sobre uma nova mensagem
   async notifyNewMessage(ticketId, ticketData, messageData, senderId) {
     try {
-      const recipients = await this.#getRecipients(ticketData, senderId);
-       if (ticketData.areaAtual) {
-        const areaUsers = await this.getUsersByArea(ticketData.areaAtual);
-        areaUsers.forEach(user => {
-          if (user.id !== senderId) recipients.add(user.id);
+        const recipients = new Set();
+        if (ticketData.criadoPor && ticketData.criadoPor !== senderId) recipients.add(ticketData.criadoPor);
+        if (ticketData.consultorId && ticketData.consultorId !== senderId) recipients.add(ticketData.consultorId);
+        if (ticketData.produtorId && ticketData.produtorId !== senderId) recipients.add(ticketData.produtorId);
+
+        // Adiciona todos os usuários que já participaram da conversa
+        if (messageData.allParticipantsIds) {
+            messageData.allParticipantsIds.forEach(id => {
+                if (id !== senderId) recipients.add(id);
+            });
+        }
+        
+        await this.#sendNotificationToUsers(Array.from(recipients), {
+            tipo: 'new_message',
+            titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
+            mensagem: `${messageData.autorNome}: ${messageData.texto.substring(0, 50)}...`,
+            link: `/tickets/${ticketId}`,
+            ticketId: ticketId,
         });
-      }
-      await this.#sendNotificationToUsers(Array.from(recipients), {
-        tipo: 'new_message',
-        titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
-        mensagem: `${messageData.autorNome}: ${messageData.texto.substring(0, 50)}...`,
-        link: `/tickets/${ticketId}`,
-        ticketId: ticketId,
-      });
     } catch (error) {
-      console.error('❌ Erro ao notificar nova mensagem:', error);
+        console.error('❌ Erro ao notificar nova mensagem:', error);
     }
+}
+
+
+  // Notifica sobre mudança de status
+  async notifyStatusChanged(ticketId, ticket, statusData, userId) {
+    // Implementação pendente, se necessário
   }
 
-  // Adicione outras funções de notificação (notifyStatusChange, etc.) aqui seguindo o mesmo padrão...
-  
+  // Notifica sobre escalação
+  async notifyTicketEscalated(ticketId, ticket, escalationData, userId) {
+    // Implementação pendente, se necessário
+  }
+
+  // Notifica sobre escalação para gerente
+  async notifyEscalatedToManager(ticketId, ticket, escalationData, userId) {
+     // Implementação pendente, se necessário
+  }
+
   // ✅ FUNÇÕES DE LEITURA E MANIPULAÇÃO (PARA A UI)
   
+  // Função que estava faltando com o nome getInAppNotifications
   async getUserNotifications(userId) {
     const notifications = [];
     const q = query(collection(db, "notifications"), where("userId", "==", userId), orderBy("criadoEm", "desc"));
@@ -111,7 +126,12 @@ class NotificationService {
     });
     return notifications;
   }
+  // Alias para garantir compatibilidade
+  async getInAppNotifications(userId) {
+    return this.getUserNotifications(userId);
+  }
 
+  // Listener em tempo real
   subscribeToNotifications(userId, callback) {
     const q = query(collection(db, "notifications"), where("userId", "==", userId), orderBy("criadoEm", "desc"));
     return onSnapshot(q, (querySnapshot) => {
@@ -122,7 +142,8 @@ class NotificationService {
       callback(notifications);
     });
   }
-
+  
+  // Funções de manipulação
   async markAsRead(userId, notificationId) {
     const notificationRef = doc(db, 'notifications', notificationId);
     await updateDoc(notificationRef, { lida: true });
@@ -136,10 +157,9 @@ class NotificationService {
   async markAllAsRead(userId) {
     const q = query(collection(db, 'notifications'), where('userId', '==', userId), where('lida', '==', false));
     const snapshot = await getDocs(q);
+    if (snapshot.empty) return;
     const batch = writeBatch(db);
-    snapshot.docs.forEach(doc => {
-      batch.update(doc.ref, { lida: true });
-    });
+    snapshot.docs.forEach(doc => batch.update(doc.ref, { lida: true }));
     await batch.commit();
   }
 
@@ -147,10 +167,23 @@ class NotificationService {
     await deleteDoc(doc(db, 'notifications', notificationId));
   }
 
-  /**
-   * ✅ FUNÇÃO QUE ESTAVA FALTANDO IMPLEMENTADA AQUI
-   */
+  // Função que estava faltando na versão anterior
   async markTicketNotificationsAsRead(userId, ticketId) {
+    const q = query(
+      collection(db, 'notifications'),
+      where('userId', '==', userId),
+      where('ticketId', '==', ticketId),
+      where('lida', '==', false)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return;
+    const batch = writeBatch(db);
+    snapshot.forEach(doc => batch.update(doc.ref, { lida: true, dataLeitura: new Date() }));
+    await batch.commit();
+  }
+
+  // ✅ Função que estava faltando na versão anterior
+  async getUnreadNotificationsByTicket(userId, ticketId) {
     try {
       const q = query(
         collection(db, 'notifications'),
@@ -158,24 +191,11 @@ class NotificationService {
         where('ticketId', '==', ticketId),
         where('lida', '==', false)
       );
-      
       const querySnapshot = await getDocs(q);
-      if (querySnapshot.empty) return 0;
-
-      const batch = writeBatch(db);
-      querySnapshot.forEach((docSnapshot) => {
-        batch.update(docSnapshot.ref, {
-          lida: true,
-          dataLeitura: new Date()
-        });
-      });
-      
-      await batch.commit();
-      console.log(`✅ ${querySnapshot.size} notificações marcadas como lidas para o chamado ${ticketId}`);
-      return querySnapshot.size;
+      return querySnapshot.size; // Retorna a contagem de notificações não lidas
     } catch (error) {
-      console.error('❌ Erro ao marcar notificações do chamado como lidas:', error);
-      throw error;
+      console.error("Erro ao buscar notificações não lidas por ticket:", error);
+      return 0;
     }
   }
 }
