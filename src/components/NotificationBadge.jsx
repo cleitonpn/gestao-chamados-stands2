@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { firestoreNotificationService } from '../services/firestoreNotificationService';
+import firestoreNotificationService from '../services/firestoreNotificationService';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { 
   Bell, 
   BellRing, 
@@ -17,16 +15,10 @@ import {
   Trash2,
   Mail,
   MailOpen,
-  Filter,
   Clock,
   User,
-  FileText,
-  Settings,
-  ChevronDown,
-  ChevronUp
+  FileText
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 
 const NotificationBadge = () => {
@@ -36,8 +28,8 @@ const NotificationBadge = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // 'all', 'unread', 'read'
-  const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'ticket', 'message', 'escalation', 'event'
+  const [filter, setFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const dropdownRef = useRef(null);
 
   // Carregar notificações quando o usuário estiver logado
@@ -54,7 +46,11 @@ const NotificationBadge = () => {
         }
       );
 
-      return () => unsubscribe();
+      return () => {
+        if (unsubscribe) {
+          unsubscribe();
+        }
+      };
     }
   }, [user?.uid]);
 
@@ -185,10 +181,18 @@ const NotificationBadge = () => {
     
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return formatDistanceToNow(date, { 
-        addSuffix: true, 
-        locale: ptBR 
-      });
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'Agora';
+      if (diffMins < 60) return `${diffMins}m atrás`;
+      if (diffHours < 24) return `${diffHours}h atrás`;
+      if (diffDays < 7) return `${diffDays}d atrás`;
+      
+      return date.toLocaleDateString('pt-BR');
     } catch (error) {
       return '';
     }
@@ -387,7 +391,7 @@ const NotificationBadge = () => {
                   </div>
                   
                   {index < filteredNotifications.length - 1 && (
-                    <Separator />
+                    <div className="border-b border-gray-100"></div>
                   )}
                 </div>
               ))
