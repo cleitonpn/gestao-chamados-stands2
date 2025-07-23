@@ -5,6 +5,8 @@ import { ticketService, TICKET_TYPES, PRIORITIES } from '../../services/ticketSe
 import { userService, AREAS } from '../../services/userService';
 import { imageService } from '../../services/imageService';
 import { TICKET_CATEGORIES, getCategoriesByArea } from '../../constants/ticketCategories';
+// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
+import notificationService from '../../services/notificationService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -698,6 +700,16 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
       const ticketId = await ticketService.createTicket(ticketData);
 
+      // 🔔 NOTIFICAÇÃO DE ABERTURA DE CHAMADO
+      try {
+        console.log('🔔 Enviando notificação de abertura de chamado...');
+        await notificationService.notifyTicketCreated(ticketId, ticketData, user.uid);
+        console.log('✅ Notificação de abertura enviada com sucesso');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de abertura:', notificationError);
+        // Não bloquear o fluxo se a notificação falhar
+      }
+
       // 🤖 Após criar chamado, atualizar templates IA automaticamente
       setTimeout(() => {
         updateAITemplates();
@@ -745,6 +757,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       setLoading(false);
     }
   };
+
   const areaOptions = [
     { value: AREAS.LOGISTICS, label: 'Logística' },
     { value: AREAS.WAREHOUSE, label: 'Almoxarifado' },
