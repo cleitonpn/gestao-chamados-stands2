@@ -956,6 +956,3 @@ const DashboardPage = () => {
 };
 
 export default DashboardPage;
-```
-
-Com esta versão, o seu Dashboard voltará a ter a aparência e o comportamento completos, e os problemas de notificação estarão resolvid
