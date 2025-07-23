@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext'; // CORRIGIDO
-import { ticketService, TICKET_STATUS } from '@/services/ticketService'; // CORRIGIDO
-import { projectService } from '@/services/projectService'; // CORRIGIDO
-import { userService, AREAS } from '@/services/userService'; // CORRIGIDO
-import { messageService } from '@/services/messageService'; // CORRIGIDO
-import { firestoreNotificationService } from '@/services/firestoreNotificationService'; // CORRIGIDO
-import ImageUpload from '@/components/ImageUpload'; // CORRIGIDO
-import Header from '@/components/Header'; // CORRIGIDO
+import { useAuth } from '../contexts/AuthContext';
+import { ticketService, TICKET_STATUS } from '../services/ticketService';
+import { projectService } from '../services/projectService';
+import { userService, AREAS } from '../services/userService';
+import { messageService } from '../services/messageService';
+import { firestoreNotificationService } from '../services/firestoreNotificationService';
+// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
+import notificationService from '../services/notificationService';
+import ImageUpload from '../components/ImageUpload';
+import Header from '../components/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,13 +19,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import {
-  ArrowLeft,
-  Clock,
-  User,
-  MessageSquare,
-  Send,
-  CheckCircle,
+import { 
+  ArrowLeft, 
+  Clock, 
+  User, 
+  MessageSquare, 
+  Send, 
+  CheckCircle, 
   XCircle,
   AlertCircle,
   Camera,
@@ -42,7 +44,7 @@ const TicketDetailPage = () => {
   const { ticketId } = useParams();
   const navigate = useNavigate();
   const { user, userProfile } = useAuth();
-
+  
   // Estados principais
   const [ticket, setTicket] = useState(null);
   const [project, setProject] = useState(null);
@@ -50,33 +52,33 @@ const TicketDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
-
+  
   // Estados do chat
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [chatImages, setChatImages] = useState([]);
-
+  
   // Estados de atualização de status
   const [newStatus, setNewStatus] = useState('');
   const [conclusionImages, setConclusionImages] = useState([]);
   const [conclusionDescription, setConclusionDescription] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
   const [showAreaSelector, setShowAreaSelector] = useState(false);
-
+  
   // Estados para escalação separada
   const [escalationArea, setEscalationArea] = useState('');
   const [escalationReason, setEscalationReason] = useState('');
   const [isEscalating, setIsEscalating] = useState(false);
-
+  
   // Estados para escalação para gerência
   const [managementArea, setManagementArea] = useState('');
   const [managementReason, setManagementReason] = useState('');
   const [isEscalatingToManagement, setIsEscalatingToManagement] = useState(false);
-
+  
   // Estados para escalação para consultor
   const [consultorReason, setConsultorReason] = useState('');
   const [isEscalatingToConsultor, setIsEscalatingToConsultor] = useState(false);
-
+  
   // Estados para menções de usuários
   const [users, setUsers] = useState([]);
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
@@ -90,18 +92,18 @@ const TicketDetailPage = () => {
     try {
       setLoading(true);
       setError(null);
-
+      
       console.log('Carregando dados do chamado:', ticketId);
-
+      
       // Carregar dados do chamado
       const ticketData = await ticketService.getTicketById(ticketId);
       if (!ticketData) {
         throw new Error('Chamado não encontrado');
       }
-
+      
       setTicket(ticketData);
       console.log('Dados do chamado carregados:', ticketData);
-
+      
       // Carregar projeto se existir
       if (ticketData.projetoId) {
         try {
@@ -111,7 +113,7 @@ const TicketDetailPage = () => {
           console.warn('Erro ao carregar projeto:', err);
         }
       }
-
+      
       // Carregar mensagens
       try {
         const messagesData = await messageService.getMessagesByTicket(ticketId);
@@ -120,7 +122,7 @@ const TicketDetailPage = () => {
         console.warn('Erro ao carregar mensagens:', err);
         setMessages([]);
       }
-
+      
     } catch (err) {
       console.error('Erro ao carregar dados do chamado:', err);
       setError(err.message || 'Erro ao carregar chamado');
@@ -141,7 +143,7 @@ const TicketDetailPage = () => {
   // Função para marcar notificações como lidas
   const markNotificationsAsRead = async () => {
     if (!user?.uid || !ticketId) return;
-
+    
     try {
       await firestoreNotificationService.markTicketNotificationsAsRead(user.uid, ticketId);
       console.log('✅ Notificações marcadas como lidas para o chamado:', ticketId);
@@ -160,7 +162,7 @@ const TicketDetailPage = () => {
         console.error('Erro ao carregar usuários:', error);
       }
     };
-
+    
     loadUsers();
   }, []);
 
@@ -168,14 +170,14 @@ const TicketDetailPage = () => {
   const detectMentions = (text, position) => {
     const beforeCursor = text.substring(0, position);
     const mentionMatch = beforeCursor.match(/@(\w*)$/);
-
+    
     if (mentionMatch) {
       const query = mentionMatch[1].toLowerCase();
-      const filtered = users.filter(user =>
+      const filtered = users.filter(user => 
         user.nome.toLowerCase().includes(query) ||
         user.email.toLowerCase().includes(query)
       ).slice(0, 5);
-
+      
       setMentionQuery(query);
       setMentionSuggestions(filtered);
       setShowMentionSuggestions(true);
@@ -190,26 +192,26 @@ const TicketDetailPage = () => {
   const insertMention = (user) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
+    
     const text = newMessage;
     const beforeCursor = text.substring(0, cursorPosition);
     const afterCursor = text.substring(cursorPosition);
-
+    
     // Encontrar o início da menção
     const mentionStart = beforeCursor.lastIndexOf('@');
     const beforeMention = text.substring(0, mentionStart);
     const mention = `@${user.nome} `;
-
+    
     const newText = beforeMention + mention + afterCursor;
     setNewMessage(newText);
-
+    
     // Posicionar cursor após a menção
     setTimeout(() => {
       const newPosition = beforeMention.length + mention.length;
       textarea.setSelectionRange(newPosition, newPosition);
       textarea.focus();
     }, 0);
-
+    
     setShowMentionSuggestions(false);
   };
 
@@ -218,34 +220,34 @@ const TicketDetailPage = () => {
     const mentionRegex = /@(\w+(?:\s+\w+)*)/g;
     const mentions = [];
     let match;
-
+    
     while ((match = mentionRegex.exec(text)) !== null) {
       const mentionedName = match[1];
-      const mentionedUser = users.find(user =>
+      const mentionedUser = users.find(user => 
         user.nome.toLowerCase() === mentionedName.toLowerCase()
       );
-
+      
       if (mentionedUser) {
         mentions.push(mentionedUser);
       }
     }
-
+    
     return mentions;
   };
 
   // Função para processar texto com menções
   const processTextWithMentions = (text) => {
     const mentionRegex = /@(\w+(?:\s+\w+)*)/g;
-
+    
     return text.replace(mentionRegex, (match, name) => {
-      const mentionedUser = users.find(user =>
+      const mentionedUser = users.find(user => 
         user.nome.toLowerCase() === name.toLowerCase()
       );
-
+      
       if (mentionedUser) {
         return `<span class="mention bg-blue-100 text-blue-800 px-1 rounded">@${name}</span>`;
       }
-
+      
       return match;
     });
   };
@@ -266,14 +268,14 @@ const TicketDetailPage = () => {
   // Função para obter status disponíveis baseado no perfil e status atual
   const getAvailableStatuses = () => {
     if (!ticket || !userProfile) return [];
-
+    
     const currentStatus = ticket.status;
     const userRole = userProfile.funcao;
-
+    
     // Lógica para ADMINISTRADOR - função "DEUS" (todas as opções de todos os perfis)
     if (userRole === 'administrador') {
       const allOptions = [];
-
+      
       // Opções do PRODUTOR
       if (currentStatus === TICKET_STATUS.OPEN || currentStatus === TICKET_STATUS.IN_ANALYSIS) {
         allOptions.push(
@@ -282,7 +284,7 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Finalizar chamado diretamente' }
         );
       }
-
+      
       // Opções do OPERADOR
       if (currentStatus === TICKET_STATUS.OPEN || currentStatus === TICKET_STATUS.SENT_TO_AREA || currentStatus === TICKET_STATUS.APPROVED || currentStatus === TICKET_STATUS.IN_TREATMENT || currentStatus === TICKET_STATUS.ESCALATED_TO_OTHER_AREA) {
         allOptions.push(
@@ -291,7 +293,7 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.AWAITING_APPROVAL, label: 'Escalar para Gerência', description: 'Escalar para aprovação gerencial' }
         );
       }
-
+      
       // Opções do GERENTE
       if (currentStatus === TICKET_STATUS.AWAITING_APPROVAL) {
         allOptions.push(
@@ -299,7 +301,7 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar (motivo obrigatório)' }
         );
       }
-
+      
       // Opções de VALIDAÇÃO
       if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
         allOptions.push(
@@ -307,15 +309,15 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar', description: 'Rejeitar e voltar para área (motivo obrigatório)' }
         );
       }
-
+      
       // Remover duplicatas e retornar
-      const uniqueOptions = allOptions.filter((option, index, self) =>
+      const uniqueOptions = allOptions.filter((option, index, self) => 
         index === self.findIndex(o => o.value === option.value)
       );
-
+      
       return uniqueOptions;
     }
-
+    
     // Lógica para CONSULTOR
     if (userRole === 'consultor') {
       // Se o chamado foi escalado para o consultor
@@ -325,37 +327,37 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Finalizar chamado diretamente' }
         ];
       }
-
+      
       // Consultor só pode validar chamados que ele mesmo criou e que estão aguardando validação
-      if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION &&
-          ticket.criadoPorFuncao === 'consultor' &&
+      if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION && 
+          ticket.criadoPorFuncao === 'consultor' && 
           ticket.criadoPor === user.uid) {
         return [
           { value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Validar e finalizar chamado' }
         ];
       }
-
+      
       return []; // Consultor não pode fazer outras ações além de validar seus próprios chamados
     }
-
+    
     // Lógica para PRODUTOR
     if (userRole === 'produtor') {
       // VISÃO AMPLA: Produtor pode ver todos os chamados dos seus projetos
       // Mas só pode agir quando for o responsável atual
-
+      
       // Verificar se o produtor é responsável pelo projeto
       const isProjectProducer = project && (project.produtorId === user.uid || project.consultorId === user.uid);
-
+      
       // Verificar se é o responsável atual do chamado
-      const isCurrentResponsible = ticket.responsavelAtual === 'produtor' ||
+      const isCurrentResponsible = ticket.responsavelAtual === 'produtor' || 
                                    ticket.responsavelAtual === 'consultor_produtor' ||
                                    ticket.responsavelId === user.uid;
-
+      
       console.log('DEBUG-Produtor-Permissões: É produtor do projeto?', isProjectProducer);
       console.log('DEBUG-Produtor-Permissões: É responsável atual?', isCurrentResponsible);
       console.log('DEBUG-Produtor-Permissões: ResponsavelAtual:', ticket.responsavelAtual);
       console.log('DEBUG-Produtor-Permissões: ResponsavelId:', ticket.responsavelId);
-
+      
       // Se não é responsável atual, não pode agir (apenas visualizar)
       if (!isCurrentResponsible) {
         console.log('DEBUG-Produtor-Permissões: Produtor pode visualizar mas não agir');
@@ -369,7 +371,7 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Finalizar chamado diretamente' }
         ];
       }
-
+      
       // Quando chamado está aberto (criado pelo próprio produtor)
       if (currentStatus === TICKET_STATUS.OPEN && ticket.criadoPorFuncao === 'produtor') {
         return [
@@ -378,13 +380,13 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Finalizar chamado diretamente' }
         ];
       }
-
+      
       // Quando volta da área para validação
       if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
         const options = [
           { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar', description: 'Devolver para área com motivo' }
         ];
-
+        
         // Se foi criado por consultor, produtor pode validar mas consultor também pode
         if (ticket.criadoPorFuncao === 'consultor') {
           options.push({ value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Validar e finalizar chamado' });
@@ -392,10 +394,10 @@ const TicketDetailPage = () => {
           // Para outros casos (produtor), apenas produtor pode validar
           options.push({ value: TICKET_STATUS.COMPLETED, label: 'Concluir', description: 'Validar e finalizar chamado' });
         }
-
+        
         return options;
       }
-
+      
       // NOVO: Quando operador criou o chamado e está aguardando validação do operador
       if (currentStatus === 'executado_aguardando_validacao_operador' && ticket.criadoPor === user.uid) {
         return [
@@ -403,14 +405,14 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.COMPLETED, label: 'Validar e Concluir', description: 'Validar e finalizar chamado' }
         ];
       }
-
+      
       // Se está em execução pelo produtor
       if (currentStatus === TICKET_STATUS.IN_EXECUTION && ticket.executandoNoPavilhao) {
         return [
           { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
         ];
       }
-
+      
       // Chamados transferidos para o produtor
       if (currentStatus === 'enviado_para_area' && ticket.area === 'producao' && ticket.transferidoParaProdutor) {
         return [
@@ -420,7 +422,7 @@ const TicketDetailPage = () => {
         ];
       }
     }
-
+    
     // Lógica para OPERADOR (área específica)
     if (userRole === 'operador') {
       console.log('DEBUG-Permissões-Operador: Iniciando verificação de permissões');
@@ -428,11 +430,11 @@ const TicketDetailPage = () => {
       console.log('DEBUG-Permissões-Operador: UID do usuário:', user.uid);
       console.log('DEBUG-Permissões-Operador: Criado por:', ticket.criadoPor);
       console.log('DEBUG-Permissões-Operador: Usuário é criador?', user.uid === ticket.criadoPor);
-
+      
       // CORREÇÃO CRÍTICA: Verificar se operador criou o chamado e está aguardando validação
       if (
-        (ticket.status === 'executado_aguardando_validacao_operador' ||
-         ticket.status === 'executado_aguardando_validacao') &&
+        (ticket.status === 'executado_aguardando_validacao_operador' || 
+         ticket.status === 'executado_aguardando_validacao') && 
         user.uid === ticket.criadoPor
       ) {
         // ESTA É A CORREÇÃO CRÍTICA
@@ -445,61 +447,61 @@ const TicketDetailPage = () => {
           { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar', description: 'Rejeitar e voltar para área (motivo obrigatório)' }
         ];
       }
-
+      
       // CORREÇÃO: Verificar se operador pode agir ou apenas visualizar
       const isCurrentArea = ticket.area === userProfile.area;
       const isOriginArea = ticket.areaDeOrigem === userProfile.area;
-
+      
       console.log('DEBUG-Operador-Permissões: Área do operador:', userProfile.area);
       console.log('DEBUG-Operador-Permissões: Área atual do chamado:', ticket.area);
       console.log('DEBUG-Operador-Permissões: Área de origem do chamado:', ticket.areaDeOrigem);
       console.log('DEBUG-Operador-Permissões: É área atual?', isCurrentArea);
       console.log('DEBUG-Operador-Permissões: É área de origem?', isOriginArea);
-
+      
       // Se não é área atual nem área de origem, operador não pode ver este chamado
       if (!isCurrentArea && !isOriginArea && ticket.criadoPor !== user.uid) {
         console.log('DEBUG-Operador-Permissões: Operador não tem permissão para este chamado');
         return [];
       }
-
+      
       // Se é área de origem mas não área atual (chamado escalado), apenas visualização
       if (isOriginArea && !isCurrentArea) {
         console.log('DEBUG-Operador-Permissões: Chamado escalado - apenas visualização (chat habilitado)');
         return []; // Sem ações disponíveis, apenas chat
       }
-
+      
       // Se é área atual, operador pode agir normalmente
       if (isCurrentArea) {
         console.log('DEBUG-Operador-Permissões: Área atual - todas as ações disponíveis');
-
+        
         // Operador pode agir quando chamado está: Aberto (criado pelo produtor), Enviado para Área, Aprovado pela gerência, ou Escalado de outra área
-        if (currentStatus === TICKET_STATUS.OPEN ||
-            currentStatus === TICKET_STATUS.SENT_TO_AREA ||
-            currentStatus === TICKET_STATUS.APPROVED ||
+        if (currentStatus === TICKET_STATUS.OPEN || 
+            currentStatus === TICKET_STATUS.SENT_TO_AREA || 
+            currentStatus === TICKET_STATUS.APPROVED || 
             currentStatus === TICKET_STATUS.ESCALATED_TO_OTHER_AREA) {
           return [
             { value: TICKET_STATUS.IN_TREATMENT, label: 'Tratativa', description: 'Dar andamento ao chamado' },
             { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
           ];
         }
-
+        
         if (currentStatus === TICKET_STATUS.IN_TREATMENT) {
           return [
             { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
           ];
         }
-
+        
         // Se o operador criou o chamado e está aguardando validação do operador
-        if (ticket.criadoPor === user.uid &&
-            (currentStatus === 'executado_aguardando_validacao_operador' ||
-             (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION &&
+        if (ticket.criadoPor === user.uid && 
+            (currentStatus === 'executado_aguardando_validacao_operador' || 
+             (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION && 
               ticket.criadoPorFuncao && ticket.criadoPorFuncao.startsWith('operador_')))) {
           return [
             { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar', description: 'Devolver para área com motivo' },
             { value: TICKET_STATUS.COMPLETED, label: 'Validar e Concluir', description: 'Validar e finalizar chamado' }
           ];
         }
-
+        
         // Se o operador criou o chamado e está aguardando validação, ele pode validar
         if (ticket.criadoPor === user.uid && currentStatus === TICKET_STATUS.COMPLETED) {
           return [
@@ -508,25 +510,25 @@ const TicketDetailPage = () => {
         }
       }
     }
-
+    
     // Lógica para GERENTE - só pode manipular chamados escalados para sua gerência
     if (userRole === 'gerente') {
       // Verificar se o chamado foi escalado para a gerência do usuário
-      const isEscalatedToManager = currentStatus === TICKET_STATUS.AWAITING_APPROVAL &&
-                                   ticket.areaGerencia &&
+      const isEscalatedToManager = currentStatus === TICKET_STATUS.AWAITING_APPROVAL && 
+                                   ticket.areaGerencia && 
                                    isManagerForArea(userProfile.area, ticket.areaGerencia);
-
+      
       if (isEscalatedToManager) {
         return [
           { value: TICKET_STATUS.APPROVED, label: 'Aprovar', description: 'Aprovar e retornar para área' },
           { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
         ];
       }
-
+      
       // Gerente não pode manipular outros chamados, apenas visualizar
       return [];
     }
-
+    
     // Lógica para CONSULTOR (apenas seus próprios chamados)
     if (userRole === 'consultor' && ticket.criadoPor === user.uid) {
       if (currentStatus === TICKET_STATUS.COMPLETED) {
@@ -535,7 +537,7 @@ const TicketDetailPage = () => {
         ];
       }
     }
-
+    
     return [];
   };
 
@@ -545,14 +547,14 @@ const TicketDetailPage = () => {
       alert('Por favor, selecione uma área de destino');
       return;
     }
-
+    
     if (!escalationReason.trim()) {
       alert('Por favor, descreva o motivo da escalação');
       return;
     }
 
     setIsEscalating(true);
-
+    
     try {
       // CORREÇÃO: Garantir que nenhum campo seja undefined
       const updateData = {
@@ -574,7 +576,7 @@ const TicketDetailPage = () => {
         currentArea: ticket?.area,
         currentAreasEnvolvidas: ticket?.areasEnvolvidas
       });
-
+      
       console.log('DEBUG-Escalação: Dados para atualizar:', updateData);
       console.log('DEBUG-Escalação: Verificando campos undefined:', {
         status: updateData.status === undefined ? 'UNDEFINED!' : 'OK',
@@ -587,9 +589,23 @@ const TicketDetailPage = () => {
 
       // CORREÇÃO: Usar escalateTicketToArea para garantir que areasEnvolvidas seja atualizado
       await ticketService.escalateTicketToArea(ticketId, escalationArea, updateData);
-
+      
       console.log('DEBUG-Escalação: Chamado escalado com sucesso para área:', escalationArea);
 
+      // 🔔 NOTIFICAÇÃO DE ESCALAÇÃO
+      try {
+        console.log('🔔 Enviando notificação de escalação...');
+        await notificationService.notifyTicketEscalated(ticketId, ticket, {
+          areaOrigem: ticket.area,
+          areaDestino: escalationArea,
+          motivo: escalationReason
+        }, user.uid);
+        console.log('✅ Notificação de escalação enviada com sucesso');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de escalação:', notificationError);
+        // Não bloquear o fluxo se a notificação falhar
+      }
+      
       // Criar mensagem com o motivo da escalação
       const escalationMessage = {
         userId: user.uid,
@@ -598,18 +614,18 @@ const TicketDetailPage = () => {
         criadoEm: new Date(),
         type: 'escalation'
       };
-
+      
       await messageService.sendMessage(ticketId, escalationMessage);
-
+      
       // Recarregar dados
       await loadTicketData();
-
+      
       // Limpar formulário
       setEscalationArea('');
       setEscalationReason('');
-
+      
       alert('Chamado escalado com sucesso!');
-
+      
     } catch (error) {
       console.error('Erro ao escalar chamado:', error);
       alert('Erro ao escalar chamado: ' + error.message);
@@ -624,14 +640,14 @@ const TicketDetailPage = () => {
       alert('Por favor, selecione uma gerência de destino');
       return;
     }
-
+    
     if (!managementReason.trim()) {
       alert('Por favor, descreva o motivo da escalação para gerência');
       return;
     }
 
     setIsEscalatingToManagement(true);
-
+    
     try {
       // Função para sanitizar valores e garantir que não sejam undefined
       const sanitizeValue = (value, defaultValue = null) => {
@@ -657,28 +673,28 @@ const TicketDetailPage = () => {
 
       // Sanitizar cada campo individualmente
       const updateData = {};
-
+      
       // Campos obrigatórios com valores padrão seguros
       updateData.status = sanitizeValue(rawUpdateData.status, 'aguardando_aprovacao');
       updateData.escaladoParaGerencia = sanitizeValue(rawUpdateData.escaladoParaGerencia, true);
       updateData.escaladoEm = sanitizeValue(rawUpdateData.escaladoEm, new Date().toISOString());
-
+      
       // Campos opcionais - só incluir se tiverem valor válido
       const areaGerencia = sanitizeValue(rawUpdateData.areaGerencia);
       if (areaGerencia) updateData.areaGerencia = areaGerencia;
-
+      
       const escalationReason = sanitizeValue(rawUpdateData.escalationReason);
       if (escalationReason) updateData.escalationReason = escalationReason;
-
+      
       const escaladoPor = sanitizeValue(rawUpdateData.escaladoPor);
       if (escaladoPor) updateData.escaladoPor = escaladoPor;
-
+      
       const userRole = sanitizeValue(rawUpdateData.userRole);
       if (userRole) updateData.userRole = userRole;
 
       // DEBUG: Log dos dados sanitizados
       console.log('DEBUG: Dados sanitizados para atualização:', updateData);
-
+      
       // Validação final - verificar se há algum undefined
       const hasUndefined = Object.entries(updateData).some(([key, value]) => {
         const isUndefined = value === undefined;
@@ -695,6 +711,20 @@ const TicketDetailPage = () => {
       // Atualizar o chamado usando a nova função de escalação
       await ticketService.escalateTicketToArea(ticketId, 'gerencia', updateData);
 
+      // 🔔 NOTIFICAÇÃO DE ESCALAÇÃO PARA GERENTE
+      try {
+        console.log('🔔 Enviando notificação de escalação para gerente...');
+        await notificationService.notifyEscalatedToManager(ticketId, ticket, {
+          gerenteId: getManagerUidByArea(managementArea),
+          gerenteNome: managementArea,
+          motivo: managementReason
+        }, user.uid);
+        console.log('✅ Notificação de escalação para gerente enviada com sucesso');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de escalação para gerente:', notificationError);
+        // Não bloquear o fluxo se a notificação falhar
+      }
+      
       // Criar mensagem com o motivo da escalação para gerência
       const gerenciaNames = {
         'gerente_operacional': 'Gerência Operacional',
@@ -702,9 +732,9 @@ const TicketDetailPage = () => {
         'gerente_producao': 'Gerência Produção',
         'gerente_financeiro': 'Gerência Financeira'
       };
-
+      
       const gerenciaNome = gerenciaNames[managementArea] || managementArea;
-
+      
       const escalationMessage = {
         userId: user.uid,
         remetenteNome: userProfile.nome || user.email,
@@ -712,18 +742,18 @@ const TicketDetailPage = () => {
         criadoEm: new Date(),
         type: 'management_escalation'
       };
-
+      
       await messageService.sendMessage(ticketId, escalationMessage);
-
+      
       // Recarregar dados
       await loadTicketData();
-
+      
       // Limpar formulário
       setManagementArea('');
       setManagementReason('');
-
+      
       alert('Chamado escalado para gerência com sucesso!');
-
+      
     } catch (error) {
       console.error('Erro ao escalar para gerência:', error);
       alert('Erro ao escalar para gerência: ' + error.message);
@@ -745,7 +775,7 @@ const TicketDetailPage = () => {
     }
 
     setIsEscalatingToConsultor(true);
-
+    
     try {
       const updateData = {
         status: 'escalado_para_consultor',
@@ -765,7 +795,7 @@ const TicketDetailPage = () => {
       );
 
       await ticketService.escalateTicketToArea(ticketId, 'consultor', filteredUpdateData);
-
+      
       // Criar mensagem com o motivo da escalação para consultor
       const escalationMessage = {
         userId: user.uid,
@@ -774,17 +804,17 @@ const TicketDetailPage = () => {
         criadoEm: new Date(),
         type: 'consultor_escalation'
       };
-
+      
       await messageService.sendMessage(ticketId, escalationMessage);
-
+      
       // Recarregar dados
       await loadTicketData();
-
+      
       // Limpar formulário
       setConsultorReason('');
-
+      
       alert('Chamado escalado para consultor com sucesso!');
-
+      
     } catch (error) {
       console.error('Erro ao escalar para consultor:', error);
       alert('Erro ao escalar para consultor: ' + error.message);
@@ -802,7 +832,7 @@ const TicketDetailPage = () => {
 
     try {
       setUpdating(true);
-
+      
       // Atualizar dados do chamado
       const updateData = {
         responsavelAtual: 'produtor',
@@ -817,9 +847,9 @@ const TicketDetailPage = () => {
       };
 
       console.log('DEBUG-TransferProdutor: Dados de transferência:', updateData);
-
+      
       await ticketService.updateTicket(ticketId, updateData);
-
+      
       // Registrar transferência no chat
       const transferMessage = {
         ticketId,
@@ -831,14 +861,14 @@ const TicketDetailPage = () => {
         criadoEm: new Date(),
         type: 'producer_transfer'
       };
-
+      
       await messageService.sendMessage(ticketId, transferMessage);
-
+      
       // Recarregar dados
       await loadTicketData();
-
+      
       alert('Chamado transferido para produtor com sucesso!');
-
+      
     } catch (error) {
       console.error('Erro ao transferir para produtor:', error);
       alert('Erro ao transferir para produtor: ' + error.message);
@@ -850,24 +880,24 @@ const TicketDetailPage = () => {
   // Função para atualizar status
   const handleStatusUpdate = async () => {
     if (!newStatus || updating) return;
-
+    
     // Validar se é rejeição e tem motivo
-    if ((newStatus === TICKET_STATUS.REJECTED ||
-         (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION))
+    if ((newStatus === TICKET_STATUS.REJECTED || 
+         (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) 
         && !conclusionDescription.trim()) {
       setError('Motivo da rejeição é obrigatório');
       return;
     }
-
+    
     // Validar se é escalação para outra área e tem área selecionada
     if (newStatus === TICKET_STATUS.ESCALATED_TO_OTHER_AREA && !selectedArea) {
       setError('Selecione a área de destino');
       return;
     }
-
+    
     try {
       setUpdating(true);
-
+      
       const updateData = {
         status: newStatus,
         atualizadoPor: user.uid,
@@ -875,63 +905,63 @@ const TicketDetailPage = () => {
         userRole: userProfile.funcao, // Para compatibilidade
         atualizadoEm: new Date().toISOString()
       };
-
+      
       // Se for conclusão, adicionar descrição e imagens
       if (newStatus === TICKET_STATUS.COMPLETED) {
         updateData.conclusaoDescricao = conclusionDescription;
         updateData.conclusaoImagens = conclusionImages;
       }
-
+      
       // Se for rejeição, adicionar motivo
-      if (newStatus === TICKET_STATUS.REJECTED ||
+      if (newStatus === TICKET_STATUS.REJECTED || 
           (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) {
         updateData.motivoRejeicao = conclusionDescription;
         updateData.rejeitadoPor = user.uid;
         updateData.rejeitadoEm = new Date().toISOString();
       }
-
+      
       // Se for escalação para outra área, usar função específica
       if (newStatus === TICKET_STATUS.ESCALATED_TO_OTHER_AREA) {
         updateData.areaAnterior = ticket.area;
         updateData.escaladoPara = selectedArea;
         updateData.escaladoPor = user.uid;
         updateData.escaladoEm = new Date().toISOString();
-
+        
         // Usar função de escalação com arrayUnion
         await ticketService.escalateTicketToArea(ticketId, selectedArea, updateData);
       } else {
         // CORREÇÃO: Definir variável comment antes de usar
         const comment = conclusionDescription || ''; // Usar descrição da conclusão como comentário
-
+        
         // Para outros status, usar updateTicket normal
         await ticketService.updateTicketStatus(ticketId, newStatus, user.uid, comment, ticket);
       }
-
+      
       // Se for escalação para gerência, adicionar informações da área
       if (newStatus === TICKET_STATUS.AWAITING_APPROVAL) {
         console.log('DEBUG-Escalação: Iniciando escalação para gerência...');
         console.log('DEBUG-Escalação: managementArea recebida:', managementArea);
         console.log('DEBUG-Escalação: Tipo de managementArea:', typeof managementArea);
         console.log('DEBUG-Escalação: managementArea é válida?', !!managementArea);
-
+        
         updateData.escaladoParaGerencia = true;
         updateData.escaladoPor = user.uid;
         updateData.escaladoEm = new Date().toISOString();
-
+        
         // CAMPO CRÍTICO: Atribuir gerente responsável explicitamente usando UID correto
         console.log('DEBUG-Escalação: Chamando getManagerUidByArea com:', managementArea);
         const gerenteUid = getManagerUidByArea(managementArea);
         console.log('DEBUG-Escalação: UID retornado pela função:', gerenteUid);
         console.log('DEBUG-Escalação: Tipo do UID retornado:', typeof gerenteUid);
-
+        
         updateData.gerenteResponsavelId = gerenteUid; // UID do gerente selecionado
         updateData.areaGerencia = managementArea; // Tipo de gerência selecionada
-
+        
         console.log('DEBUG-Escalação: updateData.gerenteResponsavelId final:', updateData.gerenteResponsavelId);
         console.log('DEBUG-Escalação: updateData.areaGerencia final:', updateData.areaGerencia);
         console.log('DEBUG-Escalação: updateData completo:', JSON.stringify(updateData, null, 2));
       }
-
+      
       // Se for devolução de chamado escalado para consultor
       if (newStatus === 'devolver_para_area') {
         updateData.status = TICKET_STATUS.SENT_TO_AREA;
@@ -944,48 +974,62 @@ const TicketDetailPage = () => {
         updateData.devolvidoEm = new Date().toISOString();
         updateData.devolvidoPor = user.uid;
       }
-
+      
       // Validação final dos dados antes de salvar
       console.log('DEBUG-Validação: updateData antes da validação:', JSON.stringify(updateData, null, 2));
-
+      
       // Validação específica para escalação de gerência
       if (newStatus === TICKET_STATUS.AWAITING_APPROVAL) {
         if (!updateData.gerenteResponsavelId || typeof updateData.gerenteResponsavelId !== 'string' || updateData.gerenteResponsavelId.trim() === '') {
           console.error('ERRO-Validação: gerenteResponsavelId inválido:', updateData.gerenteResponsavelId);
           throw new Error('ID do gerente responsável é obrigatório para escalação');
         }
-
+        
         if (!updateData.areaGerencia || typeof updateData.areaGerencia !== 'string' || updateData.areaGerencia.trim() === '') {
           console.error('ERRO-Validação: areaGerencia inválida:', updateData.areaGerencia);
           throw new Error('Área de gerência é obrigatória para escalação');
         }
-
+        
         console.log('DEBUG-Validação: Dados de escalação validados com sucesso');
         console.log('DEBUG-Validação: gerenteResponsavelId válido:', updateData.gerenteResponsavelId);
         console.log('DEBUG-Validação: areaGerencia válida:', updateData.areaGerencia);
       }
-
+      
       console.log('DEBUG-Firestore: Enviando updateData para o Firestore:', JSON.stringify(updateData, null, 2));
       await ticketService.updateTicket(ticketId, updateData);
       console.log('DEBUG-Firestore: Dados salvos com sucesso no Firestore');
 
+      // 🔔 NOTIFICAÇÃO DE MUDANÇA DE STATUS
+      try {
+        console.log('🔔 Enviando notificação de mudança de status...');
+        await notificationService.notifyStatusChanged(ticketId, ticket, {
+          statusAnterior: ticket.status,
+          novoStatus: newStatus,
+          novaArea: selectedArea || ticket.area
+        }, user.uid);
+        console.log('✅ Notificação de mudança de status enviada com sucesso');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de mudança de status:', notificationError);
+        // Não bloquear o fluxo se a notificação falhar
+      }
+      
       // Registrar aprovação/reprovação de gerente no chat
       if (newStatus === TICKET_STATUS.APPROVED || newStatus === TICKET_STATUS.REJECTED) {
         const isApproval = newStatus === TICKET_STATUS.APPROVED;
         const managerName = userProfile?.nome || user?.email || 'Gerente';
-
+        
         const approvalMessage = {
           ticketId,
           remetenteId: user.uid,
           remetenteFuncao: userProfile.funcao,
           remetenteNome: managerName,
-          conteudo: isApproval
+          conteudo: isApproval 
             ? `✅ **Chamado aprovado pelo gerente ${managerName}**\n\nO chamado foi aprovado e retornará para a área responsável para execução.`
             : `❌ **Chamado reprovado pelo gerente ${managerName}**\n\n**Motivo:** ${conclusionDescription}\n\nO chamado foi encerrado devido à reprovação gerencial.`,
           criadoEm: new Date().toISOString(),
           type: isApproval ? 'manager_approval' : 'manager_rejection'
         };
-
+        
         try {
           await messageService.sendMessage(ticketId, approvalMessage);
         } catch (messageError) {
@@ -993,16 +1037,16 @@ const TicketDetailPage = () => {
           // Não falhar a operação principal por causa do erro de mensagem
         }
       }
-
+      
       // Recarregar dados
       await loadTicketData();
-
+      
       // Limpar formulário
       setNewStatus('');
       setConclusionDescription('');
       setConclusionImages([]);
       setSelectedArea('');
-
+      
     } catch (err) {
       console.error('Erro ao atualizar status:', err);
       setError('Erro ao atualizar status do chamado');
@@ -1014,10 +1058,10 @@ const TicketDetailPage = () => {
   // Função para enviar mensagem
   const handleSendMessage = async () => {
     if ((!newMessage.trim() && chatImages.length === 0) || sendingMessage) return;
-
+    
     try {
       setSendingMessage(true);
-
+      
       const messageData = {
         ticketId,
         remetenteId: user.uid,
@@ -1027,17 +1071,30 @@ const TicketDetailPage = () => {
         imagens: chatImages,
         criadoEm: new Date().toISOString()
       };
-
+      
       await messageService.sendMessage(ticketId, messageData);
 
+      // 🔔 NOTIFICAÇÃO DE NOVA MENSAGEM
+      try {
+        console.log('🔔 Enviando notificação de nova mensagem...');
+        await notificationService.notifyNewMessage(ticketId, ticket, {
+          texto: newMessage.trim(),
+          autorNome: userProfile.nome || user.email
+        }, user.uid);
+        console.log('✅ Notificação de nova mensagem enviada com sucesso');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de nova mensagem:', notificationError);
+        // Não bloquear o fluxo se a notificação falhar
+      }
+      
       // Recarregar mensagens
       const messagesData = await messageService.getMessagesByTicket(ticketId);
       setMessages(messagesData || []);
-
+      
       // Limpar formulário
       setNewMessage('');
       setChatImages([]);
-
+      
     } catch (err) {
       console.error('Erro ao enviar mensagem:', err);
       setError('Erro ao enviar mensagem');
@@ -1065,31 +1122,31 @@ const TicketDetailPage = () => {
   const getManagerUidByArea = (managementArea) => {
     console.log('DEBUG-getManagerUidByArea: Função chamada com parâmetro:', managementArea);
     console.log('DEBUG-getManagerUidByArea: Tipo do parâmetro:', typeof managementArea);
-
+    
     let resultado;
     switch (managementArea) {
-      case 'gerente_operacional':
+      case 'gerente_operacional': 
         resultado = 'I21CyL98Eua2WmkLh50OGjvivb83'; // Eduardo Corazin - Gerente Operacional
         console.log('DEBUG-getManagerUidByArea: Caso gerente_operacional selecionado');
         break;
-      case 'gerente_comercial':
+      case 'gerente_comercial': 
         resultado = 'UID_DO_GERENTE_COMERCIAL'; // Substituir pelo UID real
         console.log('DEBUG-getManagerUidByArea: Caso gerente_comercial selecionado');
         break;
-      case 'gerente_producao':
+      case 'gerente_producao': 
         resultado = 'UID_DO_GERENTE_PRODUCAO'; // Substituir pelo UID real
         console.log('DEBUG-getManagerUidByArea: Caso gerente_producao selecionado');
         break;
-      case 'gerente_financeiro':
+      case 'gerente_financeiro': 
         resultado = 'UID_DO_GERENTE_FINANCEIRO'; // Substituir pelo UID real
         console.log('DEBUG-getManagerUidByArea: Caso gerente_financeiro selecionado');
         break;
-      default:
+      default: 
         resultado = user.uid; // Fallback para usuário atual
         console.log('DEBUG-getManagerUidByArea: Caso default selecionado, usando user.uid:', user.uid);
         break;
     }
-
+    
     console.log('DEBUG-getManagerUidByArea: Resultado final:', resultado);
     return resultado;
   };
@@ -1217,7 +1274,7 @@ const TicketDetailPage = () => {
             <ArrowLeft className="h-4 w-4 mr-1 sm:mr-2" />
             <span className="text-sm sm:text-base">Voltar ao Dashboard</span>
           </Button>
-
+          
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
             <div className="min-w-0 flex-1">
               <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 break-words">
@@ -1232,12 +1289,12 @@ const TicketDetailPage = () => {
             </Badge>
           </div>
         </div>
-
+        
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-
+          
           {/* Coluna principal - Detalhes e Chat */}
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
-
+            
             {/* Detalhes do Chamado */}
             <Card>
               <CardHeader className="pb-3 sm:pb-4">
@@ -1251,7 +1308,7 @@ const TicketDetailPage = () => {
                   <Label className="text-xs sm:text-sm font-medium text-gray-700">Título</Label>
                   <p className="text-sm sm:text-base text-gray-900 break-words">{ticket.titulo || 'Título não disponível'}</p>
                 </div>
-
+                
                 <div>
                   <Label className="text-xs sm:text-sm font-medium text-gray-700">Descrição</Label>
                   <p className="text-sm sm:text-base text-gray-900 whitespace-pre-wrap break-words">{ticket.descricao || 'Descrição não disponível'}</p>
@@ -1306,7 +1363,7 @@ const TicketDetailPage = () => {
                     )}
                   </div>
                 )}
-
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Área</Label>
@@ -1317,7 +1374,7 @@ const TicketDetailPage = () => {
                     <p className="text-gray-900">{ticket.tipo || 'Não especificado'}</p>
                   </div>
                 </div>
-
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Criado em</Label>
@@ -1328,7 +1385,7 @@ const TicketDetailPage = () => {
                     <p className="text-gray-900">{ticket.criadoPorNome || 'Não disponível'}</p>
                   </div>
                 </div>
-
+                
                 {ticket.imagensIniciais && ticket.imagensIniciais.length > 0 && (
                   <div>
                     <Label className="text-sm font-medium text-gray-700 mb-2 block">Imagens Iniciais</Label>
@@ -1420,7 +1477,7 @@ const TicketDetailPage = () => {
                       onChange={(e) => setNewMessage(e.target.value)}
                       rows={3}
                     />
-
+                    
                     {/* Upload de imagens para chat */}
                     <ImageUpload
                       onImagesUploaded={setChatImages}
@@ -1429,7 +1486,7 @@ const TicketDetailPage = () => {
                       buttonText="Anexar ao Chat"
                       className="border-t pt-3"
                     />
-
+                    
                     <div className="flex items-center justify-end">
                       <Button
                         onClick={handleSendMessage}
@@ -1451,7 +1508,7 @@ const TicketDetailPage = () => {
 
           {/* Coluna lateral - Projeto e Ações */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
-
+            
             {/* Informações do Projeto */}
             <Card>
               <CardHeader className="pb-3 sm:pb-4">
@@ -1507,7 +1564,7 @@ const TicketDetailPage = () => {
                   </div>
 
                   {/* Campos específicos para conclusão ou rejeição */}
-                  {(newStatus === TICKET_STATUS.COMPLETED ||
+                  {(newStatus === TICKET_STATUS.COMPLETED || 
                     newStatus === TICKET_STATUS.REJECTED ||
                     (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
                     <div className="space-y-3">
@@ -1518,26 +1575,26 @@ const TicketDetailPage = () => {
                         <Textarea
                           id="conclusion-description"
                           placeholder={
-                            newStatus === TICKET_STATUS.COMPLETED
-                              ? "Descreva como o problema foi resolvido..."
+                            newStatus === TICKET_STATUS.COMPLETED 
+                              ? "Descreva como o problema foi resolvido..." 
                               : "Explique o motivo da rejeição..."
                           }
                           value={conclusionDescription}
                           onChange={(e) => setConclusionDescription(e.target.value)}
                           rows={3}
                           className={
-                            (newStatus === TICKET_STATUS.REJECTED ||
+                            (newStatus === TICKET_STATUS.REJECTED || 
                              (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION))
-                              ? "border-red-300 focus:border-red-500"
+                              ? "border-red-300 focus:border-red-500" 
                               : ""
                           }
                         />
-                        {(newStatus === TICKET_STATUS.REJECTED ||
+                        {(newStatus === TICKET_STATUS.REJECTED || 
                           (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
                           <p className="text-xs text-red-600 mt-1">* Campo obrigatório para rejeição</p>
                         )}
                       </div>
-
+                      
                       {newStatus === TICKET_STATUS.COMPLETED && (
                         <div>
                           <Label>Evidências (Imagens)</Label>
@@ -1593,7 +1650,7 @@ const TicketDetailPage = () => {
                       <p className="text-xs text-gray-500">{formatDate(ticket.criadoEm)}</p>
                     </div>
                   </div>
-
+                  
                   {ticket.atualizadoEm && ticket.atualizadoEm !== ticket.criadoEm && (
                     <div className="flex items-center space-x-3">
                       <div className="flex-shrink-0">
@@ -1694,7 +1751,7 @@ const TicketDetailPage = () => {
                     {/* Aviso */}
                     <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                       <p className="text-sm text-yellow-800">
-                        ⚠️ <strong>Atenção:</strong> Ao escalar, o chamado será transferido para a área selecionada
+                        ⚠️ <strong>Atenção:</strong> Ao escalar, o chamado será transferido para a área selecionada 
                         e sairá da sua lista de responsabilidades.
                       </p>
                     </div>
@@ -1704,8 +1761,8 @@ const TicketDetailPage = () => {
             )}
 
             {/* Seção Separada de Escalação para Consultor */}
-            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') &&
-             project?.consultorId &&
+            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && 
+             project?.consultorId && 
              // CORREÇÃO: Operador só pode escalar se chamado está em sua área atual
              (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
               <Card className="mt-6">
@@ -1768,7 +1825,7 @@ const TicketDetailPage = () => {
                     {/* Aviso */}
                     <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                       <p className="text-sm text-green-800">
-                        ⚠️ <strong>Fluxo:</strong> O chamado irá para o consultor do projeto. Após a ação do consultor,
+                        ⚠️ <strong>Fluxo:</strong> O chamado irá para o consultor do projeto. Após a ação do consultor, 
                         retornará automaticamente para sua área ({ticket.area?.replace('_', ' ').toUpperCase()}) para continuidade.
                       </p>
                     </div>
@@ -1778,7 +1835,7 @@ const TicketDetailPage = () => {
             )}
 
             {/* Seção Separada de Escalação para Gerência */}
-            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') &&
+            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && 
              // CORREÇÃO: Operador só pode escalar se chamado está em sua área atual
              (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
               <Card className="mt-6">
@@ -1856,7 +1913,7 @@ const TicketDetailPage = () => {
                     {/* Aviso */}
                     <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
                       <p className="text-sm text-purple-800">
-                        ⚠️ <strong>Atenção:</strong> Ao escalar para gerência, o chamado aguardará aprovação gerencial
+                        ⚠️ <strong>Atenção:</strong> Ao escalar para gerência, o chamado aguardará aprovação gerencial 
                         antes de retornar para execução.
                       </p>
                     </div>
@@ -1909,7 +1966,7 @@ const TicketDetailPage = () => {
                     {/* Aviso */}
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                       <p className="text-sm text-blue-800">
-                        ℹ️ <strong>Informação:</strong> O chamado será transferido para o produtor do projeto
+                        ℹ️ <strong>Informação:</strong> O chamado será transferido para o produtor do projeto 
                         para dar continuidade e finalização.
                       </p>
                     </div>
@@ -1925,3 +1982,4 @@ const TicketDetailPage = () => {
 };
 
 export default TicketDetailPage;
+
