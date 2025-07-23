@@ -1,36 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { ticketService, TICKET_STATUS } from '../services/ticketService';
+import { ticketService } from '../services/ticketService';
 import { projectService } from '../services/projectService';
-import { userService, AREAS } from '../services/userService';
+import { userService } from '../services/userService';
 import { messageService } from '../services/messageService';
 import notificationService from '../services/notificationService';
 import ImageUpload from '../components/ImageUpload';
 import Header from '../components/Header';
-// ... (todos os outros imports de UI e ícones)
-import { 
-  ArrowLeft, 
-  Clock, 
+// ... (imports de UI e ícones)
+import {
+  ArrowLeft,
+  Clock,
   User,
-  // etc...
-  AtSign
+  MessageSquare,
+  Send,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Loader2
+  // Adicione outros ícones que você usa aqui
 } from 'lucide-react';
-
 
 const TicketDetailPage = () => {
   const { ticketId } = useParams();
   const navigate = useNavigate();
   const { user, userProfile } = useAuth();
-  
+
   const [ticket, setTicket] = useState(null);
   const [project, setProject] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
   
-  // ... (O resto dos seus 'useState' permanecem os mesmos)
+  // ... (outros estados do seu componente)
 
   // Função para carregar dados do chamado
   const loadTicketData = async () => {
@@ -59,23 +62,6 @@ const TicketDetailPage = () => {
     }
   };
 
-  // Carregar dados na inicialização
-  useEffect(() => {
-    const-init-data = async () => {
-      if (ticketId && user) {
-        try {
-          await loadTicketData();
-          await markNotificationsAsRead();
-        } catch (e) {
-          console.error("Erro na inicialização da página de detalhes:", e);
-          // Mesmo com erro na notificação, a página tentou carregar os dados
-        }
-      }
-    };
-    initData();
-  }, [ticketId, user]);
-
-
   // Função para marcar notificações como lidas
   const markNotificationsAsRead = async () => {
     if (!user?.uid || !ticketId) return;
@@ -86,7 +72,24 @@ const TicketDetailPage = () => {
     }
   };
   
-  // ... (O resto do seu código, funções de handle, etc., permanece o mesmo)
+  // Carregar dados na inicialização
+  useEffect(() => {
+    // ✅ CORREÇÃO APLICADA AQUI
+    const initData = async () => {
+      if (ticketId && user) {
+        try {
+          await loadTicketData();
+          await markNotificationsAsRead();
+        } catch (e) {
+          console.error("Erro na inicialização da página de detalhes:", e);
+        }
+      }
+    };
+    initData(); // Chama a função corrigida
+  }, [ticketId, user]);
+
+
+  // ... (O resto do seu componente, funções de handle, etc., permanece o mesmo)
   
   // Renderização de loading
   if (loading) {
@@ -117,7 +120,31 @@ const TicketDetailPage = () => {
     );
   }
 
-  // ... (o resto do seu JSX permanece o mesmo)
+  if (!ticket) {
+    return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="text-center">
+                <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">Chamado não encontrado</h2>
+                <p className="text-gray-600 mb-4">O chamado que você está procurando não existe ou foi movido.</p>
+                <Button onClick={() => navigate('/dashboard')} variant="outline">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Voltar ao Dashboard
+                </Button>
+            </div>
+        </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+       <Header title={`Chamado #${ticket.numero || ticketId.slice(-8)}`} />
+       {/* Aqui vai todo o JSX da sua página... ele não precisa ser alterado. */}
+       <div className="p-4">
+         Renderização do seu chamado...
+       </div>
+    </div>
+  );
 };
 
 export default TicketDetailPage;
