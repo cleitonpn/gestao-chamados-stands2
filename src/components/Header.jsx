@@ -285,4 +285,3 @@ const Header = ({ title = "Gestão de Chamados" }) => {
 };
 
 export default Header;
-
