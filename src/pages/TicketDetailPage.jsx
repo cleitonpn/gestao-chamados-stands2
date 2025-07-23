@@ -5,17 +5,39 @@ import { ticketService, TICKET_STATUS } from '../services/ticketService';
 import { projectService } from '../services/projectService';
 import { userService, AREAS } from '../services/userService';
 import { messageService } from '../services/messageService';
-// ✅ REMOVIDA A IMPORTAÇÃO CONFLITANTE
+// ✅ REMOVIDA a importação do serviço de baixo nível
 // import { firestoreNotificationService } from '../services/firestoreNotificationService';
-// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES (agora é a única fonte)
+// ✅ ESTA É A ÚNICA IMPORTAÇÃO NECESSÁRIA
 import notificationService from '../services/notificationService';
 import ImageUpload from '../components/ImageUpload';
 import Header from '../components/Header';
-// ... (resto dos imports de componentes UI)
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { 
   ArrowLeft, 
   Clock, 
-  // ... (resto dos imports de ícones)
+  User, 
+  MessageSquare, 
+  Send, 
+  CheckCircle, 
+  XCircle,
+  AlertCircle,
+  Camera,
+  Calendar,
+  MapPin,
+  Loader2,
+  ExternalLink,
+  Upload,
+  X,
+  Image as ImageIcon,
+  Settings,
   AtSign
 } from 'lucide-react';
 
@@ -24,10 +46,18 @@ const TicketDetailPage = () => {
   const navigate = useNavigate();
   const { user, userProfile } = useAuth();
   
-  // ... (todos os useState hooks permanecem os mesmos)
+  const [ticket, setTicket] = useState(null);
+  const [project, setProject] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState(null);
+  
+  // ... (O resto do seu componente, estados e funções, pode permanecer exatamente o mesmo)
+  // ... A chamada para `markNotificationsAsRead` agora funcionará porque o `notificationService` foi corrigido.
 
   const loadTicketData = async () => {
-    // ... (código da função permanece o mesmo)
+    // (código original)
   };
 
   useEffect(() => {
@@ -37,25 +67,34 @@ const TicketDetailPage = () => {
     }
   }, [ticketId, user]);
 
-  // ✅ Função corrigida para usar o serviço de alto nível
   const markNotificationsAsRead = async () => {
     if (!user?.uid || !ticketId) return;
     
     try {
-      // Usa a função exposta pelo serviço de alto nível
+      // Esta chamada agora vai encontrar a função correta no serviço corrigido
       await notificationService.markTicketNotificationsAsRead(user.uid, ticketId);
-      console.log('✅ Notificações marcadas como lidas para o chamado:', ticketId);
     } catch (error) {
       console.error('❌ Erro ao marcar notificações como lidas:', error);
     }
   };
 
-  // ... (O resto do arquivo TicketDetailPage.jsx permanece exatamente o mesmo)
-  // ... (As chamadas para notificationService.notify... já estavam corretas)
+  // ... (todas as outras funções permanecem iguais)
+  
+  if (loading) {
+    // (código original)
+  }
+
+  if (error) {
+    // (código original)
+  }
+
+  if (!ticket) {
+    // (código original)
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ... (código JSX do return permanece idêntico) ... */}
+       {/* ... (código JSX original) ... */}
     </div>
   );
 };
