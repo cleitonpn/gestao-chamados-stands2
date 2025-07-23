@@ -15,8 +15,8 @@ import {
   Calendar,
   ExternalLink,
   Trash2,
-  MarkAsUnread,
-  MarkAsRead,
+  Mail,
+  MailOpen,
   Filter,
   Clock,
   User,
@@ -251,7 +251,7 @@ const NotificationBadge = () => {
                     onClick={markAllAsRead}
                     className="text-xs"
                   >
-                    <MarkAsRead className="h-3 w-3 mr-1" />
+                    <MailOpen className="h-3 w-3 mr-1" />
                     Marcar todas como lidas
                   </Button>
                 )}
@@ -362,9 +362,9 @@ const NotificationBadge = () => {
                               }}
                             >
                               {notification.lida ? (
-                                <MarkAsUnread className="h-3 w-3" />
+                                <Mail className="h-3 w-3" />
                               ) : (
-                                <MarkAsRead className="h-3 w-3" />
+                                <MailOpen className="h-3 w-3" />
                               )}
                             </Button>
 
