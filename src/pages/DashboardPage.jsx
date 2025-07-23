@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { ticketService } from '../services/ticketService';
 import { userService } from '../services/userService';
-import { firestoreNotificationService } from '../services/firestoreNotificationService';
+// ✅ 1. ALTERAÇÃO: Usando o serviço de notificação unificado e correto.
+import notificationService from '../services/notificationService';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Button } from '@/components/ui/button';
@@ -175,30 +176,14 @@ const DashboardPage = () => {
       ).length,
       escalado_para_mim: tickets.filter(t => {
         if (t.status === 'escalado_para_outra_area') {
-          // Verifica se foi escalado para a área do usuário
-          if (t.areaEscalada === userProfile?.area) {
-            return true;
-          }
-          // Verifica se foi escalado especificamente para o usuário
-          if (t.usuarioEscalado === user?.uid || 
-              t.usuarioEscalado === userProfile?.email ||
-              t.usuarioEscalado === userProfile?.nome) {
-            return true;
-          }
-          // Verifica se está nas áreas envolvidas
-          if (t.areasEnvolvidas && t.areasEnvolvidas.includes(userProfile?.area)) {
-            return true;
-          }
+          if (t.areaEscalada === userProfile?.area) return true;
+          if (t.usuarioEscalado === user?.uid || t.usuarioEscalado === userProfile?.email || t.usuarioEscalado === userProfile?.nome) return true;
+          if (t.areasEnvolvidas && t.areasEnvolvidas.includes(userProfile?.area)) return true;
         }
         return false;
       }).length,
-      devolvido: tickets.filter(t => 
-        t.status === 'devolvido' || 
-        (t.historico && t.historico.some(h => h.acao === 'devolvido'))
-      ).length,
-      aguardando_validacao: tickets.filter(t => 
-        t.status === 'executado_aguardando_validacao'
-      ).length,
+      devolvido: tickets.filter(t => t.status === 'devolvido' || (t.historico && t.historico.some(h => h.acao === 'devolvido'))).length,
+      aguardando_validacao: tickets.filter(t => t.status === 'executado_aguardando_validacao').length,
       concluidos: tickets.filter(t => t.status === 'concluido').length
     };
     return counts;
@@ -206,191 +191,69 @@ const DashboardPage = () => {
 
   // NOVO: Configuração dos cards de filtro
   const filterCards = [
-    {
-      id: 'todos',
-      title: 'Todos',
-      icon: FileText,
-      color: 'bg-blue-50 border-blue-200 hover:bg-blue-100',
-      iconColor: 'text-blue-600',
-      activeColor: 'bg-blue-500 text-white border-blue-500'
-    },
-    {
-      id: 'sem_tratativa',
-      title: 'Sem Tratativa',
-      icon: AlertCircle,
-      color: 'bg-orange-50 border-orange-200 hover:bg-orange-100',
-      iconColor: 'text-orange-600',
-      activeColor: 'bg-orange-500 text-white border-orange-500'
-    },
-    {
-      id: 'em_tratativa',
-      title: 'Em Tratativa',
-      icon: Clock,
-      color: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100',
-      iconColor: 'text-yellow-600',
-      activeColor: 'bg-yellow-500 text-white border-yellow-500'
-    },
-    {
-      id: 'em_execucao',
-      title: 'Em Execução',
-      icon: Play,
-      color: 'bg-blue-50 border-blue-200 hover:bg-blue-100',
-      iconColor: 'text-blue-600',
-      activeColor: 'bg-blue-500 text-white border-blue-500'
-    },
-    {
-      id: 'escalado',
-      title: 'Escalado',
-      icon: ArrowUp,
-      color: 'bg-purple-50 border-purple-200 hover:bg-purple-100',
-      iconColor: 'text-purple-600',
-      activeColor: 'bg-purple-500 text-white border-purple-500'
-    },
-    {
-      id: 'escalado_para_mim',
-      title: 'Escalados para Mim',
-      icon: ChevronDown,
-      color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100',
-      iconColor: 'text-indigo-600',
-      activeColor: 'bg-indigo-500 text-white border-indigo-500'
-    },
-    {
-      id: 'devolvido',
-      title: 'Devolvido',
-      icon: RotateCcw,
-      color: 'bg-pink-50 border-pink-200 hover:bg-pink-100',
-      iconColor: 'text-pink-600',
-      activeColor: 'bg-pink-500 text-white border-pink-500'
-    },
-    {
-      id: 'aguardando_validacao',
-      title: 'Aguardando Validação',
-      icon: Hourglass,
-      color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100',
-      iconColor: 'text-indigo-600',
-      activeColor: 'bg-indigo-500 text-white border-indigo-500'
-    },
-    {
-      id: 'concluidos',
-      title: 'Concluídos',
-      icon: CheckCircle,
-      color: 'bg-green-50 border-green-200 hover:bg-green-100',
-      iconColor: 'text-green-600',
-      activeColor: 'bg-green-500 text-white border-green-500'
-    }
+    { id: 'todos', title: 'Todos', icon: FileText, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
+    { id: 'sem_tratativa', title: 'Sem Tratativa', icon: AlertCircle, color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500' },
+    { id: 'em_tratativa', title: 'Em Tratativa', icon: Clock, color: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', iconColor: 'text-yellow-600', activeColor: 'bg-yellow-500 text-white border-yellow-500' },
+    { id: 'em_execucao', title: 'Em Execução', icon: Play, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
+    { id: 'escalado', title: 'Escalado', icon: ArrowUp, color: 'bg-purple-50 border-purple-200 hover:bg-purple-100', iconColor: 'text-purple-600', activeColor: 'bg-purple-500 text-white border-purple-500' },
+    { id: 'escalado_para_mim', title: 'Escalados para Mim', icon: ChevronDown, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
+    { id: 'devolvido', title: 'Devolvido', icon: RotateCcw, color: 'bg-pink-50 border-pink-200 hover:bg-pink-100', iconColor: 'text-pink-600', activeColor: 'bg-pink-500 text-white border-pink-500' },
+    { id: 'aguardando_validacao', title: 'Aguardando Validação', icon: Hourglass, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
+    { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' }
   ];
 
-  // Função para obter todos os chamados com ordenação cronológica
-  const getDisplayedTickets = () => {
-    return getFilteredTickets();
-  };
-
-  // Função para agrupar projetos por evento
+  const getDisplayedTickets = () => getFilteredTickets();
   const getProjectsByEvent = () => {
     const grouped = {};
     projects.forEach(project => {
       const eventName = project.feira || 'Sem Evento';
-      if (!grouped[eventName]) {
-        grouped[eventName] = [];
-      }
+      if (!grouped[eventName]) grouped[eventName] = [];
       grouped[eventName].push(project);
     });
     return grouped;
   };
-
-  // Função para agrupar chamados por projeto com ordenação cronológica
   const getTicketsByProject = () => {
     const grouped = {};
-    
-    // Usar chamados filtrados
     const displayedTickets = getDisplayedTickets();
-    
     displayedTickets.forEach(ticket => {
       const projectName = ticket.projetoId ? getProjectName(ticket.projetoId) : 'Sem Projeto';
-      if (!grouped[projectName]) {
-        grouped[projectName] = [];
-      }
+      if (!grouped[projectName]) grouped[projectName] = [];
       grouped[projectName].push(ticket);
     });
-
     return grouped;
   };
 
-  // Função para alternar expansão de eventos
-  const toggleEventExpansion = (eventName) => {
-    setExpandedEvents(prev => ({
-      ...prev,
-      [eventName]: !prev[eventName]
-    }));
-  };
+  const toggleEventExpansion = (eventName) => setExpandedEvents(prev => ({ ...prev, [eventName]: !prev[eventName] }));
+  const toggleProjectExpansion = (projectName) => setExpandedProjects(prev => ({ ...prev, [projectName]: !prev[projectName] }));
+  const handleProjectClick = (project) => navigate(`/projeto/${project.id}`);
+  const handleTicketClick = (ticketId) => navigate(`/chamado/${ticketId}`);
 
-  // Função para alternar expansão de projetos
-  const toggleProjectExpansion = (projectName) => {
-    setExpandedProjects(prev => ({
-      ...prev,
-      [projectName]: !prev[projectName]
-    }));
-  };
-
-  // Função para lidar com clique no projeto
-  const handleProjectClick = (project) => {
-    navigate(`/projeto/${project.id}`);
-  };
-
-  // Função para lidar com clique no chamado
-  const handleTicketClick = (ticketId) => {
-    navigate(`/chamado/${ticketId}`);
-  };
-
-  // Função para obter cor do status
   const getStatusColor = (status) => {
-    const colors = {
-      'aberto': 'bg-blue-100 text-blue-800',
-      'em_tratativa': 'bg-yellow-100 text-yellow-800',
-      'em_execucao': 'bg-blue-100 text-blue-800',
-      'enviado_para_area': 'bg-purple-100 text-purple-800',
-      'escalado_para_area': 'bg-purple-100 text-purple-800',
-      'aguardando_aprovacao': 'bg-orange-100 text-orange-800',
-      'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800',
-      'concluido': 'bg-green-100 text-green-800',
-      'cancelado': 'bg-red-100 text-red-800',
-      'devolvido': 'bg-pink-100 text-pink-800'
-    };
+    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800' };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
-
-  // Função para obter cor da prioridade
   const getPriorityColor = (priority) => {
-    const colors = {
-      'baixa': 'bg-green-100 text-green-800',
-      'media': 'bg-yellow-100 text-yellow-800',
-      'alta': 'bg-red-100 text-red-800'
-    };
+    const colors = { 'baixa': 'bg-green-100 text-green-800', 'media': 'bg-yellow-100 text-yellow-800', 'alta': 'bg-red-100 text-red-800' };
     return colors[priority] || 'bg-gray-100 text-gray-800';
   };
 
-  // Função para seleção de chamados em lote
   const handleTicketSelect = (ticketId, checked) => {
     const newSelected = new Set(selectedTickets);
-    if (checked) {
-      newSelected.add(ticketId);
-    } else {
-      newSelected.delete(ticketId);
-    }
+    if (checked) newSelected.add(ticketId);
+    else newSelected.delete(ticketId);
     setSelectedTickets(newSelected);
   };
 
-  // Função para carregar notificações por chamado
+  // ✅ 2. ALTERAÇÃO: Função agora usa o serviço correto.
   const loadTicketNotifications = async () => {
     if (!user?.uid || !tickets.length) return;
     
     try {
       const notificationCounts = {};
       
-      // Para cada chamado, buscar notificações não lidas
       for (const ticket of tickets) {
         try {
-          const count = await firestoreNotificationService.getUnreadNotificationsByTicket(
+          const count = await notificationService.getUnreadNotificationsByTicket(
             user.uid, 
             ticket.id
           );
@@ -410,7 +273,6 @@ const DashboardPage = () => {
     }
   };
 
-  // useEffect para carregar dados
   useEffect(() => {
     if (authInitialized && user && userProfile && user.uid) {
       loadDashboardData();
@@ -422,46 +284,21 @@ const DashboardPage = () => {
     }
   }, [user, userProfile, authInitialized, navigate]);
 
-  // Carregar notificações quando tickets mudarem
   useEffect(() => {
     if (tickets.length > 0 && user?.uid) {
-      loadTicketNotifications();
-      
-      const setupNotificationListener = () => {
-        try {
-          const notificationsRef = collection(db, 'notifications');
-          const q = query(
-            notificationsRef,
-            where('userId', '==', user.uid),
-            where('lida', '==', false)
-          );
-
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            console.log('📱 Listener de notificações ativado, documentos:', snapshot.size);
-            
-            const notificationCounts = {};
-            
-            snapshot.forEach((doc) => {
-              const notification = doc.data();
-              if (notification.ticketId) {
-                notificationCounts[notification.ticketId] = (notificationCounts[notification.ticketId] || 0) + 1;
-              }
-            });
-            
-            console.log('📱 Contagens de notificação atualizadas:', notificationCounts);
-            setTicketNotifications(notificationCounts);
-          }, (error) => {
-            console.error('❌ Erro no listener de notificações:', error);
-          });
-
-          return unsubscribe;
-        } catch (error) {
-          console.error('❌ Erro ao configurar listener de notificações:', error);
-          return null;
-        }
-      };
-
-      const unsubscribe = setupNotificationListener();
+      // ✅ 3. ALTERAÇÃO: Listener agora usa o serviço unificado.
+      const unsubscribe = notificationService.subscribeToNotifications(user.uid, (allNotifications) => {
+        console.log('📱 Listener de notificações do Dashboard ativado, documentos:', allNotifications.length);
+        const counts = {};
+        allNotifications.forEach(notification => {
+          // Conta apenas as notificações não lidas que pertencem a um chamado
+          if (notification.ticketId && !notification.lida) {
+            counts[notification.ticketId] = (counts[notification.ticketId] || 0) + 1;
+          }
+        });
+        console.log('📱 Contagens de notificação do Dashboard atualizadas:', counts);
+        setTicketNotifications(counts);
+      });
       
       return () => {
         if (unsubscribe) {
@@ -471,7 +308,6 @@ const DashboardPage = () => {
     }
   }, [tickets, user?.uid]);
 
-  // FUNÇÃO LOADDASHBOARDDATA COM REGRAS CORRETAS DO ARQUIVO ORIGINAL
   const loadDashboardData = async () => {
     try {
       setLoading(true);
@@ -479,7 +315,6 @@ const DashboardPage = () => {
       console.log('🔍 Carregando dados para:', userProfile?.funcao);
       
       if (userProfile?.funcao === 'administrador') {
-        // ADMINISTRADOR: acesso total (função deus)
         console.log('👑 Administrador: carregando TODOS os dados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
@@ -490,7 +325,6 @@ const DashboardPage = () => {
         setTickets(allTickets);
         setUsers(allUsers);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         allProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -498,7 +332,6 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'produtor') {
-        // PRODUTOR: vê somente seus projetos, todos os chamados dos seus projetos
         console.log('🏭 Produtor: carregando projetos próprios e chamados relacionados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
@@ -506,12 +339,10 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         
-        // Filtrar apenas projetos do produtor (REGRA ORIGINAL RESTRITIVA)
         const produtorProjects = allProjects.filter(project => 
           project.produtorId === user.uid
         );
         
-        // Filtrar chamados dos projetos do produtor
         const produtorProjectIds = produtorProjects.map(p => p.id);
         const produtorTickets = allTickets.filter(ticket => 
           produtorProjectIds.includes(ticket.projetoId)
@@ -531,7 +362,6 @@ const DashboardPage = () => {
         setTickets(produtorTickets);
         setUsers(allUsers);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         produtorProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -539,7 +369,6 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'consultor') {
-        // CONSULTOR: vê somente seus projetos, chamados abertos por produtor e por ele, escalados para ele
         console.log('👨‍💼 Consultor: carregando projetos próprios e chamados específicos');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
@@ -547,19 +376,14 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         
-        // Filtrar apenas projetos do consultor (REGRA ORIGINAL RESTRITIVA)
         const consultorProjects = allProjects.filter(project => 
           project.consultorId === user.uid
         );
         
-        // Filtrar chamados específicos do consultor
         const consultorProjectIds = consultorProjects.map(p => p.id);
         const consultorTickets = allTickets.filter(ticket => {
-          // Chamados dos projetos do consultor
           const isFromConsultorProject = consultorProjectIds.includes(ticket.projetoId);
-          // Chamados abertos pelo consultor
           const isOpenedByConsultor = ticket.autorId === user.uid;
-          // Chamados escalados para o consultor
           const isEscalatedToConsultor = ticket.escalonamentos?.some(esc => 
             esc.consultorId === user.uid || esc.responsavelId === user.uid
           );
@@ -571,7 +395,6 @@ const DashboardPage = () => {
         setTickets(consultorTickets);
         setUsers(allUsers);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         allProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -579,25 +402,22 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'operador') {
-        // OPERADOR: USAR EXATAMENTE O MÉTODO ORIGINAL QUE FUNCIONAVA
         console.log('⚙️ Operador: carregando TODOS os projetos e chamados da área (MÉTODO ORIGINAL)');
         console.log('🔍 Área do operador:', userProfile?.area);
         
         const [allProjects, operatorTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
-          ticketService.getTicketsByAreaInvolved(userProfile.area), // MÉTODO ESPECÍFICO ORIGINAL
+          ticketService.getTicketsByAreaInvolved(userProfile.area),
           userService.getAllUsers()
         ]);
         
         console.log('📊 Projetos carregados:', allProjects.length);
         console.log('📊 Chamados da área carregados:', operatorTickets.length);
         
-        // Operador vê TODOS os projetos
         setProjects(allProjects);
-        setTickets(operatorTickets); // Usar resultado direto do método específico
+        setTickets(operatorTickets);
         setUsers(allUsers);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         allProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -605,7 +425,6 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'gerente') {
-        // GERENTE: vê todos os projetos, todos os chamados, prioridade para escalados para ele
         console.log('👔 Gerente: carregando TODOS os dados com prioridade para escalados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
@@ -613,13 +432,10 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         
-        // Gerente vê tudo
         setProjects(allProjects);
         setUsers(allUsers);
         
-        // Ordenar chamados com prioridade para escalados para o gerente
         const sortedTickets = [...allTickets].sort((a, b) => {
-          // Verificar se é escalado para o gerente
           const aEscaladoParaGerente = a.escalonamentos?.some(esc => 
             esc.gerenteId === user.uid || esc.responsavelId === user.uid
           );
@@ -627,11 +443,9 @@ const DashboardPage = () => {
             esc.gerenteId === user.uid || esc.responsavelId === user.uid
           );
           
-          // Prioridade para escalados para o gerente
           if (aEscaladoParaGerente && !bEscaladoParaGerente) return -1;
           if (!aEscaladoParaGerente && bEscaladoParaGerente) return 1;
           
-          // Depois por data de criação
           const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
           const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
           return dateB - dateA;
@@ -639,7 +453,6 @@ const DashboardPage = () => {
         
         setTickets(sortedTickets);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         allProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -647,7 +460,6 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else {
-        // Outros usuários - comportamento padrão
         console.log('👤 Usuário padrão: carregando dados básicos');
         const [allProjects, userTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
@@ -659,7 +471,6 @@ const DashboardPage = () => {
         setTickets(userTickets);
         setUsers(allUsers);
         
-        // Mapear nomes dos projetos
         const projectNamesMap = {};
         allProjects.forEach(project => {
           projectNamesMap[project.id] = project.nome;
@@ -697,7 +508,6 @@ const DashboardPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Menu Lateral */}
       <div className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}>
         <div className="flex items-center justify-between h-16 px-6 border-b">
           <h1 className="text-xl font-semibold text-gray-900">Gestão de Chamados</h1>
@@ -744,7 +554,6 @@ const DashboardPage = () => {
               Ver Projetos
             </Button>
             
-            {/* ADICIONADO: Botão Cronograma para todos os usuários */}
             <Button 
               onClick={() => navigate('/cronograma')}
               variant="ghost"
@@ -823,7 +632,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* Overlay para mobile */}
       {mobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
@@ -831,9 +639,7 @@ const DashboardPage = () => {
         />
       )}
 
-      {/* Conteúdo Principal */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
         <header className="bg-white shadow-sm border-b">
           <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center space-x-4">
@@ -857,7 +663,6 @@ const DashboardPage = () => {
           </div>
         </header>
 
-        {/* Main Content */}
         <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           <Tabs defaultValue="chamados" className="space-y-6">
             <TabsList className="grid w-full grid-cols-2">
@@ -871,9 +676,7 @@ const DashboardPage = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Aba de Chamados */}
             <TabsContent value="chamados" className="space-y-6">
-              {/* NOVO: Cards de Filtro */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
                 {filterCards.map((card) => {
                   const IconComponent = card.icon;
@@ -914,7 +717,6 @@ const DashboardPage = () => {
                 })}
               </div>
 
-              {/* Indicador de filtro ativo */}
               {activeFilter !== 'todos' && (
                 <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                   <div className="flex items-center space-x-2">
@@ -938,7 +740,6 @@ const DashboardPage = () => {
                 </div>
               )}
               
-              {/* Lista de Chamados Agrupados por Projeto */}
               <div className="space-y-4">
                 {Object.entries(getTicketsByProject()).map(([projectName, projectTickets]) => (
                   <div key={projectName} className="border rounded-lg">
@@ -1077,7 +878,6 @@ const DashboardPage = () => {
               </div>
             </TabsContent>
 
-            {/* Aba de Projetos */}
             <TabsContent value="projetos" className="space-y-6">
               <div className="space-y-4">
                 {Object.entries(getProjectsByEvent()).map(([eventName, eventProjects]) => (
@@ -1156,4 +956,6 @@ const DashboardPage = () => {
 };
 
 export default DashboardPage;
+```
 
+Com esta versão, o seu Dashboard voltará a ter a aparência e o comportamento completos, e os problemas de notificação estarão resolvid
