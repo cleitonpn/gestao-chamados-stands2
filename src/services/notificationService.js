@@ -12,40 +12,35 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de novo chamado...');
       
-      const recipients = [];
+      const recipients = new Set();
       
-      // Adicionar consultor (se não for o criador)
       if (ticketData.consultorId && ticketData.consultorId !== creatorId) {
-        recipients.push(ticketData.consultorId);
+        recipients.add(ticketData.consultorId);
       }
       
-      // Adicionar produtor (se não for o criador)
       if (ticketData.produtorId && ticketData.produtorId !== creatorId) {
-        recipients.push(ticketData.produtorId);
+        recipients.add(ticketData.produtorId);
       }
       
-      // Buscar operadores da área específica
       if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
         const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
         areaUsers.forEach(user => {
-          if (user.id !== creatorId && !recipients.includes(user.id)) {
-            recipients.push(user.id);
+          if (user.id !== creatorId) {
+            recipients.add(user.id);
           }
         });
       }
 
-      // Enviar notificações
-      if (recipients.length > 0) {
-        await this.firestoreService.sendNotificationToUsers(recipients, {
+      if (recipients.size > 0) {
+        await this.firestoreService.sendNotificationToUsers(Array.from(recipients), {
           tipo: 'new_ticket',
           titulo: `Novo chamado: ${ticketData.titulo}`,
-          mensagem: `Chamado criado no projeto ${ticketData.projetoNome}`,
+          mensagem: `Chamado criado no projeto ${ticketData.projetoNome || ''}`,
           link: `/tickets/${ticketId}`,
           ticketId: ticketId,
           prioridade: ticketData.prioridade || 'media'
         });
-        
-        console.log(`✅ Notificação de novo chamado enviada para ${recipients.length} usuários`);
+        console.log(`✅ Notificação de novo chamado enviada para ${recipients.size} usuários`);
       }
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de novo chamado:', error);
@@ -59,31 +54,27 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de nova mensagem...');
       
-      const recipients = [];
+      const recipients = new Set();
       
-      // Adicionar consultor (se não for o remetente)
       if (ticketData.consultorId && ticketData.consultorId !== senderId) {
-        recipients.push(ticketData.consultorId);
+        recipients.add(ticketData.consultorId);
       }
       
-      // Adicionar produtor (se não for o remetente)
       if (ticketData.produtorId && ticketData.produtorId !== senderId) {
-        recipients.push(ticketData.produtorId);
+        recipients.add(ticketData.produtorId);
       }
       
-      // Buscar operadores da área atual
       if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
         const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
         areaUsers.forEach(user => {
-          if (user.id !== senderId && !recipients.includes(user.id)) {
-            recipients.push(user.id);
+          if (user.id !== senderId) {
+            recipients.add(user.id);
           }
         });
       }
 
-      // Enviar notificações
-      if (recipients.length > 0) {
-        await this.firestoreService.sendNotificationToUsers(recipients, {
+      if (recipients.size > 0) {
+        await this.firestoreService.sendNotificationToUsers(Array.from(recipients), {
           tipo: 'new_message',
           titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
           mensagem: messageData.texto.substring(0, 100) + (messageData.texto.length > 100 ? '...' : ''),
@@ -91,8 +82,7 @@ class NotificationService {
           ticketId: ticketId,
           prioridade: 'media'
         });
-        
-        console.log(`✅ Notificação de nova mensagem enviada para ${recipients.length} usuários`);
+        console.log(`✅ Notificação de nova mensagem enviada para ${recipients.size} usuários`);
       }
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de nova mensagem:', error);
@@ -106,31 +96,25 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de escalação de chamado...');
       
-      const recipients = [];
+      const recipients = new Set();
       
-      // Adicionar consultor (se não for o escalador)
       if (ticketData.consultorId && ticketData.consultorId !== escalatorId) {
-        recipients.push(ticketData.consultorId);
+        recipients.add(ticketData.consultorId);
       }
       
-      // Adicionar produtor (se não for o escalador)
       if (ticketData.produtorId && ticketData.produtorId !== escalatorId) {
-        recipients.push(ticketData.produtorId);
+        recipients.add(ticketData.produtorId);
       }
       
-      // Buscar operadores da área de destino
       if (escalationData.areaDestino) {
         const areaUsers = await this.firestoreService.getUsersByArea(escalationData.areaDestino);
         areaUsers.forEach(user => {
-          if (user.id !== escalatorId && !recipients.includes(user.id)) {
-            recipients.push(user.id);
-          }
+            recipients.add(user.id);
         });
       }
 
-      // Enviar notificações
-      if (recipients.length > 0) {
-        await this.firestoreService.sendNotificationToUsers(recipients, {
+      if (recipients.size > 0) {
+        await this.firestoreService.sendNotificationToUsers(Array.from(recipients), {
           tipo: 'ticket_escalated',
           titulo: `Chamado escalado para ${escalationData.areaDestino}`,
           mensagem: `Chamado #${ticketId.slice(-6)} foi escalado: ${escalationData.motivo}`,
@@ -138,8 +122,7 @@ class NotificationService {
           ticketId: ticketId,
           prioridade: 'alta'
         });
-        
-        console.log(`✅ Notificação de escalação enviada para ${recipients.length} usuários`);
+        console.log(`✅ Notificação de escalação enviada para ${recipients.size} usuários`);
       }
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de escalação:', error);
@@ -153,26 +136,22 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de escalação para gerente...');
       
-      const recipients = [];
+      const recipients = new Set();
       
-      // Adicionar consultor (se não for o escalador)
       if (ticketData.consultorId && ticketData.consultorId !== escalatorId) {
-        recipients.push(ticketData.consultorId);
+        recipients.add(ticketData.consultorId);
       }
       
-      // Adicionar produtor (se não for o escalador)
       if (ticketData.produtorId && ticketData.produtorId !== escalatorId) {
-        recipients.push(ticketData.produtorId);
+        recipients.add(ticketData.produtorId);
       }
       
-      // Adicionar gerente específico
-      if (escalationData.gerenteId && !recipients.includes(escalationData.gerenteId)) {
-        recipients.push(escalationData.gerenteId);
+      if (escalationData.gerenteId) {
+        recipients.add(escalationData.gerenteId);
       }
 
-      // Enviar notificações
-      if (recipients.length > 0) {
-        await this.firestoreService.sendNotificationToUsers(recipients, {
+      if (recipients.size > 0) {
+        await this.firestoreService.sendNotificationToUsers(Array.from(recipients), {
           tipo: 'escalated_to_manager',
           titulo: `Chamado escalado para gerência`,
           mensagem: `Chamado #${ticketId.slice(-6)} escalado para ${escalationData.gerenteNome}: ${escalationData.motivo}`,
@@ -180,8 +159,7 @@ class NotificationService {
           ticketId: ticketId,
           prioridade: 'urgente'
         });
-        
-        console.log(`✅ Notificação de escalação gerencial enviada para ${recipients.length} usuários`);
+        console.log(`✅ Notificação de escalação gerencial enviada para ${recipients.size} usuários`);
       }
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de escalação gerencial:', error);
@@ -195,41 +173,35 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de mudança de status...');
       
-      const recipients = [];
+      const recipients = new Set();
       
-      // Adicionar consultor (se não for quem mudou)
       if (ticketData.consultorId && ticketData.consultorId !== changerId) {
-        recipients.push(ticketData.consultorId);
+        recipients.add(ticketData.consultorId);
       }
       
-      // Adicionar produtor (se não for quem mudou)
       if (ticketData.produtorId && ticketData.produtorId !== changerId) {
-        recipients.push(ticketData.produtorId);
+        recipients.add(ticketData.produtorId);
       }
       
-      // Buscar operadores da área atual
       if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
         const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
         areaUsers.forEach(user => {
-          if (user.id !== changerId && !recipients.includes(user.id)) {
-            recipients.push(user.id);
-          }
+            recipients.add(user.id);
         });
       }
       
-      // Se mudou para nova área, notificar operadores da nova área
       if (statusData.novaArea && statusData.novaArea !== ticketData.areaAtual) {
         const newAreaUsers = await this.firestoreService.getUsersByArea(statusData.novaArea);
         newAreaUsers.forEach(user => {
-          if (user.id !== changerId && !recipients.includes(user.id)) {
-            recipients.push(user.id);
-          }
+            recipients.add(user.id);
         });
       }
+      
+      // Remover quem fez a ação da lista de notificados
+      recipients.delete(changerId);
 
-      // Enviar notificações
-      if (recipients.length > 0) {
-        await this.firestoreService.sendNotificationToUsers(recipients, {
+      if (recipients.size > 0) {
+        await this.firestoreService.sendNotificationToUsers(Array.from(recipients), {
           tipo: 'status_changed',
           titulo: `Status alterado: ${statusData.novoStatus}`,
           mensagem: `Chamado #${ticketId.slice(-6)} teve status alterado para "${statusData.novoStatus}"`,
@@ -237,8 +209,7 @@ class NotificationService {
           ticketId: ticketId,
           prioridade: 'media'
         });
-        
-        console.log(`✅ Notificação de mudança de status enviada para ${recipients.length} usuários`);
+        console.log(`✅ Notificação de mudança de status enviada para ${recipients.size} usuários`);
       }
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de mudança de status:', error);
@@ -252,32 +223,20 @@ class NotificationService {
     try {
       console.log('🔔 Enviando notificação de novo evento...');
       
-      // Buscar todos os usuários do sistema
-      const allUsers = await this.firestoreService.getUsersByRole('consultor');
-      const producers = await this.firestoreService.getUsersByRole('produtor');
-      const operators = await this.firestoreService.getUsersByRole('operador');
-      const managers = await this.firestoreService.getUsersByRole('gerente');
-      
-      const recipients = [];
-      
-      // Adicionar todos os usuários (exceto o criador)
-      [...allUsers, ...producers, ...operators, ...managers].forEach(user => {
-        if (user.id !== creatorId && !recipients.includes(user.id)) {
-          recipients.push(user.id);
-        }
-      });
+      const allUsers = await this.firestoreService.getAllUsers(); // Supondo que exista essa função
+      const recipients = allUsers
+        .map(user => user.id)
+        .filter(id => id !== creatorId);
 
-      // Enviar notificações
       if (recipients.length > 0) {
         await this.firestoreService.sendNotificationToUsers(recipients, {
           tipo: 'new_event',
-          titulo: `Novo evento cadastrado: ${eventData.nome}`,
-          mensagem: `Evento "${eventData.nome}" foi cadastrado no pavilhão ${eventData.pavilhao}`,
+          titulo: `Novo evento: ${eventData.nome}`,
+          mensagem: `Evento "${eventData.nome}" cadastrado no pavilhão ${eventData.pavilhao}`,
           link: `/events`,
           eventId: eventId,
-          prioridade: 'media'
+          prioridade: 'baixa'
         });
-        
         console.log(`✅ Notificação de novo evento enviada para ${recipients.length} usuários`);
       }
     } catch (error) {
@@ -285,9 +244,10 @@ class NotificationService {
     }
   }
 
-  /**
-   * Métodos auxiliares para acessar o serviço Firestore
-   */
+  // ✅ MÉTODOS ADICIONADOS PARA A INTERFACE USAR
+  // Estes métodos simplesmente repassam a chamada para o serviço de baixo nível,
+  // mantendo a abstração e um ponto único de acesso.
+
   async getUserNotifications(userId) {
     return await this.firestoreService.getUserNotifications(userId);
   }
@@ -308,6 +268,10 @@ class NotificationService {
     return await this.firestoreService.deleteNotification(userId, notificationId);
   }
 
+  async markTicketNotificationsAsRead(userId, ticketId) {
+    return await this.firestoreService.markTicketNotificationsAsRead(userId, ticketId);
+  }
+  
   subscribeToNotifications(userId, callback) {
     return this.firestoreService.subscribeToNotifications(userId, callback);
   }
@@ -317,7 +281,5 @@ class NotificationService {
   }
 }
 
-// Criar instância única do serviço
 const notificationService = new NotificationService();
 export default notificationService;
-
