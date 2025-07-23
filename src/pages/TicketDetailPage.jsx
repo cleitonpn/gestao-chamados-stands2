@@ -5,7 +5,7 @@ import { ticketService, TICKET_STATUS } from '@/services/ticketService'; // CORR
 import { projectService } from '@/services/projectService'; // CORRIGIDO
 import { userService, AREAS } from '@/services/userService'; // CORRIGIDO
 import { messageService } from '@/services/messageService'; // CORRIGIDO
-// ✅ 1. ALTERAÇÃO: Removida a importação conflitante e mantida a correta.
+// ✅ 1. ALTERAÇÃO: Usando o serviço de notificação unificado e correto.
 import notificationService from '@/services/notificationService'; // CORRIGIDO
 import ImageUpload from '@/components/ImageUpload'; // CORRIGIDO
 import Header from '@/components/Header'; // CORRIGIDO
