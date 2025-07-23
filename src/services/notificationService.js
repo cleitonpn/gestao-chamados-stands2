@@ -1,675 +1,323 @@
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  getDocs,
-  updateDoc, 
-  onSnapshot, 
-  query, 
-  where, 
-  orderBy,
-  serverTimestamp,
-  increment
-} from 'firebase/firestore';
-import { db } from '../config/firebase';
+import firestoreNotificationService from './firestoreNotificationService';
 
 class NotificationService {
   constructor() {
-    this.listeners = new Map();
+    this.firestoreService = firestoreNotificationService;
   }
 
   /**
-   * Registra uma nova atividade no chamado
-   * @param {string} ticketId - ID do chamado
-   * @param {string} type - Tipo da atividade ('status_change', 'message', 'escalation', etc.)
-   * @param {string} userId - ID do usuário que fez a ação
-   * @param {Object} data - Dados adicionais da atividade
+   * 1. NOTIFICAÇÃO DE NOVO CHAMADO
    */
-  async registerActivity(ticketId, type, userId, data = {}) {
+  async notifyNewTicket(ticketId, ticketData, creatorId) {
     try {
-      const activityRef = doc(collection(db, 'ticket_activities'), `${ticketId}_${Date.now()}`);
+      console.log('🔔 Enviando notificação de novo chamado...');
       
-      await setDoc(activityRef, {
-        ticketId,
-        type,
-        userId,
-        timestamp: serverTimestamp(),
-        data,
-        createdAt: new Date()
-      });
-
-      // Atualizar contador de atividades do chamado
-      const ticketRef = doc(db, 'chamados', ticketId);
-      await updateDoc(ticketRef, {
-        lastActivity: serverTimestamp(),
-        activityCount: increment(1)
-      });
-
-      console.log('🔔 Atividade registrada:', { ticketId, type, userId });
-    } catch (error) {
-      console.error('❌ Erro ao registrar atividade:', error);
-    }
-  }
-
-  /**
-   * Obtém todos os usuários de uma área específica
-   * @param {string} area - Nome da área
-   * @returns {Promise<Array>} Lista de usuários da área
-   */
-  async getUsersByArea(area) {
-    try {
-      const usersQuery = query(
-        collection(db, 'usuarios'),
-        where('area', '==', area)
-      );
+      const recipients = [];
       
-      const snapshot = await getDocs(usersQuery);
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('❌ Erro ao buscar usuários da área:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Obtém todos os gerentes do sistema
-   * @returns {Promise<Array>} Lista de gerentes
-   */
-  async getManagers() {
-    try {
-      const managersQuery = query(
-        collection(db, 'usuarios'),
-        where('funcao', '==', 'gerente')
-      );
+      // Adicionar consultor (se não for o criador)
+      if (ticketData.consultorId && ticketData.consultorId !== creatorId) {
+        recipients.push(ticketData.consultorId);
+      }
       
-      const snapshot = await getDocs(managersQuery);
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('❌ Erro ao buscar gerentes:', error);
-      return [];
-    }
-  }
+      // Adicionar produtor (se não for o criador)
+      if (ticketData.produtorId && ticketData.produtorId !== creatorId) {
+        recipients.push(ticketData.produtorId);
+      }
+      
+      // Buscar operadores da área específica
+      if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
+        const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
+        areaUsers.forEach(user => {
+          if (user.id !== creatorId && !recipients.includes(user.id)) {
+            recipients.push(user.id);
+          }
+        });
+      }
 
-  /**
-   * Obtém todos os usuários do sistema
-   * @returns {Promise<Array>} Lista de todos os usuários
-   */
-  async getAllUsers() {
-    try {
-      const usersQuery = query(collection(db, 'usuarios'));
-      const snapshot = await getDocs(usersQuery);
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('❌ Erro ao buscar todos os usuários:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Cria notificação para usuários específicos
-   * @param {Array} userIds - IDs dos usuários que devem receber a notificação
-   * @param {string} type - Tipo da notificação
-   * @param {string} title - Título da notificação
-   * @param {string} message - Mensagem da notificação
-   * @param {Object} data - Dados adicionais
-   */
-  async createNotification(userIds, type, title, message, data = {}) {
-    try {
-      const promises = userIds.map(async (userId) => {
-        const notificationRef = doc(collection(db, 'notifications'));
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'new_ticket',
+          titulo: `Novo chamado: ${ticketData.titulo}`,
+          mensagem: `Chamado criado no projeto ${ticketData.projetoNome}`,
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+          prioridade: ticketData.prioridade || 'media'
+        });
         
-        await setDoc(notificationRef, {
-          userId,
-          type,
-          title,
-          message,
-          data,
-          read: false,
-          timestamp: serverTimestamp(),
-          createdAt: new Date()
-        });
-      });
-
-      await Promise.all(promises);
-      console.log('🔔 Notificações criadas para:', userIds);
+        console.log(`✅ Notificação de novo chamado enviada para ${recipients.length} usuários`);
+      }
     } catch (error) {
-      console.error('❌ Erro ao criar notificações:', error);
+      console.error('❌ Erro ao enviar notificação de novo chamado:', error);
     }
   }
 
   /**
-   * ABERTURA DE CHAMADO
-   * Notifica operadores da área de destino
+   * 2. NOTIFICAÇÃO DE NOVA MENSAGEM
    */
-  async notifyTicketCreated(ticketId, ticketData, createdByUserId) {
+  async notifyNewMessage(ticketId, ticketData, messageData, senderId) {
     try {
+      console.log('🔔 Enviando notificação de nova mensagem...');
+      
+      const recipients = [];
+      
+      // Adicionar consultor (se não for o remetente)
+      if (ticketData.consultorId && ticketData.consultorId !== senderId) {
+        recipients.push(ticketData.consultorId);
+      }
+      
+      // Adicionar produtor (se não for o remetente)
+      if (ticketData.produtorId && ticketData.produtorId !== senderId) {
+        recipients.push(ticketData.produtorId);
+      }
+      
+      // Buscar operadores da área atual
+      if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
+        const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
+        areaUsers.forEach(user => {
+          if (user.id !== senderId && !recipients.includes(user.id)) {
+            recipients.push(user.id);
+          }
+        });
+      }
+
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'new_message',
+          titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
+          mensagem: messageData.texto.substring(0, 100) + (messageData.texto.length > 100 ? '...' : ''),
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+          prioridade: 'media'
+        });
+        
+        console.log(`✅ Notificação de nova mensagem enviada para ${recipients.length} usuários`);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação de nova mensagem:', error);
+    }
+  }
+
+  /**
+   * 3. NOTIFICAÇÃO DE ESCALAÇÃO DE CHAMADO
+   */
+  async notifyTicketEscalation(ticketId, ticketData, escalationData, escalatorId) {
+    try {
+      console.log('🔔 Enviando notificação de escalação de chamado...');
+      
+      const recipients = [];
+      
+      // Adicionar consultor (se não for o escalador)
+      if (ticketData.consultorId && ticketData.consultorId !== escalatorId) {
+        recipients.push(ticketData.consultorId);
+      }
+      
+      // Adicionar produtor (se não for o escalador)
+      if (ticketData.produtorId && ticketData.produtorId !== escalatorId) {
+        recipients.push(ticketData.produtorId);
+      }
+      
       // Buscar operadores da área de destino
-      const areaOperators = await this.getUsersByArea(ticketData.area);
-      
-      // Filtrar apenas operadores (não incluir o criador)
-      const operatorIds = areaOperators
-        .filter(user => user.funcao === 'operador' && user.id !== createdByUserId)
-        .map(user => user.id);
-
-      if (operatorIds.length > 0) {
-        await this.createNotification(
-          operatorIds,
-          'ticket_created',
-          'Novo Chamado Aberto',
-          `Novo chamado #${ticketData.numero || ticketId.slice(-6)} na área ${ticketData.area}`,
-          {
-            ticketId,
-            area: ticketData.area,
-            priority: ticketData.prioridade,
-            type: ticketData.tipo
+      if (escalationData.areaDestino) {
+        const areaUsers = await this.firestoreService.getUsersByArea(escalationData.areaDestino);
+        areaUsers.forEach(user => {
+          if (user.id !== escalatorId && !recipients.includes(user.id)) {
+            recipients.push(user.id);
           }
-        );
-      }
-
-      // Registrar atividade
-      await this.registerActivity(ticketId, 'ticket_created', createdByUserId, {
-        area: ticketData.area,
-        type: ticketData.tipo
-      });
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar criação de chamado:', error);
-    }
-  }
-
-  /**
-   * MENSAGENS NO CHAT
-   * Notifica todos os envolvidos (consultor, produtor e operadores da área)
-   */
-  async notifyNewMessage(ticketId, ticketData, messageData, sentByUserId) {
-    try {
-      const notifyUserIds = new Set();
-
-      // Adicionar consultor do projeto (se existir e não for quem enviou)
-      if (ticketData.consultorId && ticketData.consultorId !== sentByUserId) {
-        notifyUserIds.add(ticketData.consultorId);
-      }
-
-      // Adicionar produtor do projeto (se existir e não for quem enviou)
-      if (ticketData.produtorId && ticketData.produtorId !== sentByUserId) {
-        notifyUserIds.add(ticketData.produtorId);
-      }
-
-      // Adicionar operadores da área atual do chamado
-      const areaOperators = await this.getUsersByArea(ticketData.areaAtual || ticketData.area);
-      areaOperators
-        .filter(user => user.funcao === 'operador' && user.id !== sentByUserId)
-        .forEach(user => notifyUserIds.add(user.id));
-
-      if (notifyUserIds.size > 0) {
-        await this.createNotification(
-          Array.from(notifyUserIds),
-          'new_message',
-          'Nova Mensagem no Chat',
-          `Nova mensagem no chamado #${ticketData.numero || ticketId.slice(-6)}`,
-          {
-            ticketId,
-            messagePreview: messageData.texto?.substring(0, 50) + '...',
-            senderName: messageData.autorNome
-          }
-        );
-      }
-
-      // Registrar atividade
-      await this.registerActivity(ticketId, 'message', sentByUserId, {
-        messageText: messageData.texto?.substring(0, 100)
-      });
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar nova mensagem:', error);
-    }
-  }
-
-  /**
-   * ESCALAÇÃO DE CHAMADO
-   * Notifica consultor, produtor e operadores da área de destino
-   */
-  async notifyTicketEscalated(ticketId, ticketData, escalationData, escalatedByUserId) {
-    try {
-      const notifyUserIds = new Set();
-
-      // Adicionar consultor do projeto (se existir e não for quem escalou)
-      if (ticketData.consultorId && ticketData.consultorId !== escalatedByUserId) {
-        notifyUserIds.add(ticketData.consultorId);
-      }
-
-      // Adicionar produtor do projeto (se existir e não for quem escalou)
-      if (ticketData.produtorId && ticketData.produtorId !== escalatedByUserId) {
-        notifyUserIds.add(ticketData.produtorId);
-      }
-
-      // Adicionar operadores da área de destino
-      const destinationOperators = await this.getUsersByArea(escalationData.areaDestino);
-      destinationOperators
-        .filter(user => user.funcao === 'operador' && user.id !== escalatedByUserId)
-        .forEach(user => notifyUserIds.add(user.id));
-
-      if (notifyUserIds.size > 0) {
-        await this.createNotification(
-          Array.from(notifyUserIds),
-          'ticket_escalated',
-          'Chamado Escalado',
-          `Chamado #${ticketData.numero || ticketId.slice(-6)} foi escalado para ${escalationData.areaDestino}`,
-          {
-            ticketId,
-            fromArea: escalationData.areaOrigem,
-            toArea: escalationData.areaDestino,
-            reason: escalationData.motivo
-          }
-        );
-      }
-
-      // Registrar atividade
-      await this.registerActivity(ticketId, 'escalation', escalatedByUserId, {
-        fromArea: escalationData.areaOrigem,
-        toArea: escalationData.areaDestino,
-        reason: escalationData.motivo
-      });
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar escalação:', error);
-    }
-  }
-
-  /**
-   * ESCALAÇÃO PARA GERENTE
-   * Notifica consultor, produtor e gerente específico
-   */
-  async notifyEscalatedToManager(ticketId, ticketData, escalationData, escalatedByUserId) {
-    try {
-      const notifyUserIds = new Set();
-
-      // Adicionar consultor do projeto (se existir e não for quem escalou)
-      if (ticketData.consultorId && ticketData.consultorId !== escalatedByUserId) {
-        notifyUserIds.add(ticketData.consultorId);
-      }
-
-      // Adicionar produtor do projeto (se existir e não for quem escalou)
-      if (ticketData.produtorId && ticketData.produtorId !== escalatedByUserId) {
-        notifyUserIds.add(ticketData.produtorId);
-      }
-
-      // Adicionar gerente específico (se informado) ou todos os gerentes
-      if (escalationData.gerenteId) {
-        notifyUserIds.add(escalationData.gerenteId);
-      } else {
-        // Se não especificou gerente, notificar todos
-        const managers = await this.getManagers();
-        managers
-          .filter(manager => manager.id !== escalatedByUserId)
-          .forEach(manager => notifyUserIds.add(manager.id));
-      }
-
-      if (notifyUserIds.size > 0) {
-        await this.createNotification(
-          Array.from(notifyUserIds),
-          'escalated_to_manager',
-          'Chamado Escalado para Gerência',
-          `Chamado #${ticketData.numero || ticketId.slice(-6)} foi escalado para a gerência`,
-          {
-            ticketId,
-            reason: escalationData.motivo,
-            managerName: escalationData.gerenteNome
-          }
-        );
-      }
-
-      // Registrar atividade
-      await this.registerActivity(ticketId, 'escalated_to_manager', escalatedByUserId, {
-        reason: escalationData.motivo,
-        managerId: escalationData.gerenteId,
-        managerName: escalationData.gerenteNome
-      });
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar escalação para gerente:', error);
-    }
-  }
-
-  /**
-   * ALTERAÇÃO DE STATUS
-   * Notifica consultor, produtor e operadores das áreas atual e de destino
-   */
-  async notifyStatusChanged(ticketId, ticketData, statusData, changedByUserId) {
-    try {
-      const notifyUserIds = new Set();
-
-      // Adicionar consultor do projeto (se existir e não for quem alterou)
-      if (ticketData.consultorId && ticketData.consultorId !== changedByUserId) {
-        notifyUserIds.add(ticketData.consultorId);
-      }
-
-      // Adicionar produtor do projeto (se existir e não for quem alterou)
-      if (ticketData.produtorId && ticketData.produtorId !== changedByUserId) {
-        notifyUserIds.add(ticketData.produtorId);
-      }
-
-      // Adicionar operadores da área atual
-      if (ticketData.areaAtual || ticketData.area) {
-        const currentAreaOperators = await this.getUsersByArea(ticketData.areaAtual || ticketData.area);
-        currentAreaOperators
-          .filter(user => user.funcao === 'operador' && user.id !== changedByUserId)
-          .forEach(user => notifyUserIds.add(user.id));
-      }
-
-      // Se mudou de área, adicionar operadores da área de destino
-      if (statusData.novaArea && statusData.novaArea !== (ticketData.areaAtual || ticketData.area)) {
-        const destinationOperators = await this.getUsersByArea(statusData.novaArea);
-        destinationOperators
-          .filter(user => user.funcao === 'operador' && user.id !== changedByUserId)
-          .forEach(user => notifyUserIds.add(user.id));
-      }
-
-      if (notifyUserIds.size > 0) {
-        await this.createNotification(
-          Array.from(notifyUserIds),
-          'status_changed',
-          'Status do Chamado Alterado',
-          `Status do chamado #${ticketData.numero || ticketId.slice(-6)} alterado para: ${statusData.novoStatus}`,
-          {
-            ticketId,
-            oldStatus: statusData.statusAnterior,
-            newStatus: statusData.novoStatus,
-            area: statusData.novaArea || ticketData.areaAtual || ticketData.area
-          }
-        );
-      }
-
-      // Registrar atividade
-      await this.registerActivity(ticketId, 'status_change', changedByUserId, {
-        oldStatus: statusData.statusAnterior,
-        newStatus: statusData.novoStatus,
-        area: statusData.novaArea
-      });
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar mudança de status:', error);
-    }
-  }
-
-  /**
-   * NOVO EVENTO CADASTRADO
-   * Notifica todos os usuários do sistema
-   */
-  async notifyNewEvent(eventData, createdByUserId) {
-    try {
-      // Buscar todos os usuários
-      const allUsers = await this.getAllUsers();
-      
-      // Filtrar para não notificar quem criou o evento
-      const userIds = allUsers
-        .filter(user => user.id !== createdByUserId)
-        .map(user => user.id);
-
-      if (userIds.length > 0) {
-        await this.createNotification(
-          userIds,
-          'new_event',
-          'Novo Evento Cadastrado',
-          `Novo evento: ${eventData.nome} - ${eventData.local}`,
-          {
-            eventId: eventData.id,
-            eventName: eventData.nome,
-            eventLocation: eventData.local,
-            eventDate: eventData.dataInicio
-          }
-        );
-      }
-
-      console.log('🔔 Notificação de novo evento enviada para todos os usuários');
-
-    } catch (error) {
-      console.error('❌ Erro ao notificar novo evento:', error);
-    }
-  }
-
-  /**
-   * Marca uma notificação como lida
-   * @param {string} notificationId - ID da notificação
-   */
-  async markNotificationAsRead(notificationId) {
-    try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, {
-        read: true,
-        readAt: serverTimestamp()
-      });
-    } catch (error) {
-      console.error('❌ Erro ao marcar notificação como lida:', error);
-    }
-  }
-
-  /**
-   * Obtém notificações não lidas de um usuário
-   * @param {string} userId - ID do usuário
-   * @returns {Promise<Array>} Lista de notificações não lidas
-   */
-  async getUnreadNotifications(userId) {
-    try {
-      const notificationsQuery = query(
-        collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('read', '==', false),
-        orderBy('timestamp', 'desc')
-      );
-
-      const snapshot = await getDocs(notificationsQuery);
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('❌ Erro ao buscar notificações não lidas:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Escuta notificações em tempo real para um usuário
-   * @param {string} userId - ID do usuário
-   * @param {Function} callback - Função chamada quando há mudanças
-   */
-  subscribeToUserNotifications(userId, callback) {
-    const listenerId = `notifications_${userId}`;
-    
-    // Cancelar listener anterior se existir
-    if (this.listeners.has(listenerId)) {
-      this.listeners.get(listenerId)();
-    }
-
-    const notificationsQuery = query(
-      collection(db, 'notifications'),
-      where('userId', '==', userId),
-      where('read', '==', false),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
-      const notifications = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      callback(notifications);
-    });
-
-    this.listeners.set(listenerId, unsubscribe);
-    return unsubscribe;
-  }
-
-  // Métodos existentes mantidos para compatibilidade
-  async markAsViewed(ticketId, userId) {
-    try {
-      const viewRef = doc(db, 'ticket_views', `${ticketId}_${userId}`);
-      
-      await setDoc(viewRef, {
-        ticketId,
-        userId,
-        lastViewed: serverTimestamp(),
-        viewedAt: new Date()
-      }, { merge: true });
-
-      console.log('👁️ Chamado marcado como visualizado:', { ticketId, userId });
-    } catch (error) {
-      console.error('❌ Erro ao marcar como visualizado:', error);
-    }
-  }
-
-  async getUnreadCount(ticketId, userId) {
-    try {
-      const viewRef = doc(db, 'ticket_views', `${ticketId}_${userId}`);
-      const viewDoc = await getDoc(viewRef);
-      
-      let lastViewed = null;
-      if (viewDoc.exists()) {
-        lastViewed = viewDoc.data().lastViewed;
-      }
-
-      let activitiesQuery = query(
-        collection(db, 'ticket_activities'),
-        where('ticketId', '==', ticketId),
-        orderBy('timestamp', 'desc')
-      );
-
-      if (lastViewed) {
-        activitiesQuery = query(
-          collection(db, 'ticket_activities'),
-          where('ticketId', '==', ticketId),
-          where('timestamp', '>', lastViewed),
-          orderBy('timestamp', 'desc')
-        );
-      }
-
-      return new Promise((resolve) => {
-        const unsubscribe = onSnapshot(activitiesQuery, (snapshot) => {
-          const unreadActivities = snapshot.docs.filter(doc => {
-            const activity = doc.data();
-            return activity.userId !== userId;
-          });
-
-          resolve(unreadActivities.length);
-          unsubscribe();
         });
-      });
+      }
 
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'ticket_escalated',
+          titulo: `Chamado escalado para ${escalationData.areaDestino}`,
+          mensagem: `Chamado #${ticketId.slice(-6)} foi escalado: ${escalationData.motivo}`,
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+          prioridade: 'alta'
+        });
+        
+        console.log(`✅ Notificação de escalação enviada para ${recipients.length} usuários`);
+      }
     } catch (error) {
-      console.error('❌ Erro ao obter contagem não lida:', error);
-      return 0;
+      console.error('❌ Erro ao enviar notificação de escalação:', error);
     }
   }
 
-  async getUnreadCounts(ticketIds, userId) {
+  /**
+   * 4. NOTIFICAÇÃO DE ESCALAÇÃO PARA GERENTE
+   */
+  async notifyManagerEscalation(ticketId, ticketData, escalationData, escalatorId) {
     try {
-      const counts = {};
+      console.log('🔔 Enviando notificação de escalação para gerente...');
       
-      const promises = ticketIds.map(async (ticketId) => {
-        const count = await this.getUnreadCount(ticketId, userId);
-        counts[ticketId] = count;
-      });
+      const recipients = [];
+      
+      // Adicionar consultor (se não for o escalador)
+      if (ticketData.consultorId && ticketData.consultorId !== escalatorId) {
+        recipients.push(ticketData.consultorId);
+      }
+      
+      // Adicionar produtor (se não for o escalador)
+      if (ticketData.produtorId && ticketData.produtorId !== escalatorId) {
+        recipients.push(ticketData.produtorId);
+      }
+      
+      // Adicionar gerente específico
+      if (escalationData.gerenteId && !recipients.includes(escalationData.gerenteId)) {
+        recipients.push(escalationData.gerenteId);
+      }
 
-      await Promise.all(promises);
-      return counts;
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'escalated_to_manager',
+          titulo: `Chamado escalado para gerência`,
+          mensagem: `Chamado #${ticketId.slice(-6)} escalado para ${escalationData.gerenteNome}: ${escalationData.motivo}`,
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+          prioridade: 'urgente'
+        });
+        
+        console.log(`✅ Notificação de escalação gerencial enviada para ${recipients.length} usuários`);
+      }
     } catch (error) {
-      console.error('❌ Erro ao obter contagens:', error);
-      return {};
+      console.error('❌ Erro ao enviar notificação de escalação gerencial:', error);
     }
   }
 
-  subscribeToTicketUpdates(ticketId, userId, callback) {
-    const listenerId = `${ticketId}_${userId}`;
-    
-    if (this.listeners.has(listenerId)) {
-      this.listeners.get(listenerId)();
+  /**
+   * 5. NOTIFICAÇÃO DE MUDANÇA DE STATUS
+   */
+  async notifyStatusChange(ticketId, ticketData, statusData, changerId) {
+    try {
+      console.log('🔔 Enviando notificação de mudança de status...');
+      
+      const recipients = [];
+      
+      // Adicionar consultor (se não for quem mudou)
+      if (ticketData.consultorId && ticketData.consultorId !== changerId) {
+        recipients.push(ticketData.consultorId);
+      }
+      
+      // Adicionar produtor (se não for quem mudou)
+      if (ticketData.produtorId && ticketData.produtorId !== changerId) {
+        recipients.push(ticketData.produtorId);
+      }
+      
+      // Buscar operadores da área atual
+      if (ticketData.areaAtual && ticketData.areaAtual !== 'produtor') {
+        const areaUsers = await this.firestoreService.getUsersByArea(ticketData.areaAtual);
+        areaUsers.forEach(user => {
+          if (user.id !== changerId && !recipients.includes(user.id)) {
+            recipients.push(user.id);
+          }
+        });
+      }
+      
+      // Se mudou para nova área, notificar operadores da nova área
+      if (statusData.novaArea && statusData.novaArea !== ticketData.areaAtual) {
+        const newAreaUsers = await this.firestoreService.getUsersByArea(statusData.novaArea);
+        newAreaUsers.forEach(user => {
+          if (user.id !== changerId && !recipients.includes(user.id)) {
+            recipients.push(user.id);
+          }
+        });
+      }
+
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'status_changed',
+          titulo: `Status alterado: ${statusData.novoStatus}`,
+          mensagem: `Chamado #${ticketId.slice(-6)} teve status alterado para "${statusData.novoStatus}"`,
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+          prioridade: 'media'
+        });
+        
+        console.log(`✅ Notificação de mudança de status enviada para ${recipients.length} usuários`);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação de mudança de status:', error);
     }
-
-    const activitiesQuery = query(
-      collection(db, 'ticket_activities'),
-      where('ticketId', '==', ticketId),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(activitiesQuery, async (snapshot) => {
-      const count = await this.getUnreadCount(ticketId, userId);
-      callback(count);
-    });
-
-    this.listeners.set(listenerId, unsubscribe);
-    return unsubscribe;
   }
 
-  subscribeToMultipleTickets(ticketIds, userId, callback) {
-    const listenerId = `multiple_${userId}`;
-    
-    if (this.listeners.has(listenerId)) {
-      this.listeners.get(listenerId)();
-    }
-
-    const unsubscribes = ticketIds.map(ticketId => {
-      return this.subscribeToTicketUpdates(ticketId, userId, (count) => {
-        this.getUnreadCounts(ticketIds, userId).then(callback);
+  /**
+   * 6. NOTIFICAÇÃO DE NOVO EVENTO
+   */
+  async notifyNewEvent(eventId, eventData, creatorId) {
+    try {
+      console.log('🔔 Enviando notificação de novo evento...');
+      
+      // Buscar todos os usuários do sistema
+      const allUsers = await this.firestoreService.getUsersByRole('consultor');
+      const producers = await this.firestoreService.getUsersByRole('produtor');
+      const operators = await this.firestoreService.getUsersByRole('operador');
+      const managers = await this.firestoreService.getUsersByRole('gerente');
+      
+      const recipients = [];
+      
+      // Adicionar todos os usuários (exceto o criador)
+      [...allUsers, ...producers, ...operators, ...managers].forEach(user => {
+        if (user.id !== creatorId && !recipients.includes(user.id)) {
+          recipients.push(user.id);
+        }
       });
-    });
 
-    const unsubscribeAll = () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
-
-    this.listeners.set(listenerId, unsubscribeAll);
-    return unsubscribeAll;
+      // Enviar notificações
+      if (recipients.length > 0) {
+        await this.firestoreService.sendNotificationToUsers(recipients, {
+          tipo: 'new_event',
+          titulo: `Novo evento cadastrado: ${eventData.nome}`,
+          mensagem: `Evento "${eventData.nome}" foi cadastrado no pavilhão ${eventData.pavilhao}`,
+          link: `/events`,
+          eventId: eventId,
+          prioridade: 'media'
+        });
+        
+        console.log(`✅ Notificação de novo evento enviada para ${recipients.length} usuários`);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação de novo evento:', error);
+    }
   }
 
-  unsubscribeAll() {
-    this.listeners.forEach(unsubscribe => unsubscribe());
-    this.listeners.clear();
+  /**
+   * Métodos auxiliares para acessar o serviço Firestore
+   */
+  async getUserNotifications(userId) {
+    return await this.firestoreService.getUserNotifications(userId);
   }
 
-  // Métodos de conveniência para registrar atividades específicas
-  async registerStatusChange(ticketId, userId, oldStatus, newStatus) {
-    await this.registerActivity(ticketId, 'status_change', userId, {
-      oldStatus,
-      newStatus
-    });
+  async markAsRead(userId, notificationId) {
+    return await this.firestoreService.markAsRead(userId, notificationId);
   }
 
-  async registerMessage(ticketId, userId, messageText) {
-    await this.registerActivity(ticketId, 'message', userId, {
-      messageText: messageText.substring(0, 100)
-    });
+  async markAsUnread(userId, notificationId) {
+    return await this.firestoreService.markAsUnread(userId, notificationId);
   }
 
-  async registerEscalation(ticketId, userId, fromArea, toArea, reason) {
-    await this.registerActivity(ticketId, 'escalation', userId, {
-      fromArea,
-      toArea,
-      reason
-    });
+  async markAllAsRead(userId) {
+    return await this.firestoreService.markAllAsRead(userId);
   }
 
-  async registerOperatorAssignment(ticketId, userId, operatorId, operatorName) {
-    await this.registerActivity(ticketId, 'operator_assignment', userId, {
-      operatorId,
-      operatorName
-    });
+  async deleteNotification(userId, notificationId) {
+    return await this.firestoreService.deleteNotification(userId, notificationId);
+  }
+
+  subscribeToNotifications(userId, callback) {
+    return this.firestoreService.subscribeToNotifications(userId, callback);
+  }
+
+  unsubscribeFromNotifications(userId) {
+    return this.firestoreService.unsubscribeFromNotifications(userId);
   }
 }
 
-// Instância singleton
+// Criar instância única do serviço
 const notificationService = new NotificationService();
-
 export default notificationService;
 
