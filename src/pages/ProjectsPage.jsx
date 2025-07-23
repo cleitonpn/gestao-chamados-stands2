@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
+// ✅ ÍCONE ADICIONADO PARA O BOTÃO
+import { ArrowLeft } from 'lucide-react';
 
 // Componente Card Simplificado
 const ProjectCard = ({ project, onArchive, userRole }) => {
@@ -347,6 +349,16 @@ const ProjectsPage = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      
+      {/* ✅ BOTÃO ADICIONADO AQUI */}
+      <button
+        onClick={() => navigate('/dashboard')}
+        className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        Voltar ao Dashboard
+      </button>
+
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -457,4 +469,3 @@ const ProjectsPage = () => {
 };
 
 export default ProjectsPage;
-
