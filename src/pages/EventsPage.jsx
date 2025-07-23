@@ -57,7 +57,8 @@ const EventsPage = () => {
   const [formLoading, setFormLoading] = useState(false);
 
   useEffect(() => {
-    if (userProfile?.papel === 'administrador') {
+    // 🔧 CORREÇÃO: Verificar tanto 'funcao' quanto 'papel' para administrador
+    if (userProfile?.funcao === 'administrador' || userProfile?.papel === 'administrador') {
       loadEvents();
       loadStats();
     }
@@ -308,14 +309,18 @@ const EventsPage = () => {
     return { label: 'Futuro', color: 'bg-yellow-100 text-yellow-800' };
   };
 
-  // Verificar se usuário é administrador
-  if (userProfile?.papel !== 'administrador') {
+  // 🔧 CORREÇÃO: Verificar se usuário é administrador (funcao OU papel)
+  if (userProfile?.funcao !== 'administrador' && userProfile?.papel !== 'administrador') {
     return (
       <div className="container mx-auto px-4 py-8">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             Acesso negado. Esta página é restrita a administradores.
+            <br />
+            <small className="text-gray-500 mt-2 block">
+              Debug: funcao="{userProfile?.funcao}", papel="{userProfile?.papel}"
+            </small>
           </AlertDescription>
         </Alert>
       </div>
