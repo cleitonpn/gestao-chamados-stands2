@@ -5,41 +5,18 @@ import { ticketService, TICKET_STATUS } from '../services/ticketService';
 import { projectService } from '../services/projectService';
 import { userService, AREAS } from '../services/userService';
 import { messageService } from '../services/messageService';
-// ✅ REMOVIDA a importação do serviço de baixo nível
-// import { firestoreNotificationService } from '../services/firestoreNotificationService';
-// ✅ ESTA É A ÚNICA IMPORTAÇÃO NECESSÁRIA
 import notificationService from '../services/notificationService';
 import ImageUpload from '../components/ImageUpload';
 import Header from '../components/Header';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+// ... (todos os outros imports de UI e ícones)
 import { 
   ArrowLeft, 
   Clock, 
-  User, 
-  MessageSquare, 
-  Send, 
-  CheckCircle, 
-  XCircle,
-  AlertCircle,
-  Camera,
-  Calendar,
-  MapPin,
-  Loader2,
-  ExternalLink,
-  Upload,
-  X,
-  Image as ImageIcon,
-  Settings,
+  User,
+  // etc...
   AtSign
 } from 'lucide-react';
+
 
 const TicketDetailPage = () => {
   const { ticketId } = useParams();
@@ -53,50 +30,94 @@ const TicketDetailPage = () => {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
   
-  // ... (O resto do seu componente, estados e funções, pode permanecer exatamente o mesmo)
-  // ... A chamada para `markNotificationsAsRead` agora funcionará porque o `notificationService` foi corrigido.
+  // ... (O resto dos seus 'useState' permanecem os mesmos)
 
+  // Função para carregar dados do chamado
   const loadTicketData = async () => {
-    // (código original)
+    try {
+      setLoading(true);
+      setError(null);
+      const ticketData = await ticketService.getTicketById(ticketId);
+      if (!ticketData) {
+        throw new Error('Chamado não encontrado');
+      }
+      setTicket(ticketData);
+
+      if (ticketData.projetoId) {
+        const projectData = await projectService.getProjectById(ticketData.projetoId);
+        setProject(projectData);
+      }
+
+      const messagesData = await messageService.getMessagesByTicket(ticketId);
+      setMessages(messagesData || []);
+
+    } catch (err) {
+      console.error('Erro ao carregar dados do chamado:', err);
+      setError(err.message || 'Erro ao carregar chamado');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // Carregar dados na inicialização
   useEffect(() => {
-    if (ticketId && user) {
-      loadTicketData();
-      markNotificationsAsRead();
-    }
+    const-init-data = async () => {
+      if (ticketId && user) {
+        try {
+          await loadTicketData();
+          await markNotificationsAsRead();
+        } catch (e) {
+          console.error("Erro na inicialização da página de detalhes:", e);
+          // Mesmo com erro na notificação, a página tentou carregar os dados
+        }
+      }
+    };
+    initData();
   }, [ticketId, user]);
 
+
+  // Função para marcar notificações como lidas
   const markNotificationsAsRead = async () => {
     if (!user?.uid || !ticketId) return;
-    
     try {
-      // Esta chamada agora vai encontrar a função correta no serviço corrigido
       await notificationService.markTicketNotificationsAsRead(user.uid, ticketId);
     } catch (error) {
-      console.error('❌ Erro ao marcar notificações como lidas:', error);
+      console.error('❌ Erro ao marcar notificações como lidas (não fatal):', error);
     }
   };
-
-  // ... (todas as outras funções permanecem iguais)
   
+  // ... (O resto do seu código, funções de handle, etc., permanece o mesmo)
+  
+  // Renderização de loading
   if (loading) {
-    // (código original)
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Carregando detalhes do chamado...</p>
+        </div>
+      </div>
+    );
   }
 
+  // Renderização de erro
   if (error) {
-    // (código original)
+     return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro ao carregar chamado</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => navigate('/dashboard')} variant="outline">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar ao Dashboard
+          </Button>
+        </div>
+      </div>
+    );
   }
 
-  if (!ticket) {
-    // (código original)
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-       {/* ... (código JSX original) ... */}
-    </div>
-  );
+  // ... (o resto do seu JSX permanece o mesmo)
 };
 
 export default TicketDetailPage;
