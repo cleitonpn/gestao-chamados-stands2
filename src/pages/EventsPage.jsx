@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { eventService } from '../services/eventService';
+// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
+import notificationService from '../services/notificationService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +32,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 const EventsPage = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, user } = useAuth();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,8 +57,7 @@ const EventsPage = () => {
   const [formLoading, setFormLoading] = useState(false);
 
   useEffect(() => {
-    // CORREÇÃO: Verificar funcao em vez de papel
-    if (userProfile?.funcao === 'administrador') {
+    if (userProfile?.papel === 'administrador') {
       loadEvents();
       loadStats();
     }
@@ -217,10 +218,26 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
+      let eventId;
       if (editingEvent) {
         await eventService.updateEvent(editingEvent.id, eventData);
+        eventId = editingEvent.id;
       } else {
-        await eventService.createEvent(eventData);
+        const newEvent = await eventService.createEvent(eventData);
+        eventId = newEvent.id;
+
+        // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
+        try {
+          console.log('🔔 Enviando notificação de novo evento cadastrado...');
+          await notificationService.notifyNewEvent(eventId, {
+            ...eventData,
+            id: eventId
+          }, user.uid);
+          console.log('✅ Notificação de novo evento enviada com sucesso');
+        } catch (notificationError) {
+          console.error('❌ Erro ao enviar notificação de novo evento:', notificationError);
+          // Não bloquear o fluxo se a notificação falhar
+        }
       }
 
       await loadEvents();
@@ -291,8 +308,8 @@ const EventsPage = () => {
     return { label: 'Futuro', color: 'bg-yellow-100 text-yellow-800' };
   };
 
-  // CORREÇÃO: Verificar funcao em vez de papel
-  if (userProfile?.funcao !== 'administrador') {
+  // Verificar se usuário é administrador
+  if (userProfile?.papel !== 'administrador') {
     return (
       <div className="container mx-auto px-4 py-8">
         <Alert variant="destructive">
