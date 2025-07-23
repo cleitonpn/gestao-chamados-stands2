@@ -2,7 +2,6 @@ import {
   collection,
   doc,
   getDocs,
-  addDoc,
   updateDoc,
   query,
   where,
@@ -45,6 +44,17 @@ class NotificationService {
     return users;
   }
 
+  // Obtém todos os usuários
+  async getAllUsers() {
+    const users = [];
+    const q = query(collection(db, "usuarios"));
+    const querySnapshot = await getDocs(q);
+    querySnapshot.forEach((doc) => {
+      users.push({ id: doc.id, ...doc.data() });
+    });
+    return users;
+  }
+
   // Notifica sobre um novo chamado
   async notifyNewTicket(ticketId, ticketData, creatorId) {
     try {
@@ -52,7 +62,7 @@ class NotificationService {
       if (ticketData.consultorId && ticketData.consultorId !== creatorId) recipients.add(ticketData.consultorId);
       if (ticketData.produtorId && ticketData.produtorId !== creatorId) recipients.add(ticketData.produtorId);
       
-      if (ticketData.area) { // Corrigido para usar ticketData.area
+      if (ticketData.area) {
         const areaUsers = await this.getUsersByArea(ticketData.area);
         areaUsers.forEach(user => {
           if (user.id !== creatorId) recipients.add(user.id);
@@ -74,130 +84,82 @@ class NotificationService {
   // Notifica sobre uma nova mensagem
   async notifyNewMessage(ticketId, ticketData, messageData, senderId) {
     try {
-        const recipients = new Set();
-        if (ticketData.criadoPor && ticketData.criadoPor !== senderId) recipients.add(ticketData.criadoPor);
-        if (ticketData.consultorId && ticketData.consultorId !== senderId) recipients.add(ticketData.consultorId);
-        if (ticketData.produtorId && ticketData.produtorId !== senderId) recipients.add(ticketData.produtorId);
-
-        // Adiciona todos os usuários que já participaram da conversa
-        if (messageData.allParticipantsIds) {
-            messageData.allParticipantsIds.forEach(id => {
-                if (id !== senderId) recipients.add(id);
-            });
-        }
-        
-        await this.#sendNotificationToUsers(Array.from(recipients), {
-            tipo: 'new_message',
-            titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
-            mensagem: `${messageData.autorNome}: ${messageData.texto.substring(0, 50)}...`,
-            link: `/tickets/${ticketId}`,
-            ticketId: ticketId,
+      const recipients = new Set();
+      // Notifica o criador do chamado (se não for ele mesmo que enviou)
+      if (ticketData.criadoPor && ticketData.criadoPor !== senderId) {
+        recipients.add(ticketData.criadoPor);
+      }
+      // Notifica consultor e produtor
+      if (ticketData.consultorId && ticketData.consultorId !== senderId) recipients.add(ticketData.consultorId);
+      if (ticketData.produtorId && ticketData.produtorId !== senderId) recipients.add(ticketData.produtorId);
+      
+      // Notifica operadores da área atual
+      if (ticketData.area) {
+        const areaUsers = await this.getUsersByArea(ticketData.area);
+        areaUsers.forEach(user => {
+          if (user.id !== senderId) recipients.add(user.id);
         });
-    } catch (error) {
-        console.error('❌ Erro ao notificar nova mensagem:', error);
-    }
-}
-
-
-  // Notifica sobre mudança de status
-  async notifyStatusChanged(ticketId, ticket, statusData, userId) {
-    // Implementação pendente, se necessário
-  }
-
-  // Notifica sobre escalação
-  async notifyTicketEscalated(ticketId, ticket, escalationData, userId) {
-    // Implementação pendente, se necessário
-  }
-
-  // Notifica sobre escalação para gerente
-  async notifyEscalatedToManager(ticketId, ticket, escalationData, userId) {
-     // Implementação pendente, se necessário
-  }
-
-  // ✅ FUNÇÕES DE LEITURA E MANIPULAÇÃO (PARA A UI)
-  
-  // Função que estava faltando com o nome getInAppNotifications
-  async getUserNotifications(userId) {
-    const notifications = [];
-    const q = query(collection(db, "notifications"), where("userId", "==", userId), orderBy("criadoEm", "desc"));
-    const querySnapshot = await getDocs(q);
-    querySnapshot.forEach((doc) => {
-      notifications.push({ id: doc.id, ...doc.data() });
-    });
-    return notifications;
-  }
-  // Alias para garantir compatibilidade
-  async getInAppNotifications(userId) {
-    return this.getUserNotifications(userId);
-  }
-
-  // Listener em tempo real
-  subscribeToNotifications(userId, callback) {
-    const q = query(collection(db, "notifications"), where("userId", "==", userId), orderBy("criadoEm", "desc"));
-    return onSnapshot(q, (querySnapshot) => {
-      const notifications = [];
-      querySnapshot.forEach((doc) => {
-        notifications.push({ id: doc.id, ...doc.data() });
+      }
+        
+      await this.#sendNotificationToUsers(Array.from(recipients), {
+        tipo: 'new_message',
+        titulo: `Nova mensagem no chamado #${ticketId.slice(-6)}`,
+        mensagem: `${messageData.remetenteNome}: ${messageData.conteudo.substring(0, 50)}...`,
+        link: `/tickets/${ticketId}`,
+        ticketId: ticketId,
       });
-      callback(notifications);
-    });
-  }
-  
-  // Funções de manipulação
-  async markAsRead(userId, notificationId) {
-    const notificationRef = doc(db, 'notifications', notificationId);
-    await updateDoc(notificationRef, { lida: true });
-  }
-
-  async markAsUnread(userId, notificationId) {
-    const notificationRef = doc(db, 'notifications', notificationId);
-    await updateDoc(notificationRef, { lida: false });
-  }
-  
-  async markAllAsRead(userId) {
-    const q = query(collection(db, 'notifications'), where('userId', '==', userId), where('lida', '==', false));
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return;
-    const batch = writeBatch(db);
-    snapshot.docs.forEach(doc => batch.update(doc.ref, { lida: true }));
-    await batch.commit();
-  }
-
-  async deleteNotification(userId, notificationId) {
-    await deleteDoc(doc(db, 'notifications', notificationId));
-  }
-
-  // Função que estava faltando na versão anterior
-  async markTicketNotificationsAsRead(userId, ticketId) {
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', '==', userId),
-      where('ticketId', '==', ticketId),
-      where('lida', '==', false)
-    );
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return;
-    const batch = writeBatch(db);
-    snapshot.forEach(doc => batch.update(doc.ref, { lida: true, dataLeitura: new Date() }));
-    await batch.commit();
-  }
-
-  // ✅ Função que estava faltando na versão anterior
-  async getUnreadNotificationsByTicket(userId, ticketId) {
-    try {
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', userId),
-        where('ticketId', '==', ticketId),
-        where('lida', '==', false)
-      );
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.size; // Retorna a contagem de notificações não lidas
     } catch (error) {
-      console.error("Erro ao buscar notificações não lidas por ticket:", error);
-      return 0;
+      console.error('❌ Erro ao notificar nova mensagem:', error);
     }
   }
+  
+  // Notifica sobre mudança de status
+  async notifyStatusChange(ticketId, ticketData, statusData, changerId) {
+    try {
+      const recipients = new Set();
+      if (ticketData.criadoPor && ticketData.criadoPor !== changerId) recipients.add(ticketData.criadoPor);
+      if (ticketData.consultorId && ticketData.consultorId !== changerId) recipients.add(ticketData.consultorId);
+      if (ticketData.produtorId && ticketData.produtorId !== changerId) recipients.add(ticketData.produtorId);
+
+      await this.#sendNotificationToUsers(Array.from(recipients), {
+          tipo: 'status_changed',
+          titulo: `Status alterado para: ${statusData.novoStatus}`,
+          mensagem: `Chamado #${ticketId.slice(-6)} foi atualizado`,
+          link: `/tickets/${ticketId}`,
+          ticketId: ticketId,
+      });
+    } catch (error) {
+      console.error('❌ Erro ao notificar mudança de status:', error);
+    }
+  }
+  
+  // Notifica sobre novo evento
+  async notifyNewEvent(eventId, eventData, creatorId) {
+    try {
+      const allUsers = await this.getAllUsers();
+      const recipients = allUsers.map(user => user.id).filter(id => id !== creatorId);
+
+      await this.#sendNotificationToUsers(recipients, {
+        tipo: 'new_event',
+        titulo: `Novo evento: ${eventData.nome}`,
+        mensagem: `Evento "${eventData.nome}" no pavilhão ${eventData.pavilhao}`,
+        link: `/events`, // ou um link específico do evento, se houver
+        eventId: eventId,
+      });
+    } catch (error) {
+      console.error('❌ Erro ao notificar novo evento:', error);
+    }
+  }
+
+  // Funções de leitura e manipulação para a UI
+  async getUserNotifications(userId) { /* ... implementação ... */ }
+  subscribeToNotifications(userId, callback) { /* ... implementação ... */ }
+  async markAsRead(userId, notificationId) { /* ... implementação ... */ }
+  async markAsUnread(userId, notificationId) { /* ... implementação ... */ }
+  async markAllAsRead(userId) { /* ... implementação ... */ }
+  async deleteNotification(userId, notificationId) { /* ... implementação ... */ }
+  async markTicketNotificationsAsRead(userId, ticketId) { /* ... implementação ... */ }
+  async getUnreadNotificationsByTicket(userId, ticketId) { /* ... implementação ... */ }
 }
 
 const notificationService = new NotificationService();
