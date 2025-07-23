@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Função para verificar se o usuário está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Função para verificar se é o próprio usuário
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Função para verificar se é administrador
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.funcao == 'administrador';
+    }
+    
+    // Regras para usuários
+    match /usuarios/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+    
+    // Regras para projetos
+    match /projetos/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+    
+    // Nova regra para a coleção de chamados
+    match /chamados/{ticketId} {
+      // PERMITE LEITURA para Admins, Gerentes e Produtores
+      // Isso garante que os gerentes possam ver todos os chamados, como requerido.
+      allow read: if request.auth != null &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.funcao in ['administrador', 'gerente', 'produtor'];
+
+      // PERMITE ESCRITA (atualização) para Admins/Produtores, e para Gerentes APENAS em chamados que estão aguardando sua aprovação.
+      allow write: if request.auth != null &&
+        (
+          // Admins e Produtores podem sempre escrever.
+          get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.funcao in ['administrador', 'produtor'] ||
+
+          // Gerentes só podem escrever se o chamado estiver aguardando sua aprovação.
+          (get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.funcao == 'gerente' && resource.data.status == 'aguardando_aprovacao')
+        );
+    }
+    
+    // Regras para mensagens
+    match /mensagens/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && isOwner(resource.data.autorId);
+      allow delete: if isAdmin();
+    }
+  }
+}
+

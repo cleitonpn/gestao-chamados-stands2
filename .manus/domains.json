@@ -1,0 +1,44 @@
+{
+  "domains": [
+    {
+      "name": "sistemastands.com.br",
+      "type": "custom",
+      "primary": true,
+      "ssl": {
+        "provider": "letsencrypt",
+        "autoRenew": true,
+        "forceHttps": true
+      },
+      "dns": {
+        "configured": true,
+        "records": [
+          {
+            "type": "A",
+            "name": "@",
+            "value": "107.21.50.204"
+          },
+          {
+            "type": "A", 
+            "name": "@",
+            "value": "52.207.63.251"
+          },
+          {
+            "type": "CNAME",
+            "name": "www",
+            "value": "sistemastands.com.br"
+          }
+        ]
+      }
+    }
+  ],
+  "verification": {
+    "method": "dns",
+    "status": "verified",
+    "timestamp": "2025-07-14T13:00:00Z"
+  },
+  "project": {
+    "id": "gestao-chamados-stands",
+    "owner": "cleitonpnascimento@gmail.com"
+  }
+}
+

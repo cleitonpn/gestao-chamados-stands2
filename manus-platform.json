@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "platform": "manus",
+  "project": {
+    "name": "gestao-chamados-stands",
+    "type": "spa",
+    "framework": "react",
+    "buildCommand": "pnpm build",
+    "outputDirectory": "dist",
+    "nodeVersion": "18"
+  },
+  "routing": {
+    "type": "spa",
+    "fallback": "/index.html"
+  },
+  "domains": {
+    "custom": {
+      "primary": "sistemastands.com.br",
+      "aliases": ["www.sistemastands.com.br"],
+      "ssl": {
+        "enabled": true,
+        "provider": "letsencrypt",
+        "autoRenew": true,
+        "forceHttps": true
+      }
+    }
+  },
+  "headers": {
+    "/*": {
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Cache-Control": "public, max-age=0, must-revalidate"
+    },
+    "/assets/*": {
+      "Cache-Control": "public, max-age=31536000, immutable"
+    }
+  },
+  "environment": {
+    "VITE_APP_ENVIRONMENT": "production",
+    "VITE_APP_DOMAIN": "sistemastands.com.br"
+  }
+}
+

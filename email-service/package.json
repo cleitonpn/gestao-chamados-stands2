@@ -1,0 +1,13 @@
+{
+  "name": "email-service",
+  "version": "1.0.0",
+  "description": "Serviço de notificação por e-mail para o sistema de chamados",
+  "main": "src/main.py",
+  "scripts": {
+    "start": "python src/main.py",
+    "dev": "python src/main.py"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
+

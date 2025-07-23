@@ -1,0 +1,428 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Mobile-First Responsive Design */
+@media (max-width: 768px) {
+  /* Melhorar tamanho de touch targets */
+  button {
+    min-height: 44px !important;
+    min-width: 44px !important;
+    padding: 12px 16px !important;
+    font-size: 16px !important;
+  }
+  
+  /* Melhorar inputs para mobile */
+  input, textarea, select {
+    min-height: 44px !important;
+    font-size: 16px !important;
+    padding: 12px 16px !important;
+    border-radius: 8px !important;
+  }
+  
+  /* Prevenir zoom no iOS */
+  input[type="text"], input[type="email"], input[type="password"], 
+  input[type="number"], input[type="tel"], textarea, select {
+    font-size: 16px !important;
+  }
+  
+  /* Melhorar espaçamento */
+  .space-y-4 > * + * {
+    margin-top: 1.5rem !important;
+  }
+  
+  .space-y-6 > * + * {
+    margin-top: 2rem !important;
+  }
+  
+  /* Cards responsivos */
+  .card {
+    margin: 0.5rem !important;
+    border-radius: 12px !important;
+  }
+  
+  /* Headers responsivos */
+  h1 {
+    font-size: 1.5rem !important;
+    line-height: 1.3 !important;
+  }
+  
+  h2 {
+    font-size: 1.25rem !important;
+    line-height: 1.3 !important;
+  }
+  
+  /* Tabelas responsivas */
+  .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  
+  table {
+    min-width: 600px !important;
+  }
+  
+  /* Navegação mobile */
+  .mobile-nav {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: white !important;
+    border-top: 1px solid #e5e7eb !important;
+    padding: 8px !important;
+    z-index: 50 !important;
+  }
+  
+  /* Padding para conteúdo com nav fixa */
+  .main-content-mobile {
+    padding-bottom: 80px !important;
+  }
+  
+  /* Formulários mobile */
+  .form-mobile {
+    padding: 1rem !important;
+  }
+  
+  .form-mobile .form-group {
+    margin-bottom: 1.5rem !important;
+  }
+  
+  /* Modais mobile */
+  .modal-mobile {
+    margin: 0 !important;
+    min-height: 100vh !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Grid responsivo */
+  .grid-mobile {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+  
+  /* Chat mobile */
+  .chat-container {
+    height: calc(100vh - 200px) !important;
+  }
+  
+  .chat-messages {
+    max-height: calc(100vh - 300px) !important;
+    overflow-y: auto !important;
+  }
+  
+  /* Sidebar mobile */
+  .sidebar-mobile {
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s ease !important;
+  }
+  
+  .sidebar-mobile.open {
+    transform: translateX(0) !important;
+  }
+  
+  /* Overlay para sidebar */
+  .sidebar-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    background: rgba(0, 0, 0, 0.5) !important;
+    z-index: 40 !important;
+  }
+  
+  /* Melhorar contraste e legibilidade */
+  .text-sm {
+    font-size: 0.875rem !important;
+  }
+  
+  .text-xs {
+    font-size: 0.75rem !important;
+  }
+  
+  /* Badges e tags mobile */
+  .badge-mobile {
+    padding: 4px 8px !important;
+    font-size: 0.75rem !important;
+    border-radius: 6px !important;
+  }
+  
+  /* Loading states mobile */
+  .loading-mobile {
+    padding: 2rem !important;
+    text-align: center !important;
+  }
+  
+  /* Alerts mobile */
+  .alert-mobile {
+    margin: 0.5rem !important;
+    padding: 1rem !important;
+    border-radius: 8px !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .grid-tablet {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  .sidebar-tablet {
+    width: 240px !important;
+  }
+}
+
+/* Utilities para mobile */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+  
+  .desktop-only {
+    display: none;
+  }
+  
+  .mobile-flex {
+    display: flex !important;
+  }
+  
+  .mobile-hidden {
+    display: none !important;
+  }
+  
+  .mobile-full-width {
+    width: 100% !important;
+  }
+  
+  .mobile-text-center {
+    text-align: center !important;
+  }
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Melhorar performance em mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Prevenir seleção de texto em elementos interativos */
+button, .btn, .clickable {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+
+/* Classes específicas para mobile no Dashboard */
+.mobile-card {
+  @apply transition-all duration-200;
+}
+
+@media (max-width: 768px) {
+  .mobile-card {
+    @apply mx-2 rounded-lg shadow-sm;
+  }
+  
+  .mobile-card:active {
+    @apply scale-95 shadow-md;
+  }
+  
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+  
+  /* Melhorar espaçamento em mobile */
+  .space-y-3 > * + * {
+    margin-top: 0.75rem;
+  }
+  
+  /* Tabs responsivas */
+  .tabs-list-mobile {
+    @apply w-full grid grid-cols-2 gap-1;
+  }
+  
+  /* Cards de estatísticas mobile */
+  .stats-grid-mobile {
+    @apply grid grid-cols-2 gap-3;
+  }
+  
+  /* Header mobile */
+  .header-mobile {
+    @apply sticky top-0 z-40;
+  }
+  
+  /* Menu mobile overlay */
+  .mobile-menu-overlay {
+    @apply fixed inset-0 bg-black/50 z-30;
+  }
+  
+  /* Animações suaves para mobile */
+  .mobile-transition {
+    @apply transition-all duration-300 ease-in-out;
+  }
+  
+  /* Melhorar legibilidade em telas pequenas */
+  .mobile-text {
+    @apply text-sm leading-relaxed;
+  }
+  
+  /* Botões mobile-friendly */
+  .mobile-button {
+    @apply px-4 py-3 text-base font-medium rounded-lg;
+  }
+  
+  /* Input mobile-friendly */
+  .mobile-input {
+    @apply px-4 py-3 text-base rounded-lg;
+  }
+  
+  /* Badge mobile */
+  .mobile-badge {
+    @apply px-2 py-1 text-xs rounded-md;
+  }
+}
+

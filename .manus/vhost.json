@@ -1,0 +1,44 @@
+{
+  "virtualHosts": [
+    {
+      "serverName": "sistemastands.com.br",
+      "serverAlias": "www.sistemastands.com.br",
+      "documentRoot": "/dist",
+      "directoryIndex": "index.html",
+      "errorDocument": {
+        "404": "/index.html"
+      },
+      "ssl": {
+        "enabled": true,
+        "certificateFile": "/etc/ssl/certs/sistemastands.com.br.crt",
+        "certificateKeyFile": "/etc/ssl/private/sistemastands.com.br.key",
+        "certificateChainFile": "/etc/ssl/certs/sistemastands.com.br-chain.crt"
+      },
+      "headers": {
+        "add": [
+          "X-Frame-Options DENY",
+          "X-Content-Type-Options nosniff",
+          "X-XSS-Protection \"1; mode=block\"",
+          "Referrer-Policy strict-origin-when-cross-origin"
+        ]
+      },
+      "rewrite": {
+        "engine": "on",
+        "rules": [
+          {
+            "pattern": "^(.+)/$",
+            "substitution": "$1",
+            "flags": ["R=301", "L"]
+          },
+          {
+            "pattern": "^/(.*)$",
+            "condition": "!-f",
+            "substitution": "/index.html",
+            "flags": ["L"]
+          }
+        ]
+      }
+    }
+  ]
+}
+
