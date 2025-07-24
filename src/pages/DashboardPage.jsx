@@ -46,7 +46,8 @@ import {
   ArrowUp,
   Hourglass,
   UserCheck,
-  Play
+  Play,
+  BellRing // NOVO: Ícone importado para o card de notificações
 } from 'lucide-react';
 
 const DashboardPage = () => {
@@ -86,6 +87,12 @@ const DashboardPage = () => {
         // Sem filtro, todos os chamados
         break;
       
+      // NOVO: Lógica de filtro para o card de notificações
+      case 'com_notificacao':
+        // Filtra chamados que possuem uma entrada no objeto ticketNotifications
+        filteredTickets = filteredTickets.filter(ticket => ticketNotifications[ticket.id]);
+        break;
+
       case 'sem_tratativa':
         // Chamados com status 'aberto'
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'aberto');
@@ -168,6 +175,9 @@ const DashboardPage = () => {
   const getTicketCounts = () => {
     const counts = {
       todos: tickets.length,
+      // NOVO: Contagem de chamados com notificações não lidas.
+      // A contagem é o número de chaves no objeto ticketNotifications.
+      com_notificacao: Object.keys(ticketNotifications).length,
       sem_tratativa: tickets.filter(t => t.status === 'aberto').length,
       em_tratativa: tickets.filter(t => t.status === 'em_tratativa').length,
       em_execucao: tickets.filter(t => t.status === 'em_execucao').length,
@@ -192,6 +202,8 @@ const DashboardPage = () => {
   // NOVO: Configuração dos cards de filtro
   const filterCards = [
     { id: 'todos', title: 'Todos', icon: FileText, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
+    // NOVO: Definição do card de notificações.
+    { id: 'com_notificacao', title: 'Notificações', icon: BellRing, color: 'bg-red-50 border-red-200 hover:bg-red-100', iconColor: 'text-red-600', activeColor: 'bg-red-500 text-white border-red-500' },
     { id: 'sem_tratativa', title: 'Sem Tratativa', icon: AlertCircle, color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500' },
     { id: 'em_tratativa', title: 'Em Tratativa', icon: Clock, color: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', iconColor: 'text-yellow-600', activeColor: 'bg-yellow-500 text-white border-yellow-500' },
     { id: 'em_execucao', title: 'Em Execução', icon: Play, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
@@ -677,7 +689,8 @@ const DashboardPage = () => {
             </TabsList>
 
             <TabsContent value="chamados" className="space-y-6">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+              {/* NOVO: A grade agora se ajusta para acomodar o novo card */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3 mb-6">
                 {filterCards.map((card) => {
                   const IconComponent = card.icon;
                   const isActive = activeFilter === card.id;
