@@ -5,7 +5,7 @@ import { ticketService, TICKET_TYPES, PRIORITIES } from '../../services/ticketSe
 import { userService, AREAS } from '../../services/userService';
 import { imageService } from '../../services/imageService';
 import { TICKET_CATEGORIES, getCategoriesByArea } from '../../constants/ticketCategories';
-// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES - ÚNICA ADIÇÃO
+// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES - JÁ EXISTENTE
 import notificationService from '../../services/notificationService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,12 +16,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp } from 'lucide-react';
+// ✅ ADIÇÃO: Importando o ícone de cadeado
+import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp, Lock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, doc, setDoc, getDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
-// 🤖 SERVIÇO DE TEMPLATES IA DINÂMICOS
+// 🤖 SERVIÇO DE TEMPLATES IA DINÂMICOS (sem alterações)
 class DynamicAITemplateService {
   constructor() {
     this.templatesCollection = 'ai_templates';
@@ -285,7 +286,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   const { user, userProfile } = useAuth();
   const navigate = useNavigate();
   
-  // Form state
+  // ✅ ADIÇÃO: Campo `isConfidential` adicionado ao estado inicial do formulário.
   const [formData, setFormData] = useState({
     titulo: '',
     descricao: '',
@@ -294,6 +295,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     prioridade: 'media',
     isExtra: false,
     motivoExtra: '',
+    isConfidential: false, // <-- NOVO CAMPO
     observacoes: ''
   });
   
@@ -656,6 +658,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
       const ticketData = {
         ...finalTicketData,
+        // ✅ ADIÇÃO: Campo `isConfidential` incluído nos dados do chamado a ser criado.
+        isConfidential: formData.isConfidential, // <-- NOVO CAMPO
         projetoId: selectedProject,
         criadoPor: user.uid,
         criadoPorNome: userProfile?.nome || user.email,
@@ -700,7 +704,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
       const ticketId = await ticketService.createTicket(ticketData);
 
-      // 🔔 NOTIFICAÇÃO DE NOVO CHAMADO - ÚNICA ADIÇÃO AO CÓDIGO ORIGINAL
+      // 🔔 NOTIFICAÇÃO DE NOVO CHAMADO (lógica existente mantida)
       try {
         console.log('🔔 Enviando notificação de novo chamado...');
         await notificationService.notifyNewTicket(ticketId, ticketData, user.uid);
@@ -876,7 +880,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             )}
           </div>
 
-          {/* 🤖 TEMPLATES IA DINÂMICOS */}
+          {/* 🤖 TEMPLATES IA DINÂMICOS (sem alterações) */}
           <div className="space-y-2 border-t pt-4">
             <div className="flex items-center justify-between">
               <Label className="flex items-center gap-2">
@@ -1138,8 +1142,9 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             </div>
           )}
 
-          {/* Locação Inicial */}
-          <div className="space-y-4">
+          {/* Opções Adicionais (Extra e Confidencial) */}
+          <div className="space-y-4 pt-4 border-t">
+            {/* Pedido Extra (já existente) */}
             <div className="flex items-center space-x-2">
               <Switch
                 id="isExtra"
@@ -1154,7 +1159,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
             {formData.isExtra && (
               <div className="space-y-2">
-                <Label htmlFor="motivoExtra">Motivo da Locação Inicial *</Label>
+                <Label htmlFor="motivoExtra">Motivo do Pedido Extra *</Label>
                 <Textarea
                   id="motivoExtra"
                   placeholder="Explique por que este pedido é necessário..."
@@ -1166,7 +1171,32 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 />
               </div>
             )}
+
+            {/* ✅ ADIÇÃO: Seção para o chamado confidencial */}
+            <div className="flex items-center space-x-2 pt-4 border-t">
+              <Switch
+                id="isConfidential"
+                checked={formData.isConfidential}
+                onCheckedChange={(checked) => handleInputChange('isConfidential', checked)}
+                disabled={loading}
+              />
+              <Label htmlFor="isConfidential" className="text-sm font-medium flex items-center gap-2">
+                <Lock className="h-4 w-4 text-orange-600"/>
+                <span className="text-orange-700">Tornar este chamado confidencial</span>
+              </Label>
+            </div>
+
+            {formData.isConfidential && (
+              <div className="p-3 bg-orange-50 border-l-4 border-orange-400 text-orange-800 text-sm rounded-r-lg">
+                <p className="font-semibold">Atenção: Chamado Confidencial</p>
+                <p className="mt-1">
+                  Este chamado será visível apenas para você (criador), para a área de destino ({formData.area ? areaOptions.find(a => a.value === formData.area)?.label : 'N/A'}) e para administradores.
+                </p>
+                <p className="font-bold mt-2">Ele não aparecerá para o consultor ou produtor do projeto.</p>
+              </div>
+            )}
           </div>
+
 
           {/* Upload de Imagens */}
           <div className="space-y-2">
@@ -1251,4 +1281,3 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 };
 
 export default NewTicketForm;
-
