@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { ticketService } from '../services/ticketService';
 import { userService } from '../services/userService';
-// ✅ 1. ALTERAÇÃO: Usando o serviço de notificação unificado e correto.
 import notificationService from '../services/notificationService';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -47,7 +46,8 @@ import {
   Hourglass,
   UserCheck,
   Play,
-  BellRing // NOVO: Ícone importado para o card de notificações
+  BellRing,
+  Lock // ✅ ADIÇÃO: Importando o ícone de cadeado
 } from 'lucide-react';
 
 const DashboardPage = () => {
@@ -70,7 +70,6 @@ const DashboardPage = () => {
   const [bulkActionMode, setBulkActionMode] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
-  // NOVO: Estado para filtro ativo
   const [activeFilter, setActiveFilter] = useState('todos');
 
   // Função para buscar nome do projeto
@@ -78,87 +77,56 @@ const DashboardPage = () => {
     return projectNames[projetoId] || 'Projeto não encontrado';
   };
 
-  // NOVO: Função para filtrar chamados baseado no filtro ativo
+  // Função para filtrar chamados baseado no filtro ativo
   const getFilteredTickets = () => {
     let filteredTickets = [...tickets];
 
     switch (activeFilter) {
       case 'todos':
-        // Sem filtro, todos os chamados
         break;
-      
-      // NOVO: Lógica de filtro para o card de notificações
       case 'com_notificacao':
-        // Filtra chamados que possuem uma entrada no objeto ticketNotifications
         filteredTickets = filteredTickets.filter(ticket => ticketNotifications[ticket.id]);
         break;
-
       case 'sem_tratativa':
-        // Chamados com status 'aberto'
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'aberto');
         break;
-      
       case 'em_tratativa':
-        // Chamados com status 'em_tratativa'
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'em_tratativa');
         break;
-      
       case 'em_execucao':
-        // Chamados com status 'em_execucao'
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'em_execucao');
         break;
-      
       case 'escalado':
-        // Chamados com status 'enviado_para_area' ou 'escalado_para_area'
         filteredTickets = filteredTickets.filter(ticket => 
           ticket.status === 'enviado_para_area' || ticket.status === 'escalado_para_area'
         );
         break;
-      
       case 'escalado_para_mim':
-        // Chamados escalados para a área ou usuário atual
         filteredTickets = filteredTickets.filter(ticket => {
           if (ticket.status === 'escalado_para_outra_area') {
-            // Verifica se foi escalado para a área do usuário
-            if (ticket.areaEscalada === userProfile?.area) {
-              return true;
-            }
-            // Verifica se foi escalado especificamente para o usuário
+            if (ticket.areaEscalada === userProfile?.area) return true;
             if (ticket.usuarioEscalado === user?.uid || 
                 ticket.usuarioEscalado === userProfile?.email ||
-                ticket.usuarioEscalado === userProfile?.nome) {
-              return true;
-            }
-            // Verifica se está nas áreas envolvidas
-            if (ticket.areasEnvolvidas && ticket.areasEnvolvidas.includes(userProfile?.area)) {
-              return true;
-            }
+                ticket.usuarioEscalado === userProfile?.nome) return true;
+            if (ticket.areasEnvolvidas && ticket.areasEnvolvidas.includes(userProfile?.area)) return true;
           }
           return false;
         });
         break;
-      
       case 'devolvido':
-        // Chamados que retornaram para o usuário (lógica pode variar conforme regras de negócio)
-        // Por enquanto, usando chamados que foram escalados e voltaram
         filteredTickets = filteredTickets.filter(ticket => 
           ticket.status === 'devolvido' || 
           (ticket.historico && ticket.historico.some(h => h.acao === 'devolvido'))
         );
         break;
-      
       case 'aguardando_validacao':
-        // Chamados com status 'executado_aguardando_validacao'
         filteredTickets = filteredTickets.filter(ticket => 
           ticket.status === 'executado_aguardando_validacao'
         );
         break;
-      
       case 'concluidos':
-        // Chamados com status 'concluido'
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'concluido');
         break;
-      
       default:
         break;
     }
@@ -171,12 +139,10 @@ const DashboardPage = () => {
     });
   };
 
-  // NOVO: Função para contar chamados por categoria
+  // Função para contar chamados por categoria
   const getTicketCounts = () => {
     const counts = {
       todos: tickets.length,
-      // NOVO: Contagem de chamados com notificações não lidas.
-      // A contagem é o número de chaves no objeto ticketNotifications.
       com_notificacao: Object.keys(ticketNotifications).length,
       sem_tratativa: tickets.filter(t => t.status === 'aberto').length,
       em_tratativa: tickets.filter(t => t.status === 'em_tratativa').length,
@@ -199,10 +165,9 @@ const DashboardPage = () => {
     return counts;
   };
 
-  // NOVO: Configuração dos cards de filtro
+  // Configuração dos cards de filtro
   const filterCards = [
     { id: 'todos', title: 'Todos', icon: FileText, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
-    // NOVO: Definição do card de notificações.
     { id: 'com_notificacao', title: 'Notificações', icon: BellRing, color: 'bg-red-50 border-red-200 hover:bg-red-100', iconColor: 'text-red-600', activeColor: 'bg-red-500 text-white border-red-500' },
     { id: 'sem_tratativa', title: 'Sem Tratativa', icon: AlertCircle, color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500' },
     { id: 'em_tratativa', title: 'Em Tratativa', icon: Clock, color: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', iconColor: 'text-yellow-600', activeColor: 'bg-yellow-500 text-white border-yellow-500' },
@@ -256,19 +221,13 @@ const DashboardPage = () => {
     setSelectedTickets(newSelected);
   };
 
-  // ✅ 2. ALTERAÇÃO: Função agora usa o serviço correto.
   const loadTicketNotifications = async () => {
     if (!user?.uid || !tickets.length) return;
-    
     try {
       const notificationCounts = {};
-      
       for (const ticket of tickets) {
         try {
-          const count = await notificationService.getUnreadNotificationsByTicket(
-            user.uid, 
-            ticket.id
-          );
+          const count = await notificationService.getUnreadNotificationsByTicket(user.uid, ticket.id);
           if (count > 0) {
             notificationCounts[ticket.id] = count;
           }
@@ -276,9 +235,7 @@ const DashboardPage = () => {
           console.warn(`⚠️ Erro ao carregar notificações do chamado ${ticket.id}:`, ticketError);
         }
       }
-      
       setTicketNotifications(notificationCounts);
-      console.log('📱 Notificações carregadas:', notificationCounts);
     } catch (error) {
       console.error('❌ Erro ao carregar notificações dos chamados:', error);
       setTicketNotifications({});
@@ -291,27 +248,21 @@ const DashboardPage = () => {
     } else if (authInitialized && !user) {
       navigate('/login');
     } else if (authInitialized && user && !userProfile) {
-      console.warn('DashboardPage: usuário logado mas perfil não carregado ainda');
       setLoading(false);
     }
   }, [user, userProfile, authInitialized, navigate]);
 
   useEffect(() => {
     if (tickets.length > 0 && user?.uid) {
-      // ✅ 3. ALTERAÇÃO: Listener agora usa o serviço unificado.
       const unsubscribe = notificationService.subscribeToNotifications(user.uid, (allNotifications) => {
-        console.log('📱 Listener de notificações do Dashboard ativado, documentos:', allNotifications.length);
         const counts = {};
         allNotifications.forEach(notification => {
-          // Conta apenas as notificações não lidas que pertencem a um chamado
           if (notification.ticketId && !notification.lida) {
             counts[notification.ticketId] = (counts[notification.ticketId] || 0) + 1;
           }
         });
-        console.log('📱 Contagens de notificação do Dashboard atualizadas:', counts);
         setTicketNotifications(counts);
       });
-      
       return () => {
         if (unsubscribe) {
           unsubscribe();
@@ -326,6 +277,19 @@ const DashboardPage = () => {
       
       console.log('🔍 Carregando dados para:', userProfile?.funcao);
       
+      // ✅ ADIÇÃO: Lógica de filtro de confidencialidade
+      const filterConfidential = (ticket) => {
+        // Se o chamado não for confidencial, todos podem ver
+        if (!ticket.isConfidential) {
+          return true;
+        }
+        // Se for confidencial, apenas o criador e administradores podem ver
+        // Operadores verão na lógica específica de suas áreas
+        const isCreator = ticket.criadoPor === user.uid;
+        const isAdmin = userProfile?.funcao === 'administrador';
+        return isCreator || isAdmin;
+      };
+
       if (userProfile?.funcao === 'administrador') {
         console.log('👑 Administrador: carregando TODOS os dados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
@@ -334,7 +298,7 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         setProjects(allProjects);
-        setTickets(allTickets);
+        setTickets(allTickets); // Admin vê todos, sem filtro de confidencialidade aqui
         setUsers(allUsers);
         
         const projectNamesMap = {};
@@ -356,18 +320,12 @@ const DashboardPage = () => {
         );
         
         const produtorProjectIds = produtorProjects.map(p => p.id);
-        const produtorTickets = allTickets.filter(ticket => 
-          produtorProjectIds.includes(ticket.projetoId)
-        );
         
-        console.log('🔍 DEBUG Produtor (REGRAS ORIGINAIS):', {
-          userId: user.uid,
-          userProfile: userProfile.nome,
-          totalProjects: allProjects.length,
-          produtorProjects: produtorProjects.length,
-          produtorProjectIds,
-          totalTickets: allTickets.length,
-          produtorTickets: produtorTickets.length
+        // ✅ ALTERAÇÃO: Aplicando filtro de confidencialidade para Produtor
+        const produtorTickets = allTickets.filter(ticket => {
+          const isRelatedToProject = produtorProjectIds.includes(ticket.projetoId);
+          // O chamado deve pertencer ao projeto E passar no filtro de confidencialidade
+          return isRelatedToProject && filterConfidential(ticket);
         });
         
         setProjects(produtorProjects);
@@ -393,14 +351,18 @@ const DashboardPage = () => {
         );
         
         const consultorProjectIds = consultorProjects.map(p => p.id);
+        
+        // ✅ ALTERAÇÃO: Aplicando filtro de confidencialidade para Consultor
         const consultorTickets = allTickets.filter(ticket => {
           const isFromConsultorProject = consultorProjectIds.includes(ticket.projetoId);
-          const isOpenedByConsultor = ticket.autorId === user.uid;
+          const isOpenedByConsultor = ticket.criadoPor === user.uid; // Usando criadoPor para consistência
           const isEscalatedToConsultor = ticket.escalonamentos?.some(esc => 
             esc.consultorId === user.uid || esc.responsavelId === user.uid
           );
           
-          return isFromConsultorProject || isOpenedByConsultor || isEscalatedToConsultor;
+          const isRelated = isFromConsultorProject || isOpenedByConsultor || isEscalatedToConsultor;
+          // O chamado deve ser relacionado ao consultor E passar no filtro de confidencialidade
+          return isRelated && filterConfidential(ticket);
         });
         
         setProjects(consultorProjects);
@@ -414,17 +376,14 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'operador') {
-        console.log('⚙️ Operador: carregando TODOS os projetos e chamados da área (MÉTODO ORIGINAL)');
-        console.log('🔍 Área do operador:', userProfile?.area);
-        
+        console.log('⚙️ Operador: carregando chamados da área');
         const [allProjects, operatorTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
+          // A busca `getTicketsByAreaInvolved` já traz os chamados corretos.
+          // Operadores podem ver chamados confidenciais se forem da sua área.
           ticketService.getTicketsByAreaInvolved(userProfile.area),
           userService.getAllUsers()
         ]);
-        
-        console.log('📊 Projetos carregados:', allProjects.length);
-        console.log('📊 Chamados da área carregados:', operatorTickets.length);
         
         setProjects(allProjects);
         setTickets(operatorTickets);
@@ -437,7 +396,7 @@ const DashboardPage = () => {
         setProjectNames(projectNamesMap);
         
       } else if (userProfile?.funcao === 'gerente') {
-        console.log('👔 Gerente: carregando TODOS os dados com prioridade para escalados');
+        console.log('👔 Gerente: carregando TODOS os dados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
           ticketService.getAllTickets(),
@@ -446,24 +405,8 @@ const DashboardPage = () => {
         
         setProjects(allProjects);
         setUsers(allUsers);
-        
-        const sortedTickets = [...allTickets].sort((a, b) => {
-          const aEscaladoParaGerente = a.escalonamentos?.some(esc => 
-            esc.gerenteId === user.uid || esc.responsavelId === user.uid
-          );
-          const bEscaladoParaGerente = b.escalonamentos?.some(esc => 
-            esc.gerenteId === user.uid || esc.responsavelId === user.uid
-          );
-          
-          if (aEscaladoParaGerente && !bEscaladoParaGerente) return -1;
-          if (!aEscaladoParaGerente && bEscaladoParaGerente) return 1;
-          
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
-          return dateB - dateA;
-        });
-        
-        setTickets(sortedTickets);
+        // Gerentes podem ver todos os chamados, incluindo confidenciais
+        setTickets(allTickets);
         
         const projectNamesMap = {};
         allProjects.forEach(project => {
@@ -489,12 +432,6 @@ const DashboardPage = () => {
         });
         setProjectNames(projectNamesMap);
       }
-      
-      console.log('✅ Dados carregados:', {
-        projetos: projects.length,
-        chamados: tickets.length,
-        usuarios: users.length
-      });
       
     } catch (error) {
       console.error('❌ Erro ao carregar dados do dashboard:', error);
@@ -689,7 +626,6 @@ const DashboardPage = () => {
             </TabsList>
 
             <TabsContent value="chamados" className="space-y-6">
-              {/* NOVO: A grade agora se ajusta para acomodar o novo card */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3 mb-6">
                 {filterCards.map((card) => {
                   const IconComponent = card.icon;
@@ -806,6 +742,10 @@ const DashboardPage = () => {
                                   )}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
+                                      {/* ✅ ADIÇÃO: Ícone de cadeado para chamados confidenciais */}
+                                      {ticket.isConfidential && (
+                                        <Lock className="h-4 w-4 text-orange-500 flex-shrink-0" title="Chamado Confidencial" />
+                                      )}
                                       <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
                                       {ticketNotifications[ticket.id] && (
                                         <Badge className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
