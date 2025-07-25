@@ -47,7 +47,7 @@ import {
   UserCheck,
   Play,
   BellRing,
-  Lock // ✅ ADIÇÃO: Importando o ícone de cadeado
+  Lock
 } from 'lucide-react';
 
 const DashboardPage = () => {
@@ -65,19 +65,16 @@ const DashboardPage = () => {
   const [expandedProjects, setExpandedProjects] = useState({});
   const [ticketNotifications, setTicketNotifications] = useState({});
   
-  // Estados para ações em lote
   const [selectedTickets, setSelectedTickets] = useState(new Set());
   const [bulkActionMode, setBulkActionMode] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   const [activeFilter, setActiveFilter] = useState('todos');
 
-  // Função para buscar nome do projeto
   const getProjectName = (projetoId) => {
     return projectNames[projetoId] || 'Projeto não encontrado';
   };
 
-  // Função para filtrar chamados baseado no filtro ativo
   const getFilteredTickets = () => {
     let filteredTickets = [...tickets];
 
@@ -113,12 +110,6 @@ const DashboardPage = () => {
           return false;
         });
         break;
-      case 'devolvido':
-        filteredTickets = filteredTickets.filter(ticket => 
-          ticket.status === 'devolvido' || 
-          (ticket.historico && ticket.historico.some(h => h.acao === 'devolvido'))
-        );
-        break;
       case 'aguardando_validacao':
         filteredTickets = filteredTickets.filter(ticket => 
           ticket.status === 'executado_aguardando_validacao'
@@ -127,11 +118,13 @@ const DashboardPage = () => {
       case 'concluidos':
         filteredTickets = filteredTickets.filter(ticket => ticket.status === 'concluido');
         break;
+      case 'aguardando_aprovacao':
+        filteredTickets = filteredTickets.filter(ticket => ticket.status === 'aguardando_aprovacao');
+        break;
       default:
         break;
     }
 
-    // Ordenar por dataUltimaAtualizacao (mais recente primeiro)
     return filteredTickets.sort((a, b) => {
       const dateA = a.dataUltimaAtualizacao?.toDate?.() || a.createdAt?.toDate?.() || new Date(0);
       const dateB = b.dataUltimaAtualizacao?.toDate?.() || b.createdAt?.toDate?.() || new Date(0);
@@ -139,7 +132,6 @@ const DashboardPage = () => {
     });
   };
 
-  // Função para contar chamados por categoria
   const getTicketCounts = () => {
     const counts = {
       todos: tickets.length,
@@ -158,23 +150,29 @@ const DashboardPage = () => {
         }
         return false;
       }).length,
-      devolvido: tickets.filter(t => t.status === 'devolvido' || (t.historico && t.historico.some(h => h.acao === 'devolvido'))).length,
       aguardando_validacao: tickets.filter(t => t.status === 'executado_aguardando_validacao').length,
-      concluidos: tickets.filter(t => t.status === 'concluido').length
+      concluidos: tickets.filter(t => t.status === 'concluido').length,
+      aguardando_aprovacao: tickets.filter(t => t.status === 'aguardando_aprovacao').length
     };
     return counts;
   };
 
-  // Configuração dos cards de filtro
   const filterCards = [
     { id: 'todos', title: 'Todos', icon: FileText, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
+    ...(userProfile?.funcao === 'gerente' ? [{
+      id: 'aguardando_aprovacao', 
+      title: 'Aguardando Aprovação', 
+      icon: UserCheck, 
+      color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', 
+      iconColor: 'text-orange-600', 
+      activeColor: 'bg-orange-500 text-white border-orange-500' 
+    }] : []),
     { id: 'com_notificacao', title: 'Notificações', icon: BellRing, color: 'bg-red-50 border-red-200 hover:bg-red-100', iconColor: 'text-red-600', activeColor: 'bg-red-500 text-white border-red-500' },
     { id: 'sem_tratativa', title: 'Sem Tratativa', icon: AlertCircle, color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500' },
     { id: 'em_tratativa', title: 'Em Tratativa', icon: Clock, color: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100', iconColor: 'text-yellow-600', activeColor: 'bg-yellow-500 text-white border-yellow-500' },
     { id: 'em_execucao', title: 'Em Execução', icon: Play, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
     { id: 'escalado', title: 'Escalado', icon: ArrowUp, color: 'bg-purple-50 border-purple-200 hover:bg-purple-100', iconColor: 'text-purple-600', activeColor: 'bg-purple-500 text-white border-purple-500' },
     { id: 'escalado_para_mim', title: 'Escalados para Mim', icon: ChevronDown, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
-    { id: 'devolvido', title: 'Devolvido', icon: RotateCcw, color: 'bg-pink-50 border-pink-200 hover:bg-pink-100', iconColor: 'text-pink-600', activeColor: 'bg-pink-500 text-white border-pink-500' },
     { id: 'aguardando_validacao', title: 'Aguardando Validação', icon: Hourglass, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
     { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' }
   ];
@@ -277,14 +275,10 @@ const DashboardPage = () => {
       
       console.log('🔍 Carregando dados para:', userProfile?.funcao);
       
-      // ✅ ADIÇÃO: Lógica de filtro de confidencialidade
       const filterConfidential = (ticket) => {
-        // Se o chamado não for confidencial, todos podem ver
         if (!ticket.isConfidential) {
           return true;
         }
-        // Se for confidencial, apenas o criador e administradores podem ver
-        // Operadores verão na lógica específica de suas áreas
         const isCreator = ticket.criadoPor === user.uid;
         const isAdmin = userProfile?.funcao === 'administrador';
         return isCreator || isAdmin;
@@ -298,7 +292,7 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         setProjects(allProjects);
-        setTickets(allTickets); // Admin vê todos, sem filtro de confidencialidade aqui
+        setTickets(allTickets);
         setUsers(allUsers);
         
         const projectNamesMap = {};
@@ -321,10 +315,8 @@ const DashboardPage = () => {
         
         const produtorProjectIds = produtorProjects.map(p => p.id);
         
-        // ✅ ALTERAÇÃO: Aplicando filtro de confidencialidade para Produtor
         const produtorTickets = allTickets.filter(ticket => {
           const isRelatedToProject = produtorProjectIds.includes(ticket.projetoId);
-          // O chamado deve pertencer ao projeto E passar no filtro de confidencialidade
           return isRelatedToProject && filterConfidential(ticket);
         });
         
@@ -352,16 +344,14 @@ const DashboardPage = () => {
         
         const consultorProjectIds = consultorProjects.map(p => p.id);
         
-        // ✅ ALTERAÇÃO: Aplicando filtro de confidencialidade para Consultor
         const consultorTickets = allTickets.filter(ticket => {
           const isFromConsultorProject = consultorProjectIds.includes(ticket.projetoId);
-          const isOpenedByConsultor = ticket.criadoPor === user.uid; // Usando criadoPor para consistência
+          const isOpenedByConsultor = ticket.criadoPor === user.uid;
           const isEscalatedToConsultor = ticket.escalonamentos?.some(esc => 
             esc.consultorId === user.uid || esc.responsavelId === user.uid
           );
           
           const isRelated = isFromConsultorProject || isOpenedByConsultor || isEscalatedToConsultor;
-          // O chamado deve ser relacionado ao consultor E passar no filtro de confidencialidade
           return isRelated && filterConfidential(ticket);
         });
         
@@ -379,8 +369,6 @@ const DashboardPage = () => {
         console.log('⚙️ Operador: carregando chamados da área');
         const [allProjects, operatorTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
-          // A busca `getTicketsByAreaInvolved` já traz os chamados corretos.
-          // Operadores podem ver chamados confidenciais se forem da sua área.
           ticketService.getTicketsByAreaInvolved(userProfile.area),
           userService.getAllUsers()
         ]);
@@ -405,7 +393,6 @@ const DashboardPage = () => {
         
         setProjects(allProjects);
         setUsers(allUsers);
-        // Gerentes podem ver todos os chamados, incluindo confidenciais
         setTickets(allTickets);
         
         const projectNamesMap = {};
@@ -473,7 +460,8 @@ const DashboardPage = () => {
             {(userProfile?.funcao === 'produtor' || userProfile?.funcao === 'consultor' || userProfile?.funcao === 'administrador' || 
               (userProfile?.funcao === 'operador' && userProfile?.area === 'operacional') ||
               (userProfile?.funcao === 'operador' && userProfile?.area === 'comunicacao_visual') ||
-              (userProfile?.funcao === 'operador' && userProfile?.area === 'almoxarifado')) && (
+              (userProfile?.funcao === 'operador' && userProfile?.area === 'almoxarifado') ||
+              (userProfile?.funcao === 'operador' && userProfile?.area === 'logistica')) && (
               <Button 
                 onClick={() => navigate('/novo-chamado')}
                 className="w-full justify-start mb-4"
@@ -632,6 +620,8 @@ const DashboardPage = () => {
                   const isActive = activeFilter === card.id;
                   const count = counts[card.id];
                   
+                  if (!count && card.id === 'aguardando_aprovacao') return null;
+                  
                   return (
                     <Card
                       key={card.id}
@@ -742,7 +732,6 @@ const DashboardPage = () => {
                                   )}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                      {/* ✅ ADIÇÃO: Ícone de cadeado para chamados confidenciais */}
                                       {ticket.isConfidential && (
                                         <Lock className="h-4 w-4 text-orange-500 flex-shrink-0" title="Chamado Confidencial" />
                                       )}
