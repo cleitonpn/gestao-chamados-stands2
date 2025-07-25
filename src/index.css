@@ -1,0 +1,26 @@
+/* Animação para novos itens no feed */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Transição suave para as barras de progresso */
+.progress-bar {
+  transition: width 0.5s ease-in-out;
+}
+
+/* Scrollbar customizado para o Feed (Opcional, mas melhora a aparência) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #4A5568; /* gray-600 */
+  border-radius: 10px;
+  border: 2px solid #2D3748; /* gray-800 */
+}
