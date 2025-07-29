@@ -286,7 +286,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   const { user, userProfile } = useAuth();
   const navigate = useNavigate();
   
-  // ✅ ADIÇÃO: Campo `isConfidential` adicionado ao estado inicial do formulário.
   const [formData, setFormData] = useState({
     titulo: '',
     descricao: '',
@@ -295,7 +294,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     prioridade: 'media',
     isExtra: false,
     motivoExtra: '',
-    isConfidential: false, // <-- NOVO CAMPO
+    isConfidential: false,
     observacoes: ''
   });
   
@@ -311,23 +310,20 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   const [error, setError] = useState('');
   const [images, setImages] = useState([]);
   
-  // 🤖 Estados para IA
   const [aiTemplates, setAiTemplates] = useState([]);
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiService] = useState(new DynamicAITemplateService());
 
   useEffect(() => {
     loadProjects();
-    loadAITemplates(); // Carregar templates IA na inicialização
+    loadAITemplates();
   }, []);
 
-  // Carregar templates IA do Firebase
   const loadAITemplates = async () => {
     setLoadingAI(true);
     try {
       const templates = await aiService.loadAITemplates();
       setAiTemplates(templates);
-      console.log('🤖 Templates IA carregados no componente:', templates.length);
     } catch (error) {
       console.error('❌ Erro ao carregar templates IA:', error);
     } finally {
@@ -335,14 +331,11 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     }
   };
 
-  // Atualizar templates IA (análise automática)
   const updateAITemplates = async () => {
     setLoadingAI(true);
     try {
-      console.log('🔄 Iniciando atualização automática de templates...');
       await aiService.analyzeAndUpdateTemplates();
-      await loadAITemplates(); // Recarregar templates atualizados
-      console.log('✅ Templates IA atualizados com sucesso!');
+      await loadAITemplates();
     } catch (error) {
       console.error('❌ Erro ao atualizar templates IA:', error);
     } finally {
@@ -350,10 +343,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     }
   };
 
-  // Carregar tipos quando área for selecionada
   useEffect(() => {
     if (formData.area) {
-      console.log('🔄 Área selecionada:', formData.area);
       loadTypesByArea(formData.area);
     } else {
       setAvailableTypes([]);
@@ -362,10 +353,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     }
   }, [formData.area]);
 
-  // Carregar operadores quando tipo for selecionado
   useEffect(() => {
     if (formData.area && formData.tipo) {
-      console.log('🔄 Tipo selecionado:', formData.tipo, 'para área:', formData.area);
       loadOperatorsByArea(formData.area);
     } else {
       setOperators([]);
@@ -375,18 +364,12 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
   const loadProjects = async () => {
     try {
-      console.log('🔄 Carregando projetos para usuário:', userProfile?.funcao);
-      
       const projectsData = await projectService.getAllProjects();
-      
-      // Filtrar projetos baseado no papel do usuário
       let filteredProjects = [];
       
       if (userProfile?.funcao === 'administrador' || userProfile?.funcao === 'gerente' || userProfile?.funcao === 'operador') {
-        // Administradores, gerentes e operadores veem todos os projetos ativos
         filteredProjects = projectsData.filter(project => project.status !== 'encerrado');
       } else if (userProfile?.funcao === 'consultor') {
-        // Consultores veem apenas projetos vinculados a eles
         const userId = userProfile.id || user.uid;
         filteredProjects = projectsData.filter(project => {
           const isAssigned = project.consultorId === userId || 
@@ -396,7 +379,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
           return isAssigned && project.status !== 'encerrado';
         });
       } else if (userProfile?.funcao === 'produtor') {
-        // Produtores veem apenas projetos vinculados a eles
         const userId = userProfile.id || user.uid;
         filteredProjects = projectsData.filter(project => {
           const isAssigned = project.produtorId === userId || 
@@ -407,7 +389,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
         });
       }
 
-      // Ordenar por data de início (mais recentes primeiro)
       filteredProjects.sort((a, b) => {
         const dateA = a.dataInicio?.seconds ? new Date(a.dataInicio.seconds * 1000) : new Date(a.dataInicio || 0);
         const dateB = b.dataInicio?.seconds ? new Date(b.dataInicio.seconds * 1000) : new Date(b.dataInicio || 0);
@@ -415,97 +396,67 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       });
 
       setProjects(filteredProjects);
-      console.log('✅ Projetos carregados:', filteredProjects.length);
-      
     } catch (error) {
-      console.error('❌ Erro ao carregar projetos:', error);
       setError('Erro ao carregar projetos. Tente novamente.');
     }
   };
 
   const loadTypesByArea = (area) => {
     try {
-      console.log('🔍 Carregando tipos para área:', area);
       const categories = getCategoriesByArea(area);
-      console.log('📋 Categorias retornadas:', categories);
-      
       const validTypes = categories.filter(category => {
-        const isValid = category && 
-                       category.value && 
-                       typeof category.value === 'string' &&
-                       category.value.trim() !== '' && 
-                       category.label && 
-                       typeof category.label === 'string' &&
-                       category.label.trim() !== '';
-        
-        if (!isValid) {
-          console.error('❌ Tipo inválido detectado:', category);
-        }
-        
-        return isValid;
+        return category && 
+               category.value && 
+               typeof category.value === 'string' &&
+               category.value.trim() !== '' && 
+               category.label && 
+               typeof category.label === 'string' &&
+               category.label.trim() !== '';
       });
-      
-      console.log('✅ Tipos válidos após validação:', validTypes);
       setAvailableTypes(validTypes);
-      
       if (formData.tipo && !validTypes.find(type => type.value === formData.tipo)) {
         handleInputChange('tipo', '');
       }
-      
     } catch (error) {
-      console.error('❌ Erro ao carregar tipos por área:', error);
       setAvailableTypes([]);
     }
   };
 
   const loadOperatorsByArea = async (area) => {
     try {
-      console.log('👥 Carregando operadores para área:', area);
       const allUsers = await userService.getAllUsers();
       const operatorsByArea = allUsers.filter(user => 
         user.funcao === 'operador' && user.area === area
       );
-      console.log('👥 Operadores encontrados:', operatorsByArea);
       setOperators(operatorsByArea);
-      
       if (selectedOperator && !operatorsByArea.find(op => op.id === selectedOperator)) {
         setSelectedOperator('');
       }
-      
     } catch (error) {
-      console.error('❌ Erro ao carregar operadores por área:', error);
       setOperators([]);
     }
   };
 
-  // Função para obter eventos únicos
   const getUniqueEvents = () => {
     const events = [...new Set(projects.map(project => project.feira).filter(Boolean))];
     return events.sort();
   };
 
-  // Função para obter projetos filtrados por evento
   const getProjectsByEvent = (eventName) => {
     return projects.filter(project => project.feira === eventName);
   };
 
-  // Função para lidar com mudança de evento
   const handleEventChange = (eventName) => {
-    console.log('🎯 Evento selecionado:', eventName);
     setSelectedEvent(eventName);
-    setSelectedProject(''); // Limpar projeto selecionado quando evento muda
-    setSelectedProjectData(null); // Limpar dados do projeto
+    setSelectedProject('');
+    setSelectedProjectData(null);
   };
 
-  // Função para lidar com mudança de projeto
   const handleProjectChange = (projectId) => {
-    console.log('📋 Projeto selecionado:', projectId);
-    
     const project = projects.find(p => p.id === projectId);
     if (project) {
       setSelectedProject(projectId);
       setSelectedProjectData(project);
-      console.log('✅ Dados do projeto carregados:', project.nome);
     } else {
       setSelectedProject('');
       setSelectedProjectData(null);
@@ -513,34 +464,18 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   };
 
   const handleInputChange = (field, value) => {
-    console.log(`🔄 Alterando ${field} para:`, value);
-    
     if (field === 'area') {
-      const newFormData = {
-        ...formData,
-        [field]: value,
-        tipo: ''
-      };
-      setFormData(newFormData);
+      setFormData({ ...formData, [field]: value, tipo: '' });
       setSelectedOperator('');
     } else {
-      const newFormData = {
-        ...formData,
-        [field]: value
-      };
-      setFormData(newFormData);
+      setFormData({ ...formData, [field]: value });
     }
-    
     if (error) setError('');
   };
 
-  // 🤖 Função para aplicar template de IA
   const applyAITemplate = async (templateId) => {
     const template = aiTemplates.find(t => t.id === templateId);
     if (!template) return;
-    
-    console.log('🤖 Aplicando template IA:', templateId, template);
-    
     setFormData(prev => ({
       ...prev,
       titulo: template.titulo,
@@ -549,33 +484,23 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       tipo: template.tipo,
       prioridade: template.prioridade
     }));
-    
     setSelectedAITemplate(templateId);
-    
-    // Registrar uso do template para aprendizado
     await aiService.recordTemplateUsage(templateId, true);
   };
 
   const handleImageUpload = async (event) => {
     const files = Array.from(event.target.files);
-    
     for (const file of files) {
       try {
         imageService.validateImageFile(file);
         const resizedFile = await imageService.resizeImage(file);
-        
         const newImage = {
           file: resizedFile || file,
           preview: URL.createObjectURL(resizedFile || file),
           id: Math.random().toString(36).substr(2, 9),
-          uploading: false,
-          uploaded: false,
-          url: null
         };
-        
         setImages(prev => [...prev, newImage]);
       } catch (error) {
-        console.error('Erro ao processar imagem:', error);
         alert(`Erro ao processar ${file.name}: ${error.message}`);
       }
     }
@@ -596,59 +521,49 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       setError('Selecione um projeto');
       return false;
     }
-    
     if (!formData.titulo.trim()) {
       setError('Digite um título para o chamado');
       return false;
     }
-    
     if (!formData.descricao.trim()) {
       setError('Digite uma descrição para o chamado');
       return false;
     }
-    
     if (!formData.area) {
       setError('Selecione a área responsável');
       return false;
     }
-    
     if (!formData.tipo) {
       setError('Selecione o tipo do chamado');
       return false;
     }
-    
     if (formData.isExtra && !formData.motivoExtra.trim()) {
       setError('Digite o motivo para o pedido extra');
       return false;
     }
-    
     return true;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
     setError('');
 
+    let ticketId = null; 
+
     try {
       let finalTicketData = { ...formData };
       
-      if (userProfile?.funcao === 'consultor' && 
-          (formData.tipo === TICKET_TYPES.MAINTENANCE || 
-           formData.tipo === TICKET_TYPES.MAINTENANCE_PRODUCTION ||
-           formData.tipo === TICKET_TYPES.MAINTENANCE_FURNITURE ||
-           formData.tipo === TICKET_TYPES.MAINTENANCE_VISUAL)) {
-        
+      // ✅ INÍCIO DA CORREÇÃO: Salva a área de destino original antes de redirecionar para a produção
+      if (userProfile?.funcao === 'consultor') {
+        finalTicketData.areaDestinoOriginal = formData.area; 
         finalTicketData.area = AREAS.PRODUCTION;
         finalTicketData.observacoes = `${finalTicketData.observacoes || ''}\n\n[CHAMADO DE CONSULTOR] - Direcionado para o produtor avaliar e tratar ou escalar para área específica.`.trim();
       }
+      // ✅ FIM DA CORREÇÃO
 
-      // 🤖 Adicionar informação se foi usado template IA
       if (selectedAITemplate) {
         const aiTemplate = aiTemplates.find(t => t.id === selectedAITemplate);
         if (aiTemplate) {
@@ -658,37 +573,12 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
       const ticketData = {
         ...finalTicketData,
-        // ✅ ADIÇÃO: Campo `isConfidential` incluído nos dados do chamado a ser criado.
-        isConfidential: formData.isConfidential, // <-- NOVO CAMPO
+        isConfidential: formData.isConfidential,
         projetoId: selectedProject,
         criadoPor: user.uid,
         criadoPorNome: userProfile?.nome || user.email,
-        criadoPorFuncao: (() => {
-          if (userProfile?.funcao === 'operador' && userProfile?.area === 'comunicacao_visual') {
-            return 'operador_comunicacao_visual';
-          } else if (userProfile?.funcao === 'operador' && userProfile?.area === 'almoxarifado') {
-            return 'operador_almoxarifado';
-          } else {
-            return userProfile?.funcao;
-          }
-        })(),
-        areasEnvolvidas: (() => {
-          const areas = [];
-          
-          if (userProfile?.area) {
-            areas.push(userProfile.area);
-          }
-          
-          if (finalTicketData.area && finalTicketData.area !== userProfile?.area) {
-            areas.push(finalTicketData.area);
-          }
-          
-          if (!userProfile?.area && finalTicketData.area) {
-            areas.push(finalTicketData.area);
-          }
-          
-          return areas;
-        })(),
+        criadoPorFuncao: userProfile?.funcao,
+        areasEnvolvidas: [userProfile?.area, finalTicketData.area].filter(Boolean),
         areaDeOrigem: userProfile?.area || null,
         imagens: [],
         createdAt: new Date(),
@@ -696,56 +586,29 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       };
 
       if (selectedOperator) {
-        ticketData.atribuidoA = selectedOperator;
-        ticketData.status = 'em_tratativa';
-        ticketData.atribuidoEm = new Date();
-        ticketData.atribuidoPor = user.uid;
+        Object.assign(ticketData, { atribuidoA: selectedOperator, status: 'em_tratativa', atribuidoEm: new Date(), atribuidoPor: user.uid });
       }
 
-      const ticketId = await ticketService.createTicket(ticketData);
+      ticketId = await ticketService.createTicket(ticketData);
 
-      // 🔔 NOTIFICAÇÃO DE NOVO CHAMADO (lógica existente mantida)
+      // ✅ INÍCIO DA CORREÇÃO: Isola a falha da notificação
       try {
-        console.log('🔔 Enviando notificação de novo chamado...');
         await notificationService.notifyNewTicket(ticketId, ticketData, user.uid);
-        console.log('✅ Notificação de novo chamado enviada com sucesso');
       } catch (notificationError) {
-        console.error('❌ Erro ao enviar notificação de novo chamado:', notificationError);
-        // Não bloquear o fluxo se a notificação falhar
+        console.error('Falha não-crítica ao enviar notificação:', notificationError);
       }
-
-      // 🤖 Após criar chamado, atualizar templates IA automaticamente
-      setTimeout(() => {
-        updateAITemplates();
-      }, 2000);
+      // ✅ FIM DA CORREÇÃO
+      
+      setTimeout(() => updateAITemplates(), 2000);
 
       if (images.length > 0) {
-        setImages(prev => prev.map(img => ({ ...img, uploading: true })));
-        
         try {
-          const uploadedImages = await imageService.uploadMultipleImages(
-            images.map(img => img.file), 
-            ticketId
-          );
-          
+          const uploadedImages = await imageService.uploadMultipleImages(images.map(img => img.file), ticketId);
           await ticketService.updateTicket(ticketId, {
-            imagens: uploadedImages.map(img => ({
-              url: img.url,
-              name: img.name,
-              path: img.path
-            }))
+            imagens: uploadedImages.map(img => ({ url: img.url, name: img.name, path: img.path }))
           });
-          
-          setImages(prev => prev.map((img, index) => ({
-            ...img,
-            uploading: false,
-            uploaded: true,
-            url: uploadedImages[index]?.url
-          })));
-          
         } catch (uploadError) {
-          console.error('Erro no upload das imagens:', uploadError);
-          alert('Chamado criado com sucesso, mas houve erro no upload das imagens. Você pode adicionar as imagens depois.');
+          alert('Chamado criado com sucesso, mas houve erro no upload das imagens.');
         }
       }
       
@@ -761,6 +624,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       setLoading(false);
     }
   };
+  
   const areaOptions = [
     { value: AREAS.LOGISTICS, label: 'Logística' },
     { value: AREAS.WAREHOUSE, label: 'Almoxarifado' },
@@ -808,7 +672,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             </Alert>
           )}
 
-          {/* Seleção de Evento */}
           <div className="space-y-2">
             <Label htmlFor="event">Selecione o Evento *</Label>
             <Select value={selectedEvent} onValueChange={handleEventChange}>
@@ -825,7 +688,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             </Select>
           </div>
 
-          {/* Seleção de Projeto */}
           <div className="space-y-2">
             <Label htmlFor="project">Selecione o Projeto *</Label>
             <Select 
@@ -848,7 +710,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
               </SelectContent>
             </Select>
             
-            {/* Informações do projeto selecionado */}
             {selectedProjectData && (
               <div className="mt-3 p-4 bg-blue-50 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
@@ -880,7 +741,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             )}
           </div>
 
-          {/* 🤖 TEMPLATES IA DINÂMICOS (sem alterações) */}
           <div className="space-y-2 border-t pt-4">
             <div className="flex items-center justify-between">
               <Label className="flex items-center gap-2">
@@ -962,7 +822,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             </span>
                             {template.generatedAt && (
                               <span className="text-xs text-gray-400 ml-2">
-                                🕒 {new Date(template.generatedAt.seconds * 1000).toLocaleDateString()}
+                                � {new Date(template.generatedAt.seconds * 1000).toLocaleDateString()}
                               </span>
                             )}
                           </div>
@@ -998,7 +858,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             )}
           </div>
 
-          {/* Título */}
           <div className="space-y-2">
             <Label htmlFor="titulo">Título *</Label>
             <Input
@@ -1011,7 +870,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             />
           </div>
 
-          {/* Descrição */}
           <div className="space-y-2">
             <Label htmlFor="descricao">Descrição *</Label>
             <Textarea
@@ -1025,7 +883,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             />
           </div>
 
-          {/* Área e Tipo */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="area">Área Responsável *</Label>
@@ -1045,7 +902,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 </SelectContent>
               </Select>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="tipo">Tipo *</Label>
               <Select 
@@ -1070,15 +926,9 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                   ))}
                 </SelectContent>
               </Select>
-              {formData.area && availableTypes.length === 0 && (
-                <p className="text-sm text-amber-600">
-                  ⚠️ Nenhum tipo disponível para esta área
-                </p>
-              )}
             </div>
           </div>
 
-          {/* Prioridade */}
           <div className="space-y-2">
             <Label htmlFor="prioridade">Prioridade *</Label>
             <div className="flex flex-wrap gap-2">
@@ -1100,51 +950,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             </div>
           </div>
 
-          {/* Atribuição Direta a Operador */}
-          {formData.area && formData.tipo && (
-            <div className="space-y-2 p-4 border border-gray-200 rounded-lg bg-gray-50">
-              <label htmlFor="operator-select" className="block text-sm font-medium text-gray-700 mb-1">
-                Atribuir a um operador (Opcional):
-              </label>
-              <div className="text-xs text-gray-500 mb-2">
-                Área: {formData.area} | Tipo: {formData.tipo} | Operadores encontrados: {operators.length}
-              </div>
-              {operators.length > 0 ? (
-                <select 
-                  id="operator-select"
-                  value={selectedOperator || ''} 
-                  onChange={(e) => setSelectedOperator(e.target.value)}
-                  className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white text-black"
-                >
-                  <option value="">Enviar para a área toda</option>
-                  {operators.map(operator => {
-                    if (!operator || !operator.id || !operator.nome) {
-                      console.error('❌ Operador inválido:', operator);
-                      return null;
-                    }
-                    return (
-                      <option key={operator.id} value={operator.id}>
-                        {operator.nome} - {operator.area?.replace('_', ' ').toUpperCase() || 'SEM_ÁREA'}
-                      </option>
-                    );
-                  })}
-                </select>
-              ) : (
-                <div className="text-sm text-gray-500 p-2 border rounded bg-white">
-                  Carregando operadores da área {formData.area}...
-                </div>
-              )}
-              {selectedOperator && (
-                <p className="text-sm text-blue-600 mt-2">
-                  ℹ️ O chamado será enviado diretamente para o operador selecionado
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Opções Adicionais (Extra e Confidencial) */}
           <div className="space-y-4 pt-4 border-t">
-            {/* Pedido Extra (já existente) */}
             <div className="flex items-center space-x-2">
               <Switch
                 id="isExtra"
@@ -1156,7 +962,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 Este é um pedido extra
               </Label>
             </div>
-
             {formData.isExtra && (
               <div className="space-y-2">
                 <Label htmlFor="motivoExtra">Motivo do Pedido Extra *</Label>
@@ -1171,8 +976,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 />
               </div>
             )}
-
-            {/* ✅ ADIÇÃO: Seção para o chamado confidencial */}
             <div className="flex items-center space-x-2 pt-4 border-t">
               <Switch
                 id="isConfidential"
@@ -1185,20 +988,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 <span className="text-orange-700">Tornar este chamado confidencial</span>
               </Label>
             </div>
-
-            {formData.isConfidential && (
-              <div className="p-3 bg-orange-50 border-l-4 border-orange-400 text-orange-800 text-sm rounded-r-lg">
-                <p className="font-semibold">Atenção: Chamado Confidencial</p>
-                <p className="mt-1">
-                  Este chamado será visível apenas para você (criador), para a área de destino ({formData.area ? areaOptions.find(a => a.value === formData.area)?.label : 'N/A'}) e para administradores.
-                </p>
-                <p className="font-bold mt-2">Ele não aparecerá para o consultor ou produtor do projeto.</p>
-              </div>
-            )}
           </div>
 
-
-          {/* Upload de Imagens */}
           <div className="space-y-2">
             <Label htmlFor="images">Imagens</Label>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
@@ -1219,7 +1010,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                 <span className="text-sm">Clique para adicionar imagens</span>
               </label>
             </div>
-
             {images.length > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
                 {images.map((image) => (
@@ -1243,7 +1033,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             )}
           </div>
 
-          {/* Observações */}
           <div className="space-y-2">
             <Label htmlFor="observacoes">Observações Adicionais</Label>
             <Textarea
@@ -1256,7 +1045,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             />
           </div>
 
-          {/* Botões */}
           <div className="flex justify-end space-x-3 pt-4">
             {onClose && (
               <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
