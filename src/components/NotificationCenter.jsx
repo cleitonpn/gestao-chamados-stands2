@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import notificationService from '../services/notificationService';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button'; // ✅ CORREÇÃO PONTUAL APLICADA AQUI
 import { Bell, BellRing, Trash2, MailOpen, X } from 'lucide-react';
 
 const NotificationCenter = () => {
