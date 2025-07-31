@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label'; // ✅ CORREÇÃO APLICADA AQUI
+import { Label } from '@/components/ui/label';
 import { 
   ArrowLeft, Download, FileText, BarChart3, Calendar, AlertCircle, Loader2, Eye,
   Filter, Users, PieChart as PieChartIcon, Search, X as XIcon
@@ -291,8 +291,10 @@ const ReportsPage = () => {
               <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-600">Chamados em Aberto</p><p className="text-3xl font-bold text-orange-600">{kpiStats.openTickets}</p></div>
               <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-600">Taxa de Resolução</p><p className="text-3xl font-bold text-green-600">{kpiStats.resolutionRate?.toFixed(1)}%</p></div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8" style={{ height: '300px' }}>
-              <div>
+            {/* ✅ ÚNICA ALTERAÇÃO NESTE ARQUIVO ESTÁ AQUI ABAIXO */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Contêiner do Gráfico de Barras com altura definida */}
+              <div className="h-[300px]">
                 <h3 className="text-center font-semibold mb-2">Chamados por Status</h3>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData.ticketsByStatus}>
@@ -304,7 +306,8 @@ const ReportsPage = () => {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div>
+              {/* Contêiner do Gráfico de Pizza com altura definida */}
+              <div className="h-[300px]">
                 <h3 className="text-center font-semibold mb-2">Chamados por Área</h3>
                 <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
