@@ -17,6 +17,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+// ✅ NOVAS IMPORTAÇÕES PARA O MODAL E FUNÇÕES
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   ArrowLeft,
   Clock,
@@ -42,8 +45,9 @@ import {
   Shield,
   ThumbsUp,
   ThumbsDown,
-  Archive, // ✅ ÍCONE ADICIONADO
-  ArchiveRestore // ✅ ÍCONE ADICIONADO
+  Archive,
+  ArchiveRestore,
+  DollarSign // ✅ ÍCONE ADICIONADO
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -94,6 +98,17 @@ const TicketDetailPage = () => {
   const [mentionQuery, setMentionQuery] = useState('');
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef(null);
+
+  // ✅ NOVOS ESTADOS PARA O FLUXO FINANCEIRO
+  const [isFinancialModalOpen, setIsFinancialModalOpen] = useState(false);
+  const [financialFormData, setFinancialFormData] = useState({
+    valor: '',
+    condicoesPagamento: '',
+    nomeMotorista: '',
+    placaVeiculo: '',
+    observacaoPagamento: ''
+  });
+  const [isCreatingFinancialTicket, setIsCreatingFinancialTicket] = useState(false);
 
   const loadTicketData = async () => {
     try {
@@ -183,7 +198,6 @@ const TicketDetailPage = () => {
     loadUsers();
   }, []);
     
-  // ✅ NOVA FUNÇÃO PARA ARQUIVAR
   const handleArchiveTicket = async () => {
     if (!window.confirm('Tem certeza que deseja arquivar este chamado? Ele sairá da visualização principal e só poderá ser consultado.')) {
         return;
@@ -206,7 +220,6 @@ const TicketDetailPage = () => {
     }
   };
 
-  // ✅ NOVA FUNÇÃO PARA DESARQUIVAR
   const handleUnarchiveTicket = async () => {
     if (!window.confirm('Deseja desarquivar este chamado? Ele voltará para a lista de concluídos.')) {
         return;
@@ -447,40 +460,40 @@ const TicketDetailPage = () => {
         if (ticket.status === 'aberto') {
             producerActions.push({ value: TICKET_STATUS.IN_TREATMENT, label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' });
         }
-        producerActions.push({ value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação do consultor' });
+        producerActions.push({ value: 'executado_aguardando_validacao', label: 'Executado', description: 'Marcar como executado para validação do consultor' });
 
         producerActions.push({ value: 'send_to_area', label: 'Enviar para a Área', description: 'Encaminhar o chamado para a área final' });
 
         return producerActions;
     }
 
-    if (isCreator && currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
+    if (isCreator && currentStatus === 'executado_aguardando_validacao') {
         return [
-            { value: TICKET_STATUS.COMPLETED, label: 'Validar e Concluir', description: 'O chamado foi resolvido corretamente.' },
-            { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar / Devolver', description: 'Devolver para a área responsável com um motivo.' }
+            { value: 'concluido', label: 'Validar e Concluir', description: 'O chamado foi resolvido corretamente.' },
+            { value: 'enviado_para_area', label: 'Rejeitar / Devolver', description: 'Devolver para a área responsável com um motivo.' }
         ];
     }
 
     if (userRole === 'administrador') {
-      if (currentStatus === TICKET_STATUS.OPEN) {
+      if (currentStatus === 'aberto') {
         return [
-          { value: TICKET_STATUS.IN_TREATMENT, label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
+          { value: 'em_tratativa', label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
         ];
       }
-      if (currentStatus === TICKET_STATUS.IN_TREATMENT) {
+      if (currentStatus === 'em_tratativa') {
         return [
-          { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
+          { value: 'executado_aguardando_validacao', label: 'Executado', description: 'Marcar como executado para validação' }
         ];
       }
-      if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION && !isCreator) {
+      if (currentStatus === 'executado_aguardando_validacao' && !isCreator) {
         return [
-          { value: TICKET_STATUS.COMPLETED, label: 'Forçar Conclusão (Admin)', description: 'Finalizar chamado como administrador.' }
+          { value: 'concluido', label: 'Forçar Conclusão (Admin)', description: 'Finalizar chamado como administrador.' }
         ];
       }
       if (currentStatus === 'aguardando_aprovacao') {
         return [
-          { value: TICKET_STATUS.APPROVED, label: 'Aprovar', description: 'Aprovar e retornar para área' },
-          { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
+          { value: 'aprovado', label: 'Aprovar', description: 'Aprovar e retornar para área' },
+          { value: 'rejeitado', label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
         ];
       }
     }
@@ -491,14 +504,14 @@ const TicketDetailPage = () => {
       const canManage = isFromUserArea || isAssignedToUser;
 
       if (canManage) {
-        if (currentStatus === TICKET_STATUS.OPEN) {
+        if (currentStatus === 'aberto') {
           return [
-            { value: TICKET_STATUS.IN_TREATMENT, label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
+            { value: 'em_tratativa', label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
           ];
         }
-        if (currentStatus === TICKET_STATUS.IN_TREATMENT) {
+        if (currentStatus === 'em_tratativa') {
           return [
-            { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
+            { value: 'executado_aguardando_validacao', label: 'Executado', description: 'Marcar como executado para validação' }
           ];
         }
       }
@@ -512,17 +525,17 @@ const TicketDetailPage = () => {
 
       if (isEscalatedToThisManager) {
         return [
-          { value: TICKET_STATUS.APPROVED, label: 'Aprovar', description: 'Aprovar e retornar para área' },
-          { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
+          { value: 'aprovado', label: 'Aprovar', description: 'Aprovar e retornar para área' },
+          { value: 'rejeitado', label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
         ];
       }
       return [];
     }
 
     if (userRole === 'consultor' && isCreator) {
-      if (currentStatus === TICKET_STATUS.COMPLETED) {
+      if (currentStatus === 'concluido') {
         return [
-          { value: TICKET_STATUS.COMPLETED, label: 'Finalizar', description: 'Confirmar finalização do chamado' }
+          { value: 'concluido', label: 'Finalizar', description: 'Confirmar finalização do chamado' }
         ];
       }
     }
@@ -542,7 +555,7 @@ const TicketDetailPage = () => {
     setIsEscalating(true);
     try {
       const updateData = {
-        status: TICKET_STATUS.ESCALATED_TO_OTHER_AREA || 'escalado_para_outra_area',
+        status: 'escalado_para_outra_area',
         area: escalationArea || null,
         escalationReason: escalationReason || '',
         userRole: userProfile?.funcao || 'operador',
@@ -724,62 +737,70 @@ const TicketDetailPage = () => {
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
 
-    if ((newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && !conclusionDescription.trim()) {
-      alert('Por favor, forneça um motivo para a rejeição');
+    if (
+      newStatus === 'executado_aguardando_validacao' &&
+      userProfile?.area === 'logistica' &&
+      (ticket?.tipo === 'frete_imediato' || ticket?.tipo === 'agendar_frete')
+    ) {
+      setIsFinancialModalOpen(true);
       return;
     }
 
+    await proceedWithStatusUpdate(newStatus);
+  };
+    
+  const proceedWithStatusUpdate = async (statusToUpdate) => {
+    if ((statusToUpdate === 'rejeitado' || (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && !conclusionDescription.trim()) {
+      alert('Por favor, forneça um motivo para a rejeição');
+      return;
+    }
     setUpdating(true);
     try {
       let updateData = {};
       let systemMessageContent = '';
 
-      if (newStatus === 'send_to_area') {
+      if (statusToUpdate === 'send_to_area') {
         const targetArea = ticket.areaDestinoOriginal;
-
         if (!targetArea) {
             alert('Erro Crítico: A área de destino original não foi encontrada neste chamado. O chamado não pode ser enviado. Por favor, contate o suporte. (O campo areaDestinoOriginal está faltando no ticket).');
             setUpdating(false);
             return;
         }
-
         const newAreasEnvolvidas = [...new Set([...(ticket.areasEnvolvidas || []), targetArea])];
-
         updateData = {
-          status: TICKET_STATUS.OPEN,
+          status: 'aberto',
           area: targetArea,
           areasEnvolvidas: newAreasEnvolvidas,
           atualizadoPor: user.uid,
           updatedAt: new Date(),
         };
         systemMessageContent = `📲 **Chamado enviado pelo produtor para a área de destino: ${targetArea.replace('_', ' ').toUpperCase()}.**`;
-
       } else {
         updateData = {
-          status: newStatus,
+          status: statusToUpdate,
           atualizadoPor: user.uid,
           updatedAt: new Date()
         };
 
-        if (newStatus === TICKET_STATUS.COMPLETED) {
+        if (statusToUpdate === 'concluido') {
           updateData.conclusaoDescricao = conclusionDescription;
           updateData.conclusaoImagens = conclusionImages;
           updateData.concluidoEm = new Date();
           updateData.concluidoPor = user.uid;
           systemMessageContent = `✅ **Chamado concluído**\n\n**Descrição:** ${conclusionDescription}`;
-        } else if (newStatus === TICKET_STATUS.REJECTED) {
+        } else if (statusToUpdate === 'rejeitado') {
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           const managerName = userProfile?.nome || user?.email || 'Gerente';
           systemMessageContent = `❌ **Chamado reprovado pelo gerente ${managerName}**\n\n**Motivo:** ${conclusionDescription}\n\nO chamado foi encerrado devido à reprovação gerencial.`;
-        } else if (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
+        } else if (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao') {
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           updateData.area = ticket.areaDeOrigem || ticket.area;
-          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(newStatus)}`;
-        } else if (newStatus === TICKET_STATUS.APPROVED) {
+          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
+        } else if (statusToUpdate === 'aprovado') {
             if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
                 const targetArea = ticket.areaDeOrigem || ticket.area;
                 updateData.status = 'em_tratativa';
@@ -790,7 +811,7 @@ const TicketDetailPage = () => {
                 systemMessageContent = `✅ **Chamado aprovado pelo gerente ${managerName}**\n\nO chamado foi aprovado e retornará para a área responsável para execução.`;
             }
         } else {
-            systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(newStatus)}`;
+            systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
         }
       }
 
@@ -828,6 +849,36 @@ const TicketDetailPage = () => {
       alert('Erro ao atualizar status: ' + error.message);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleSubmitFinancialTicket = async (skip = false) => {
+    setIsCreatingFinancialTicket(true);
+    try {
+      if (!skip) {
+        const { valor, condicoesPagamento, nomeMotorista, placaVeiculo, observacaoPagamento } = financialFormData;
+        if (!valor || !condicoesPagamento || !nomeMotorista || !placaVeiculo) {
+          alert("Por favor, preencha todos os campos financeiros obrigatórios (Valor, Condições, Motorista, Placa).");
+          setIsCreatingFinancialTicket(false);
+          return;
+        }
+        const functions = getFunctions();
+        const createFinancialTicket = httpsCallable(functions, 'createFinancialTicket');
+        await createFinancialTicket({
+          originalTicketId: ticketId,
+          ...financialFormData
+        });
+      }
+      await proceedWithStatusUpdate('executado_aguardando_validacao');
+      alert('Chamado de logística finalizado e enviado para validação!');
+      setIsFinancialModalOpen(false);
+      setFinancialFormData({ valor: '', condicoesPagamento: '', nomeMotorista: '', placaVeiculo: '', observacaoPagamento: '' });
+      setNewStatus('');
+    } catch (error) {
+      console.error("Erro no processo de criação do chamado financeiro:", error);
+      alert(`Erro: ${error.message}`);
+    } finally {
+      setIsCreatingFinancialTicket(false);
     }
   };
 
@@ -1460,25 +1511,25 @@ const TicketDetailPage = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  {(newStatus === TICKET_STATUS.COMPLETED || newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
+                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="conclusion-description">
-                          {newStatus === TICKET_STATUS.COMPLETED ? 'Descrição da Conclusão' : 'Motivo da Rejeição'}
+                          {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição'}
                         </Label>
                         <Textarea
                           id="conclusion-description"
-                          placeholder={newStatus === TICKET_STATUS.COMPLETED ? "Descreva como o problema foi resolvido..." : "Explique o motivo da rejeição..."}
+                          placeholder={newStatus === 'concluido' ? "Descreva como o problema foi resolvido..." : "Explique o motivo da rejeição..."}
                           value={conclusionDescription}
                           onChange={(e) => setConclusionDescription(e.target.value)}
                           rows={3}
-                          className={(newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) ? "border-red-300 focus:border-red-500" : ""}
+                          className={(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) ? "border-red-300 focus:border-red-500" : ""}
                         />
-                        {(newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
+                        {(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
                           <p className="text-xs text-red-600 mt-1">* Campo obrigatório para rejeição</p>
                         )}
                       </div>
-                      {newStatus === TICKET_STATUS.COMPLETED && (
+                      {newStatus === 'concluido' && (
                         <div>
                           <Label>Evidências (Imagens)</Label>
                           <ImageUpload
@@ -1495,10 +1546,10 @@ const TicketDetailPage = () => {
                   <Button
                     onClick={handleStatusUpdate}
                     disabled={!newStatus || updating}
-                    className={`w-full ${newStatus === TICKET_STATUS.REJECTED ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                    variant={newStatus === TICKET_STATUS.REJECTED ? 'destructive' : 'default'}
+                    className={`w-full ${newStatus === 'rejeitado' ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                    variant={newStatus === 'rejeitado' ? 'destructive' : 'default'}
                   >
-                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === TICKET_STATUS.REJECTED ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === 'rejeitado' ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
                     {updating ? 'Atualizando...' : 'Confirmar Ação'}
                   </Button>
                 </CardContent>
@@ -1564,6 +1615,51 @@ const TicketDetailPage = () => {
           </div>
         </div>
       </div>
+      
+      <Dialog open={isFinancialModalOpen} onOpenChange={setIsFinancialModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="text-green-600" />
+              Criar Chamado Financeiro
+            </DialogTitle>
+            <DialogDescription>
+              Este chamado de frete foi executado. Deseja criar um chamado dependente para o financeiro realizar o pagamento?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="valor">Valor (R$)</Label>
+              <Input id="valor" value={financialFormData.valor} onChange={(e) => setFinancialFormData({...financialFormData, valor: e.target.value})} placeholder="Ex: 150,00" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="condicoes">Condições de Pagamento</Label>
+              <Input id="condicoes" value={financialFormData.condicoesPagamento} onChange={(e) => setFinancialFormData({...financialFormData, condicoesPagamento: e.target.value})} placeholder="Ex: PIX na entrega" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="motorista">Nome do Motorista</Label>
+              <Input id="motorista" value={financialFormData.nomeMotorista} onChange={(e) => setFinancialFormData({...financialFormData, nomeMotorista: e.target.value})} placeholder="Nome completo" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="placa">Placa do Veículo</Label>
+              <Input id="placa" value={financialFormData.placaVeiculo} onChange={(e) => setFinancialFormData({...financialFormData, placaVeiculo: e.target.value})} placeholder="Ex: BRA2E19" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="observacao">Observação de Pagamento (Opcional)</Label>
+              <Textarea id="observacao" value={financialFormData.observacaoPagamento} onChange={(e) => setFinancialFormData({...financialFormData, observacaoPagamento: e.target.value})} placeholder="Detalhes adicionais para o financeiro..." />
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-between">
+            <Button type="button" variant="ghost" onClick={() => handleSubmitFinancialTicket(true)} disabled={isCreatingFinancialTicket}>
+              Não, apenas finalizar chamado
+            </Button>
+            <Button type="button" onClick={() => handleSubmitFinancialTicket(false)} disabled={isCreatingFinancialTicket}>
+              {isCreatingFinancialTicket ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Criar Chamado Financeiro
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
