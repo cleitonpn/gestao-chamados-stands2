@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Header from '../components/Header';
+import * as XLSX from 'xlsx'; // ✅ CORREÇÃO: Importa a biblioteca para gerar planilhas
 import { 
   BarChart3, Users, FolderOpen, AlertTriangle, Clock, CheckCircle, TrendingUp, Activity,
   Timer, Target, Zap, Calendar, RefreshCw, Building, UserCheck, FilePlus2, DollarSign,
@@ -22,17 +23,14 @@ const AdminPanelPage = () => {
   const { user, userProfile, authInitialized } = useAuth();
   const navigate = useNavigate();
   
-  // Estados de UI
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(new Date());
   
-  // Dados brutos
   const [allProjects, setAllProjects] = useState([]);
   const [allTickets, setAllTickets] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   
-  // Dados filtrados e estatísticas
   const [filters, setFilters] = useState({ dateRange: { from: '', to: '' } });
   const [stats, setStats] = useState({
     projetos: {}, chamados: {}, performance: {}, alertas: {
@@ -53,12 +51,11 @@ const AdminPanelPage = () => {
     }
   }, [authInitialized, user, userProfile]);
 
-  // Recalcula estatísticas quando os filtros mudam
   useEffect(() => {
-    if (!loading) {
+    if (allProjects.length > 0 || allTickets.length > 0 || allUsers.length > 0) {
       calculateStatistics(allProjects, allTickets, allUsers, filters);
     }
-  }, [filters, loading]);
+  }, [filters, allProjects, allTickets, allUsers]);
 
   const loadAdminData = async () => {
     try {
@@ -72,7 +69,7 @@ const AdminPanelPage = () => {
       setAllProjects(projectsData);
       setAllTickets(ticketsData);
       setAllUsers(usersData);
-      calculateStatistics(projectsData, ticketsData, usersData, filters);
+      // A chamada para calculateStatistics será feita pelo useEffect
       setLastUpdate(new Date());
     } catch (error) {
       console.error('❌ Erro ao carregar dados do painel:', error);
@@ -83,8 +80,9 @@ const AdminPanelPage = () => {
   };
 
   const calculateStatistics = (projectsData, ticketsData, usersData, currentFilters) => {
-    // Aplica filtros
     let filteredTickets = [...ticketsData];
+    let filteredProjects = [...projectsData]; // Começamos com todos os projetos
+
     if (currentFilters.dateRange.from) {
         const fromDate = new Date(currentFilters.dateRange.from);
         filteredTickets = filteredTickets.filter(t => t.createdAt?.toDate() >= fromDate);
@@ -95,7 +93,6 @@ const AdminPanelPage = () => {
         filteredTickets = filteredTickets.filter(t => t.createdAt?.toDate() <= toDate);
     }
     
-    // O resto das estatísticas é calculado com base nos tickets filtrados
     const produtores = usersData.filter(u => u.funcao === 'produtor');
     const consultores = usersData.filter(u => u.funcao === 'consultor');
     const operadores = usersData.filter(u => u.funcao === 'operador');
@@ -112,21 +109,33 @@ const AdminPanelPage = () => {
     const chamadosSemTratativa = filteredTickets.filter(ticket => 
       ticket.status === 'aberto' && !ticket.atribuidoA
     );
-
+    
+    // ✅ CORREÇÃO: Lógica de cálculo das estatísticas restaurada
+    const projetosStats = {
+      porProdutor: produtores.map(p => ({
+        nome: p.nome,
+        totalProjetos: projectsData.filter(proj => proj.produtorId === p.id).length,
+      })),
+      porConsultor: consultores.map(c => ({
+        nome: c.nome,
+        projetosAtivos: projectsData.filter(p => p.consultorId === c.id && p.status !== 'encerrado').length,
+      })),
+    };
+    
     const chamadosStats = {
         porProdutor: produtores.map(p => ({
             nome: p.nome,
-            chamadosAbertos: filteredTickets.filter(t => t.criadoPor === p.id).length,
+            chamadosAbertos: filteredTickets.filter(t => t.criadoPor === p.uid).length,
         })),
         porConsultor: consultores.map(c => ({
             nome: c.nome,
-            chamadosAbertos: filteredTickets.filter(t => t.criadoPor === c.id).length,
+            chamadosAbertos: filteredTickets.filter(t => t.criadoPor === c.uid).length,
         })),
         emTratativaPorArea: (() => {
             const map = {};
             filteredTickets.filter(t => ['em_tratativa', 'em_andamento'].includes(t.status)).forEach(t => {
                 const area = t.area || 'Sem Área';
-                if(!map[area]) map[area] = { name: area, value: 0 };
+                if(!map[area]) map[area] = { name: area.replace(/_/g, ' '), value: 0 };
                 map[area].value++;
             });
             return Object.values(map);
@@ -134,15 +143,33 @@ const AdminPanelPage = () => {
         semTratativa: chamadosSemTratativa.length,
         aguardandoAprovacaoGerente: gerentes.map(g => ({
             nome: g.nome,
-            count: filteredTickets.filter(t => t.status === 'aguardando_aprovacao' && t.gerenteResponsavelId === g.id).length
+            count: filteredTickets.filter(t => t.status === 'aguardando_aprovacao' && t.gerenteResponsavelId === g.uid).length
         })),
         chamadosExtras: filteredTickets.filter(t => t.isExtra === true),
     };
+    
+    const calcularTempoMedio = (tickets, startField, endField) => {
+        const tempos = tickets.filter(t => t[startField] && t[endField]).map(t => {
+            const inicio = t[startField].seconds ? new Date(t[startField].seconds * 1000) : new Date(t[startField]);
+            const fim = t[endField].seconds ? new Date(t[endField].seconds * 1000) : new Date(t[endField]);
+            return (fim - inicio) / (1000 * 60 * 60);
+        });
+        if (tempos.length === 0) return 'N/A';
+        const media = tempos.reduce((a, b) => a + b, 0) / tempos.length;
+        return `${media.toFixed(1)}h`;
+    };
+    
+    const performanceStats = {
+        tempoMedioTratativa: calcularTempoMedio(filteredTickets, 'createdAt', 'atribuidoEm'),
+        tempoMedioExecucao: calcularTempoMedio(filteredTickets, 'atribuidoEm', 'executadoEm'),
+        porcentagemEscalados: filteredTickets.length > 0 ? Math.round((filteredTickets.filter(t => t.escaladoParaGerencia === true).length / filteredTickets.length) * 100) : 0,
+        quantidadeExtras: filteredTickets.filter(t => t.isExtra === true).length,
+    };
 
     setStats({
-      projetos: { /* ... sua lógica de projetos ... */ },
+      projetos: projetosStats,
       chamados: chamadosStats,
-      performance: { /* ... sua lógica de performance ... */ },
+      performance: performanceStats,
       alertas: {
         chamadosParados: chamadosParados.length,
         chamadosParadosDetalhes: chamadosParados,
@@ -159,10 +186,8 @@ const AdminPanelPage = () => {
             status: 'em_tratativa',
             atribuidoEm: new Date(),
         });
-        // Recarrega os dados para refletir a mudança
         loadAdminData();
     } catch (error) {
-        console.error("Erro ao atribuir chamado:", error);
         alert("Falha ao atribuir o chamado.");
     }
   };
@@ -176,6 +201,7 @@ const AdminPanelPage = () => {
             'Projeto': allProjects.find(p => p.id === ticket.projetoId)?.nome || 'N/A',
             'Motivo Extra': ticket.motivoExtra,
             'Criado Em': ticket.createdAt?.toDate().toLocaleDateString('pt-BR'),
+            'Faturado': ticket.faturado ? 'Sim' : 'Não'
         }));
 
     if (dataToExport.length === 0) {
@@ -205,7 +231,6 @@ const AdminPanelPage = () => {
         setSelectedExtraTickets(new Set());
         loadAdminData();
     } catch (error) {
-        console.error("Erro ao marcar como faturado:", error);
         alert("Ocorreu um erro.");
     }
   };
@@ -219,8 +244,36 @@ const AdminPanelPage = () => {
     }
     setSelectedExtraTickets(newSelection);
   };
+  
+  // ✅ CORREÇÃO: Funções para os botões de usuário
+  const handleEditUser = (userId) => {
+    // Futuramente, navegará para uma página de edição
+    alert(`Navegando para editar usuário: ${userId} (página a ser criada)`);
+    // navigate(`/admin/usuarios/editar/${userId}`);
+  };
 
-  if (!authInitialized || loading) { /* ... */ }
+  const handleDeactivateUser = async (userId, userName) => {
+    if (!window.confirm(`Tem certeza que deseja desativar o usuário ${userName}?`)) return;
+    try {
+      // Supondo que exista uma função no seu userService para isso
+      // await userService.deactivateUser(userId);
+      alert(`Usuário ${userName} desativado com sucesso (função a ser implementada).`);
+      loadAdminData();
+    } catch (err) {
+      alert("Erro ao desativar usuário.");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+            <RefreshCw className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+            <p className="text-gray-600">Carregando painel administrativo...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -246,7 +299,6 @@ const AdminPanelPage = () => {
           </div>
         </div>
 
-        {/* Alertas Acionáveis */}
         <Card className="mb-6 bg-red-50 border-red-200">
             <CardHeader><CardTitle className="text-red-800 flex items-center gap-2"><AlertTriangle />Alertas Acionáveis</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -257,7 +309,8 @@ const AdminPanelPage = () => {
                 <Card>
                     <CardHeader><CardTitle className="text-base">Chamados Sem Tratativa</CardTitle></CardHeader>
                     <CardContent>
-                        {stats.alertas.semResponsavelDetalhes.slice(0, 3).map(ticket => (
+                        {stats.alertas.semResponsavelDetalhes?.length === 0 && <p className="text-sm text-gray-500">Nenhum chamado sem atribuição.</p>}
+                        {stats.alertas.semResponsavelDetalhes?.slice(0, 3).map(ticket => (
                             <div key={ticket.id} className="flex items-center justify-between gap-2 mb-2">
                                 <span className="text-sm truncate" title={ticket.titulo}>{ticket.titulo}</span>
                                 <Select onValueChange={(operatorId) => handleAssignTicket(ticket.id, operatorId)}>
@@ -266,7 +319,7 @@ const AdminPanelPage = () => {
                                 </Select>
                             </div>
                         ))}
-                        {stats.alertas.semResponsavelDetalhes.length > 3 && <p className="text-xs text-gray-500 text-center mt-2">... e mais {stats.alertas.semResponsavelDetalhes.length - 3}</p>}
+                        {stats.alertas.semResponsavelDetalhes?.length > 3 && <p className="text-xs text-gray-500 text-center mt-2">... e mais {stats.alertas.semResponsavelDetalhes.length - 3}</p>}
                     </CardContent>
                 </Card>
             </CardContent>
@@ -281,15 +334,80 @@ const AdminPanelPage = () => {
             <TabsTrigger value="extras">💲 Extras</TabsTrigger>
             <TabsTrigger value="usuarios">👥 Usuários</TabsTrigger>
           </TabsList>
+            
+          <TabsContent value="projetos" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader><CardTitle>Projetos Ativos por Consultor</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {stats.projetos.porConsultor?.map((data, i) => (
+                  <div key={i} className="flex justify-between items-center p-2 bg-gray-50 rounded-md">
+                    <p className="font-medium text-sm">{data.nome}</p>
+                    <Badge>{data.projetosAtivos} ativos</Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Total de Projetos por Produtor</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {stats.projetos.porProdutor?.map((data, i) => (
+                   <div key={i} className="flex justify-between items-center p-2 bg-gray-50 rounded-md">
+                    <p className="font-medium text-sm">{data.nome}</p>
+                    <Badge>{data.totalProjetos} projetos</Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-          {/* ... Conteúdo das abas existentes ... */}
+          <TabsContent value="chamados" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+             <Card>
+                <CardHeader><CardTitle>Chamados Abertos por Produtor</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                {stats.chamados.porProdutor?.map((data, i) => (
+                    <div key={i} className="flex justify-between p-2 bg-gray-50 rounded-md">
+                    <span>{data.nome}</span>
+                    <Badge>{data.chamadosAbertos}</Badge>
+                    </div>
+                ))}
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle>Chamados Abertos por Consultor</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                {stats.chamados.porConsultor?.map((data, i) => (
+                    <div key={i} className="flex justify-between p-2 bg-gray-50 rounded-md">
+                    <span>{data.nome}</span>
+                    <Badge>{data.chamadosAbertos}</Badge>
+                    </div>
+                ))}
+                </CardContent>
+            </Card>
+          </TabsContent>
+          
+          <TabsContent value="performance" className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                  <CardHeader><CardTitle>Tempo Médio de 1ª Resposta</CardTitle></CardHeader>
+                  <CardContent>
+                      <p className="text-3xl font-bold">{stats.performance.tempoMedioTratativa}</p>
+                      <p className="text-sm text-gray-500">Desde a criação até o início da tratativa.</p>
+                  </CardContent>
+              </Card>
+                <Card>
+                  <CardHeader><CardTitle>Tempo Médio de Execução</CardTitle></CardHeader>
+                  <CardContent>
+                      <p className="text-3xl font-bold">{stats.performance.tempoMedioExecucao}</p>
+                      <p className="text-sm text-gray-500">Desde o início da tratativa até a execução.</p>
+                  </CardContent>
+              </Card>
+          </TabsContent>
 
           <TabsContent value="areas" className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card>
                   <CardHeader><CardTitle>Carga de Trabalho (Em Tratativa)</CardTitle></CardHeader>
                   <CardContent className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={stats.chamados.emTratativaPorArea} layout="vertical">
+                          <BarChart data={stats.chamados.emTratativaPorArea} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis type="number" />
                               <YAxis type="category" dataKey="name" width={120} fontSize={12} />
@@ -302,12 +420,14 @@ const AdminPanelPage = () => {
               <Card>
                   <CardHeader><CardTitle>Aguardando Aprovação por Gerente</CardTitle></CardHeader>
                   <CardContent className="space-y-2">
-                      {stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).map((data, i) => (
-                          <div key={i} className="flex justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                              <span>{data.nome}</span>
-                              <Badge variant="destructive">{data.count}</Badge>
-                          </div>
-                      ))}
+                      {stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).length > 0 ? (
+                        stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).map((data, i) => (
+                            <div key={i} className="flex justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                                <span>{data.nome}</span>
+                                <Badge variant="destructive">{data.count}</Badge>
+                            </div>
+                        ))
+                      ) : (<p className="text-sm text-gray-500">Nenhum chamado aguardando aprovação.</p>)}
                   </CardContent>
               </Card>
           </TabsContent>
@@ -334,7 +454,7 @@ const AdminPanelPage = () => {
                   {stats.chamados.chamadosExtras?.map(ticket => (
                     <div key={ticket.id} className={`flex justify-between items-center p-3 rounded-lg border transition-colors ${selectedExtraTickets.has(ticket.id) ? 'bg-blue-50' : 'bg-gray-50'}`}>
                       <div className="flex items-center gap-3">
-                        <input type="checkbox" checked={selectedExtraTickets.has(ticket.id)} onChange={() => handleToggleExtraTicket(ticket.id)} />
+                        <input type="checkbox" checked={selectedExtraTickets.has(ticket.id)} onChange={() => handleToggleExtraTicket(ticket.id)} className="h-4 w-4" />
                         <div>
                           <p className={`font-medium ${ticket.faturado ? 'line-through text-gray-500' : ''}`}>{ticket.titulo}</p>
                           <p className="text-sm text-gray-500">Projeto: {allProjects.find(p => p.id === ticket.projetoId)?.nome || 'N/A'}</p>
@@ -359,8 +479,8 @@ const AdminPanelPage = () => {
                       <p className="text-sm text-gray-500">{u.email} - <span className="capitalize font-semibold">{u.funcao}</span></p>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm"><Edit className="h-4 w-4 mr-2" />Editar</Button>
-                      <Button variant="destructive" size="sm"><UserX className="h-4 w-4 mr-2" />Desativar</Button>
+                      <Button variant="outline" size="sm" onClick={() => handleEditUser(u.id)}><Edit className="h-4 w-4 mr-2" />Editar</Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleDeactivateUser(u.id, u.nome)}><UserX className="h-4 w-4 mr-2" />Desativar</Button>
                     </div>
                   </div>
                 ))}
