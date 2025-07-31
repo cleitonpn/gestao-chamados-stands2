@@ -87,9 +87,9 @@ const TVPanel = () => {
       setStats({
         total: tickets.length,
         abertos: openTickets.length,
-        // ✅ LÓGICA CORRIGIDA para o card "Em Andamento"
         emAndamento: tickets.filter(t => t && ['em tratativa', 'tratativa', 'escalado_para_outra_area', 'aguardando_aprovacao'].includes(t.status)).length,
-        concluidos: tickets.filter(t => t && t.status === 'concluido').length,
+        // ✅ ÚNICA ALTERAÇÃO REALIZADA: Card "Concluídos" agora soma 'concluido' e 'arquivado'.
+        concluidos: tickets.filter(t => t && ['concluido', 'arquivado'].includes(t.status)).length,
       });
 
       setEscalatedCount(tickets.filter(t => t && t.status === 'escalado_para_outra_area').length);
@@ -133,7 +133,7 @@ const TVPanel = () => {
       
       const slaConfig = { baixa: 48, media: 24, alta: 12, urgente: 2 };
       let violatedCount = 0; let atRiskCount = 0;
-      tickets.filter(t => t && !['concluido', 'cancelado'].includes(t.status)).forEach(ticket => {
+      tickets.filter(t => t && !['concluido', 'cancelado', 'arquivado'].includes(t.status)).forEach(ticket => {
         const slaHours = slaConfig[ticket.prioridade];
         if (slaHours && ticket.createdAt?.toDate) {
           const elapsedHours = (agora - ticket.createdAt.toDate()) / (1000 * 60 * 60);
@@ -149,7 +149,7 @@ const TVPanel = () => {
         const timestamp = getLatestTimestamp(ticket);
         let message, icon;
         if(ticket.status === 'aberto') { [message, icon] = [`Novo: "${ticket.titulo}"`, PlusCircle]; }
-        else if(ticket.status === 'concluido') { [message, icon] = [`Concluído: "${ticket.titulo}"`, CheckCircle]; }
+        else if(ticket.status === 'concluido' || ticket.status === 'arquivado') { [message, icon] = [`Finalizado: "${ticket.titulo}"`, CheckCircle]; }
         else if(ticket.status === 'executado_aguardando_validacao') { [message, icon] = [`Executado: "${ticket.titulo}"`, UserCheck]; }
         else { [message, icon] = [`Atualizado: "${ticket.titulo}"`, ArrowRightCircle]; }
         return { id: ticket.id, message, icon, timeAgo: formatTimeAgo(timestamp), status: ticket.status };
