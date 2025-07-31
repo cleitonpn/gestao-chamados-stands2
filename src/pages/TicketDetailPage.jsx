@@ -42,6 +42,8 @@ import {
   Shield,
   ThumbsUp,
   ThumbsDown,
+  Archive, // ✅ ÍCONE ADICIONADO
+  ArchiveRestore // ✅ ÍCONE ADICIONADO
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -180,6 +182,53 @@ const TicketDetailPage = () => {
 
     loadUsers();
   }, []);
+    
+  // ✅ NOVA FUNÇÃO PARA ARQUIVAR
+  const handleArchiveTicket = async () => {
+    if (!window.confirm('Tem certeza que deseja arquivar este chamado? Ele sairá da visualização principal e só poderá ser consultado.')) {
+        return;
+    }
+
+    setUpdating(true);
+    try {
+        await ticketService.updateTicket(ticketId, {
+            status: 'arquivado',
+            arquivadoEm: new Date(),
+            arquivadoPor: user.uid,
+            dataUltimaAtualizacao: new Date()
+        });
+        alert('Chamado arquivado com sucesso!');
+        navigate('/dashboard');
+    } catch (error) {
+        console.error('Erro ao arquivar chamado:', error);
+        alert('Ocorreu um erro ao arquivar o chamado.');
+        setUpdating(false);
+    }
+  };
+
+  // ✅ NOVA FUNÇÃO PARA DESARQUIVAR
+  const handleUnarchiveTicket = async () => {
+    if (!window.confirm('Deseja desarquivar este chamado? Ele voltará para a lista de concluídos.')) {
+        return;
+    }
+
+    setUpdating(true);
+    try {
+        await ticketService.updateTicket(ticketId, {
+            status: 'concluido',
+            arquivadoEm: null,
+            arquivadoPor: null,
+            dataUltimaAtualizacao: new Date()
+        });
+        alert('Chamado desarquivado com sucesso!');
+        loadTicketData();
+    } catch (error) {
+        console.error('Erro ao desarquivar chamado:', error);
+        alert('Ocorreu um erro ao desarquivar o chamado.');
+    } finally {
+        setUpdating(false);
+    }
+  };
 
   const getUserNameById = (userId) => {
       if (!users || !userId) return 'Sistema';
@@ -355,7 +404,8 @@ const TicketDetailPage = () => {
       'cancelado': 'bg-red-100 text-red-800',
       'devolvido': 'bg-pink-100 text-pink-800',
       'aprovado': 'bg-green-100 text-green-800',
-      'reprovado': 'bg-red-100 text-red-800'
+      'reprovado': 'bg-red-100 text-red-800',
+      'arquivado': 'bg-gray-100 text-gray-700'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
@@ -374,7 +424,8 @@ const TicketDetailPage = () => {
       'cancelado': 'Cancelado',
       'devolvido': 'Devolvido',
       'aprovado': 'Aprovado',
-      'reprovado': 'Reprovado'
+      'reprovado': 'Reprovado',
+      'arquivado': 'Arquivado'
     };
     return statusTexts[status] || status;
   };
@@ -881,6 +932,7 @@ const TicketDetailPage = () => {
   }
 
   const availableStatuses = getAvailableStatuses();
+  const isArchived = ticket.status === 'arquivado';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -918,6 +970,15 @@ const TicketDetailPage = () => {
             </div>
           </div>
         </div>
+
+        {isArchived && (
+          <Alert variant="default" className="mb-6 bg-gray-100 border-gray-300">
+              <Archive className="h-4 w-4" />
+              <AlertDescription>
+                  Este chamado está arquivado e é somente para consulta. Para fazer alterações, é preciso desarquivá-lo.
+              </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
@@ -1086,11 +1147,12 @@ const TicketDetailPage = () => {
                     <div className="relative">
                       <Textarea
                         ref={textareaRef}
-                        placeholder="Digite sua mensagem..."
+                        placeholder={isArchived ? "Este chamado está arquivado e não permite novas mensagens." : "Digite sua mensagem..."}
                         value={newMessage}
                         onChange={handleTextareaChange}
                         onKeyDown={handleTextareaKeyDown}
                         rows={3}
+                        disabled={isArchived || sendingMessage}
                       />
                       {showMentionSuggestions && mentionSuggestions.length > 0 && (
                         <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
@@ -1108,17 +1170,19 @@ const TicketDetailPage = () => {
                         </div>
                       )}
                     </div>
-                    <ImageUpload
-                      onImagesUploaded={setChatImages}
-                      existingImages={chatImages}
-                      maxImages={3}
-                      buttonText="Anexar ao Chat"
-                      className="border-t pt-3"
-                    />
+                    {!isArchived && (
+                        <ImageUpload
+                          onImagesUploaded={setChatImages}
+                          existingImages={chatImages}
+                          maxImages={3}
+                          buttonText="Anexar ao Chat"
+                          className="border-t pt-3"
+                        />
+                    )}
                     <div className="flex items-center justify-end">
                       <Button
                         onClick={handleSendMessage}
-                        disabled={sendingMessage || (!newMessage.trim() && chatImages.length === 0)}
+                        disabled={isArchived || sendingMessage || (!newMessage.trim() && chatImages.length === 0)}
                       >
                         {sendingMessage ? (
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1133,7 +1197,7 @@ const TicketDetailPage = () => {
               </CardContent>
             </Card>
 
-            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && (
+            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && (
               <Card className="mt-6">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><span className="text-2xl">🔄</span>Escalar Chamado</CardTitle>
@@ -1194,7 +1258,7 @@ const TicketDetailPage = () => {
             )}
 
 
-            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && project?.consultorId && (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
+            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && project?.consultorId && (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
               <Card className="mt-6">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><span className="text-2xl">👨‍🎯</span>Escalar para Consultor</CardTitle>
@@ -1233,7 +1297,7 @@ const TicketDetailPage = () => {
               </Card>
             )}
 
-            {userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
+            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
               <Card className="mt-6">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><span className="text-2xl">👨‍💼</span>Escalar para Gerência</CardTitle>
@@ -1285,7 +1349,7 @@ const TicketDetailPage = () => {
               </Card>
             )}
 
-            {userProfile && userProfile.funcao === 'operador' && project?.produtorId && (
+            {!isArchived && userProfile && userProfile.funcao === 'operador' && project?.produtorId && (
               <Card className="mt-6">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><span className="text-2xl">🏭</span>Transferir para Produtor</CardTitle>
@@ -1355,7 +1419,24 @@ const TicketDetailPage = () => {
               </CardContent>
             </Card>
 
-            {availableStatuses.length > 0 && (
+            {isArchived && userProfile?.funcao === 'administrador' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center text-base sm:text-lg">
+                    <ArchiveRestore className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Ações de Arquivo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Button onClick={handleUnarchiveTicket} disabled={updating} className="w-full">
+                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArchiveRestore className="h-4 w-4 mr-2" />}
+                    Desarquivar Chamado
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {!isArchived && availableStatuses.length > 0 && (
               <Card>
                 <CardHeader className="pb-3 sm:pb-4">
                   <CardTitle className="flex items-center text-base sm:text-lg">
@@ -1419,6 +1500,23 @@ const TicketDetailPage = () => {
                   >
                     {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === TICKET_STATUS.REJECTED ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
                     {updating ? 'Atualizando...' : 'Confirmar Ação'}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {!isArchived && userProfile?.funcao === 'administrador' && ticket.status === 'concluido' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center text-base sm:text-lg">
+                    <Archive className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Ações de Arquivo
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Button onClick={handleArchiveTicket} disabled={updating} variant="outline" className="w-full">
+                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Archive className="h-4 w-4 mr-2" />}
+                    Arquivar Chamado
                   </Button>
                 </CardContent>
               </Card>

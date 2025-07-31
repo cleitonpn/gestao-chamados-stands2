@@ -76,10 +76,21 @@ const DashboardPage = () => {
   };
 
   const getFilteredTickets = () => {
-    let filteredTickets = [...tickets];
+    // Se o filtro 'arquivados' estiver ativo, mostre apenas eles.
+    if (activeFilter === 'arquivados') {
+        return tickets.filter(ticket => ticket.status === 'arquivado').sort((a, b) => {
+            const dateA = a.arquivadoEm?.toDate?.() || a.dataUltimaAtualizacao?.toDate?.() || new Date(0);
+            const dateB = b.arquivadoEm?.toDate?.() || b.dataUltimaAtualizacao?.toDate?.() || new Date(0);
+            return dateB - dateA;
+        });
+    }
+
+    // Para todos os outros filtros, pegue apenas os tickets NÃO arquivados.
+    let filteredTickets = tickets.filter(ticket => ticket.status !== 'arquivado');
 
     switch (activeFilter) {
       case 'todos':
+        // 'todos' agora significa 'todos os ativos'
         break;
       case 'com_notificacao':
         filteredTickets = filteredTickets.filter(ticket => ticketNotifications[ticket.id]);
@@ -133,16 +144,17 @@ const DashboardPage = () => {
   };
 
   const getTicketCounts = () => {
+    const activeTickets = tickets.filter(t => t.status !== 'arquivado');
     const counts = {
-      todos: tickets.length,
+      todos: activeTickets.length,
       com_notificacao: Object.keys(ticketNotifications).length,
-      sem_tratativa: tickets.filter(t => t.status === 'aberto').length,
-      em_tratativa: tickets.filter(t => t.status === 'em_tratativa').length,
-      em_execucao: tickets.filter(t => t.status === 'em_execucao').length,
-      escalado: tickets.filter(t => 
+      sem_tratativa: activeTickets.filter(t => t.status === 'aberto').length,
+      em_tratativa: activeTickets.filter(t => t.status === 'em_tratativa').length,
+      em_execucao: activeTickets.filter(t => t.status === 'em_execucao').length,
+      escalado: activeTickets.filter(t => 
         t.status === 'enviado_para_area' || t.status === 'escalado_para_area'
       ).length,
-      escalado_para_mim: tickets.filter(t => {
+      escalado_para_mim: activeTickets.filter(t => {
         if (t.status === 'escalado_para_outra_area') {
           if (t.areaEscalada === userProfile?.area) return true;
           if (t.usuarioEscalado === user?.uid || t.usuarioEscalado === userProfile?.email || t.usuarioEscalado === userProfile?.nome) return true;
@@ -150,9 +162,10 @@ const DashboardPage = () => {
         }
         return false;
       }).length,
-      aguardando_validacao: tickets.filter(t => t.status === 'executado_aguardando_validacao').length,
-      concluidos: tickets.filter(t => t.status === 'concluido').length,
-      aguardando_aprovacao: tickets.filter(t => t.status === 'aguardando_aprovacao').length
+      aguardando_validacao: activeTickets.filter(t => t.status === 'executado_aguardando_validacao').length,
+      concluidos: activeTickets.filter(t => t.status === 'concluido').length,
+      aguardando_aprovacao: activeTickets.filter(t => t.status === 'aguardando_aprovacao').length,
+      arquivados: tickets.filter(t => t.status === 'arquivado').length
     };
     return counts;
   };
@@ -174,7 +187,8 @@ const DashboardPage = () => {
     { id: 'escalado', title: 'Escalado', icon: ArrowUp, color: 'bg-purple-50 border-purple-200 hover:bg-purple-100', iconColor: 'text-purple-600', activeColor: 'bg-purple-500 text-white border-purple-500' },
     { id: 'escalado_para_mim', title: 'Escalados para Mim', icon: ChevronDown, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
     { id: 'aguardando_validacao', title: 'Aguardando Validação', icon: Hourglass, color: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100', iconColor: 'text-indigo-600', activeColor: 'bg-indigo-500 text-white border-indigo-500' },
-    { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' }
+    { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' },
+    { id: 'arquivados', title: 'Arquivados', icon: Archive, color: 'bg-gray-50 border-gray-200 hover:bg-gray-100', iconColor: 'text-gray-600', activeColor: 'bg-gray-500 text-white border-gray-500' }
   ];
 
   const getDisplayedTickets = () => getFilteredTickets();
@@ -204,7 +218,7 @@ const DashboardPage = () => {
   const handleTicketClick = (ticketId) => navigate(`/chamado/${ticketId}`);
 
   const getStatusColor = (status) => {
-    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800' };
+    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'arquivado': 'bg-gray-100 text-gray-700' };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
   const getPriorityColor = (priority) => {
@@ -619,8 +633,6 @@ const DashboardPage = () => {
                   const IconComponent = card.icon;
                   const isActive = activeFilter === card.id;
                   const count = counts[card.id];
-                  
-                  if (!count && card.id === 'aguardando_aprovacao') return null;
                   
                   return (
                     <Card
