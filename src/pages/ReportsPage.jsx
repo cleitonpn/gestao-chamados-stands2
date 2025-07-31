@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Label } from '@/components/ui/label'; // ✅ CORREÇÃO APLICADA AQUI
 import { 
   ArrowLeft, Download, FileText, BarChart3, Calendar, AlertCircle, Loader2, Eye,
   Filter, Users, PieChart as PieChartIcon, Search, X as XIcon
@@ -33,7 +34,7 @@ const ReportsPage = () => {
   const [generating, setGenerating] = useState(false);
   const [reportPreview, setReportPreview] = useState('');
   
-  // ✅ NOVOS ESTADOS PARA FILTROS E DADOS FILTRADOS
+  // NOVOS ESTADOS PARA FILTROS E DADOS FILTRADOS
   const [filters, setFilters] = useState({
     dateRange: { from: '', to: '' },
     userId: 'all',
@@ -49,7 +50,7 @@ const ReportsPage = () => {
     loadData();
   }, []);
 
-  // ✅ NOVO useEffect PARA APLICAR FILTROS QUANDO OS DADOS OU FILTROS MUDAM
+  // NOVO useEffect PARA APLICAR FILTROS QUANDO OS DADOS OU FILTROS MUDAM
   useEffect(() => {
     applyFilters();
   }, [projects, tickets, filters]);
@@ -94,9 +95,12 @@ const ReportsPage = () => {
 
     // Filtro de Usuário (afeta tanto tickets quanto projetos)
     if (filters.userId !== 'all') {
-      tempTickets = tempTickets.filter(t => t.criadoPor === filters.userId || t.atribuidoA === filters.userId);
-      const userProjectIds = projects.filter(p => p.produtorId === filters.userId || p.consultorId === filters.userId).map(p => p.id);
-      tempProjects = tempProjects.filter(p => userProjectIds.includes(p.id));
+      const user = allUsers.find(u => u.id === filters.userId);
+      if (user) {
+        tempTickets = tempTickets.filter(t => t.criadoPor === user.uid || t.atribuidoA === user.uid || t.produtorId === user.id || t.consultorId === user.id);
+        const userProjectIds = projects.filter(p => p.produtorId === user.id || p.consultorId === user.id).map(p => p.id);
+        tempProjects = tempProjects.filter(p => userProjectIds.includes(p.id));
+      }
     }
     
     setFilteredTickets(tempTickets);
@@ -153,7 +157,6 @@ const ReportsPage = () => {
   };
 
   const handleGenerateGeneralReport = async () => {
-    // Futura implementação do PDF geral
     alert('Geração de relatório geral em PDF a ser implementada.');
   };
   
@@ -195,7 +198,6 @@ const ReportsPage = () => {
     }
   };
 
-  // Memoize para evitar re-renderizações desnecessárias da lista
   const displayedProjects = useMemo(() => 
     filteredProjects.filter(p => p.nome.toLowerCase().includes(searchTerm.toLowerCase())),
     [filteredProjects, searchTerm]
@@ -249,7 +251,7 @@ const ReportsPage = () => {
             <div className="space-y-2">
               <Label>Usuário</Label>
               <Select value={filters.userId} onValueChange={value => handleFilterChange('userId', value)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Todos os Usuários" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os Usuários</SelectItem>
                   {allUsers.map(user => <SelectItem key={user.id} value={user.id}>{user.nome}</SelectItem>)}
@@ -259,7 +261,7 @@ const ReportsPage = () => {
             <div className="space-y-2">
               <Label>Status do Chamado</Label>
               <Select value={filters.status} onValueChange={value => handleFilterChange('status', value)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Todos os Status" /></SelectTrigger>
                 <SelectContent>
                     <SelectItem value="all">Todos os Status</SelectItem>
                     <SelectItem value="aberto">Aberto</SelectItem>
