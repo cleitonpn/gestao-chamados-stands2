@@ -40,7 +40,7 @@ const ReportsPage = () => {
     status: 'all',
     eventId: 'all',
     projectId: 'all',
-    extras: 'all', // all, yes, no
+    extras: 'all',
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredProjects, setFilteredProjects] = useState([]);
@@ -81,20 +81,17 @@ const ReportsPage = () => {
     let tempTickets = [...tickets];
     let tempProjects = [...projects];
 
-    // Filtro de Evento
     if (filters.eventId !== 'all') {
       const projectIdsInEvent = projects.filter(p => p.feira === filters.eventId).map(p => p.id);
       tempProjects = tempProjects.filter(p => p.feira === filters.eventId);
       tempTickets = tempTickets.filter(t => projectIdsInEvent.includes(t.projetoId));
     }
     
-    // Filtro de Projeto
     if (filters.projectId !== 'all') {
       tempProjects = tempProjects.filter(p => p.id === filters.projectId);
       tempTickets = tempTickets.filter(t => t.projetoId === filters.projectId);
     }
     
-    // Filtro de Data
     if (filters.dateRange.from) {
       const fromDate = new Date(filters.dateRange.from);
       tempTickets = tempTickets.filter(t => t.createdAt?.toDate() >= fromDate);
@@ -105,17 +102,14 @@ const ReportsPage = () => {
       tempTickets = tempTickets.filter(t => t.createdAt?.toDate() <= toDate);
     }
 
-    // Filtro de Status
     if (filters.status !== 'all') {
       tempTickets = tempTickets.filter(t => t.status === filters.status);
     }
 
-    // Filtro de Usuário
     if (filters.userId !== 'all') {
       tempTickets = tempTickets.filter(t => t.criadoPor === filters.userId || t.atribuidoA === filters.userId);
     }
 
-    // Filtro de Extras
     if (filters.extras !== 'all') {
         const isExtra = filters.extras === 'yes';
         tempTickets = tempTickets.filter(t => t.isExtra === isExtra);
@@ -208,7 +202,6 @@ const ReportsPage = () => {
       if (isPreview) {
         setReportPreview(markdown);
       } else {
-        // Lógica de download PDF
         const fileName = `relatorio_geral_${Date.now()}`;
         const response = await fetch('https://kkh7ikcgpp6y.manus.space/api/generate-pdf', {
           method: 'POST',
@@ -356,6 +349,7 @@ const ReportsPage = () => {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center"><BarChart3 className="h-5 w-5 mr-2" /> Dashboard de Relatórios</CardTitle>
+            <CardDescription>Resumo visual dos dados filtrados.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
@@ -364,9 +358,36 @@ const ReportsPage = () => {
               <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-600">Chamados em Aberto</p><p className="text-3xl font-bold text-orange-600">{kpiStats.openTickets}</p></div>
               <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-600">Taxa de Resolução</p><p className="text-3xl font-bold text-green-600">{kpiStats.resolutionRate?.toFixed(1)}%</p></div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[300px]">
-              <div className="h-full"><h3 className="text-center font-semibold mb-2">Chamados por Status</h3><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData.ticketsByStatus}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" fontSize={12} /><YAxis /><Tooltip /><Bar dataKey="value" fill="#8884d8" /></BarChart></ResponsiveContainer></div>
-              <div className="h-full"><h3 className="text-center font-semibold mb-2">Chamados por Área</h3><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={chartData.ticketsByArea} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>{chartData.ticketsByArea?.map((entry, index) => (<Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />))}</Pie><Tooltip /><RechartsLegend /></PieChart></ResponsiveContainer></div>
+            
+            {/* ✅ CORREÇÃO APLICADA AQUI */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="h-[300px]">
+                <h3 className="text-center font-semibold mb-2">Chamados por Status</h3>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData.ticketsByStatus}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" fontSize={12} />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="value" fill="#8884d8" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[300px]">
+                <h3 className="text-center font-semibold mb-2">Chamados por Área</h3>
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Pie data={chartData.ticketsByArea} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                            {chartData.ticketsByArea?.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                        </Pie>
+                        <Tooltip />
+                        <RechartsLegend />
+                    </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </CardContent>
         </Card>
