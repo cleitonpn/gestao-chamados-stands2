@@ -99,7 +99,7 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
 
 
 // =================================================================
-// ||        ✅ NOVA FUNÇÃO PARA CRIAR CHAMADO FINANCEIRO         ||
+// ||        ✅ FUNÇÃO ATUALIZADA PARA CRIAR CHAMADO FINANCEIRO      ||
 // =================================================================
 exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
     if (!request.auth) {
@@ -132,6 +132,7 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
         descricao += `\n**Referente ao Chamado de Logística:** #${originalTicketId}`;
 
         const newFinancialTicket = {
+            // Dados essenciais do novo chamado
             titulo: `Pagamento Frete: ${originalTicketData.titulo || 'Título não encontrado'}`,
             descricao: descricao,
             area: 'financeiro',
@@ -140,24 +141,35 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
             prioridade: 'media',
             isConfidential: true,
             isExtra: false,
+            
+            // Dados de rastreabilidade
             chamadoPaiId: originalTicketId,
             projetoId: originalTicketData.projetoId || null,
+            
+            // Dados do criador (operador de logística)
             criadoPor: uid,
             criadoPorNome: creatorData?.nome || 'Operador de Logística',
             criadoPorFuncao: creatorData?.funcao || 'operador',
             areaDeOrigem: creatorData?.area || 'logistica',
             areasEnvolvidas: [creatorData?.area || 'logistica', 'financeiro'],
+
+            // Campos padrão para consistência do sistema (evitar erros)
             atribuidoA: null,
             atribuidoEm: null,
             concluidoEm: null,
             concluidoPor: null,
+            executadoEm: null,
+            historicoStatus: [],
             imagens: [],
+            
+            // Timestamps
             criadoEm: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
         const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
         
+        // Atualiza o novo chamado com seu próprio ID para consistência
         await newTicketRef.update({ id: newTicketRef.id });
 
         console.log(`✅ Chamado financeiro ${newTicketRef.id} criado e atualizado com seu ID.`);
