@@ -99,7 +99,7 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
 
 
 // =================================================================
-// ||        ✅ NOVA FUNÇÃO PARA CRIAR CHAMADO FINANCEIRO         ||
+// ||        ✅ FUNÇÃO ATUALIZADA PARA CRIAR CHAMADO FINANCEIRO      ||
 // =================================================================
 exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
     if (!request.auth) {
@@ -125,6 +125,7 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
         const originalTicketData = originalTicketSnap.data();
         const creatorData = await getUserData(uid);
         
+        // Monta a descrição, incluindo a observação se ela existir
         let descricao = `**Dados para Pagamento:**\n- Valor: R$ ${valor}\n- Condições: ${condicoesPagamento}\n- Motorista: ${nomeMotorista}\n- Placa: ${placaVeiculo}\n`;
         if (observacaoPagamento && observacaoPagamento.trim() !== '') {
             descricao += `- Observação: ${observacaoPagamento}\n`;
@@ -143,8 +144,9 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
             projetoId: originalTicketData.projetoId,
             criadoPor: uid,
             criadoPorNome: creatorData?.nome || 'Operador de Logística',
-            criadoEm: new Date(),
-            updatedAt: new Date(),
+            // ✅ CORREÇÃO APLICADA AQUI: Usando o timestamp do servidor
+            criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
         const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
