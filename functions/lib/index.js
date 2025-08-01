@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// ✅ NOVAS FUNÇÕES ADICIONADAS À LISTA DE EXPORTAÇÃO
+// ✅ FUNÇÕES EXPORTADAS, INCLUINDO A createFinancialTicket
 exports.createFinancialTicket = exports.onTicketUpdated = exports.uploadImage = void 0;
 const admin = require("firebase-admin");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -116,7 +116,7 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
 }
 
 // =================================================================
-// ||        ✅ NOVA FUNÇÃO PARA CRIAR CHAMADO FINANCEIRO         ||
+// ||        ✅ FUNÇÃO RESTAURADA PARA CRIAR CHAMADO FINANCEIRO   ||
 // =================================================================
 exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
     if (!request.auth) {
@@ -177,6 +177,7 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
 
         const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
         
+        // Atualiza o novo chamado com seu próprio ID
         await newTicketRef.update({ id: newTicketRef.id });
 
         console.log(`✅ Chamado financeiro ${newTicketRef.id} criado e atualizado com seu ID.`);
@@ -190,35 +191,34 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
 
 
 // Função principal para monitorar atualizações de chamados
-exports.onTicketUpdated = (0, onDocumentUpdated)('chamados/{ticketId}', async (event) => {
-    var _a, _b;
-    const beforeSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before;
-    const afterSnap = (_b = event.data) === null || _b === void 0 ? void 0 : _b.after;
+exports.onTicketUpdated = onDocumentUpdated('chamados/{ticketId}', async (event) => {
+    const beforeSnap = event.data?.before;
+    const afterSnap = event.data?.after;
+
     if (!beforeSnap || !afterSnap) {
         console.log('Dados de before/after não disponíveis');
         return;
     }
+
     const before = beforeSnap.data();
     const after = afterSnap.data();
     const ticketId = event.params.ticketId;
-    // Adicionar ID do chamado aos dados
-    after.id = ticketId;
+    after.id = ticketId; // Adicionar ID do chamado aos dados
+
     try {
         console.log(`🔄 Processando atualização do chamado ${ticketId}`);
         console.log(`Status: ${before.status} → ${after.status}`);
         console.log(`Área: ${before.area} → ${after.area}`);
-        // Buscar dados do projeto
+        
         const projectData = await getProjectData(after.projetoId);
         if (!projectData) {
             console.error('Dados do projeto não encontrados');
             return;
         }
-        // 1. CHAMADO INICIA TRATATIVA
-        if (before.status !== 'em_tratativa' && after.status === 'em_tratativa') {
-            await handleTicketStartedTreatment(after, projectData);
-        }
-        // Também verificar se mudou para em_execucao
-        else if (before.status !== 'em_execucao' && after.status === 'em_execucao') {
+
+        // 1. CHAMADO INICIA TRATATIVA OU EXECUÇÃO
+        if ((before.status !== 'em_tratativa' && after.status === 'em_tratativa') ||
+            (before.status !== 'em_execucao' && after.status === 'em_execucao')) {
             await handleTicketStartedTreatment(after, projectData);
         }
         // 2. CHAMADO ESCALADO PARA UMA ÁREA
@@ -230,31 +230,29 @@ exports.onTicketUpdated = (0, onDocumentUpdated)('chamados/{ticketId}', async (e
             await handleTicketEscalatedToManager(after, projectData);
         }
         // 4. DEVOLUTIVA DO GERENTE (APROVADO/REJEITADO)
-        else if (before.status === 'aguardando_aprovacao' &&
-            (after.status === 'aprovado' || after.status === 'rejeitado')) {
+        else if (before.status === 'aguardando_aprovacao' && (after.status === 'aprovado' || after.status === 'rejeitado')) {
             await handleManagerDecision(before, after, projectData);
         }
         // 5. CHAMADO EXECUTADO PELO OPERADOR
-        else if (before.status !== 'executado_aguardando_validacao' &&
-            after.status === 'executado_aguardando_validacao') {
+        else if (before.status !== 'executado_aguardando_validacao' && after.status === 'executado_aguardando_validacao') {
             await handleTicketExecuted(after, projectData);
         }
-        // ✅ 6. NOVA LÓGICA PARA O FLUXO DO CONSULTOR
+        // ✅ 6. LÓGICA CORRIGIDA PARA O FLUXO DO CONSULTOR
         else if (before.status !== 'executado_pelo_consultor' && after.status === 'executado_pelo_consultor') {
             console.log('👨‍🎯 Processando devolução do consultor para a área de origem.');
             if (after.areaDeOrigem) {
+                // Atualiza o status para 'executado_pelo_consultor' e devolve para a área de origem
                 await admin.firestore().collection('chamados').doc(ticketId).update({
-                    status: 'em_tratativa',
                     area: after.areaDeOrigem,
+                    // O status já foi definido como 'executado_pelo_consultor' pelo frontend, aqui apenas garantimos a área.
+                    // Opcional: limpar campos de consultor
                     consultorResponsavelId: null, 
-                    motivoEscalonamentoConsultor: null
                 });
-                console.log(`✅ Chamado ${ticketId} devolvido para a área: ${after.areaDeOrigem}`);
+                console.log(`✅ Chamado ${ticketId} devolvido para a área: ${after.areaDeOrigem} com status 'executado_pelo_consultor'.`);
             }
         }
         console.log(`✅ Processamento de atualização concluído para chamado ${ticketId}`);
-    }
-    catch (error) {
+    } catch (error) {
         console.error(`❌ Erro ao processar atualização do chamado ${ticketId}:`, error);
     }
 });
@@ -262,19 +260,13 @@ exports.onTicketUpdated = (0, onDocumentUpdated)('chamados/{ticketId}', async (e
 async function handleTicketStartedTreatment(ticket, project) {
     console.log('📋 Processando início de tratativa');
     const recipients = [];
-    // Notificar Produtor do projeto
     if (project.produtorId) {
         const producer = await getUserData(project.produtorId);
-        if (producer === null || producer === void 0 ? void 0 : producer.email) {
-            recipients.push(producer.email);
-        }
+        if (producer?.email) recipients.push(producer.email);
     }
-    // Notificar Consultor do projeto
     if (project.consultorId) {
         const consultant = await getUserData(project.consultorId);
-        if (consultant === null || consultant === void 0 ? void 0 : consultant.email) {
-            recipients.push(consultant.email);
-        }
+        if (consultant?.email) recipients.push(consultant.email);
     }
     if (recipients.length > 0) {
         await sendEmailViaSendGrid(recipients, `Chamado em Andamento: ${ticket.titulo}`, 'ticket_started_treatment', ticket, project);
@@ -284,29 +276,20 @@ async function handleTicketStartedTreatment(ticket, project) {
 async function handleTicketEscalatedToArea(before, after, project) {
     console.log(`🔄 Processando escalação de área: ${before.area} → ${after.area}`);
     const recipients = [];
-    // Notificar todos os operadores da nova área de destino
     const areaUsers = await getUsersByArea(after.area);
     areaUsers.forEach(user => {
-        if (user.email && !recipients.includes(user.email)) {
-            recipients.push(user.email);
-        }
+        if (user.email && !recipients.includes(user.email)) recipients.push(user.email);
     });
-    // Notificar Produtor do projeto
     if (project.produtorId) {
         const producer = await getUserData(project.produtorId);
-        if ((producer === null || producer === void 0 ? void 0 : producer.email) && !recipients.includes(producer.email)) {
-            recipients.push(producer.email);
-        }
+        if (producer?.email && !recipients.includes(producer.email)) recipients.push(producer.email);
     }
-    // Notificar Consultor do projeto
     if (project.consultorId) {
         const consultant = await getUserData(project.consultorId);
-        if ((consultant === null || consultant === void 0 ? void 0 : consultant.email) && !recipients.includes(consultant.email)) {
-            recipients.push(consultant.email);
-        }
+        if (consultant?.email && !recipients.includes(consultant.email)) recipients.push(consultant.email);
     }
     if (recipients.length > 0) {
-        const areaName = after.area.replace('_', ' ').toUpperCase();
+        const areaName = after.area.replace(/_/g, ' ').toUpperCase();
         await sendEmailViaSendGrid(recipients, `Chamado Escalado para ${areaName}: ${after.titulo}`, 'ticket_escalated_to_area', after, project, {
             previousArea: before.area,
             newArea: after.area,
@@ -318,48 +301,27 @@ async function handleTicketEscalatedToArea(before, after, project) {
 async function handleTicketEscalatedToManager(ticket, project) {
     console.log('👔 Processando escalação para gerente');
     const recipients = [];
-    // Notificar o gerente da área responsável pela aprovação
-    // Mapear área para tipo de gerente
     let managerFunction = '';
+    // Lógica para determinar a função do gerente
     switch (ticket.area) {
-        case 'compras':
-        case 'locacao':
-        case 'operacional':
-        case 'logistica':
-            managerFunction = 'gerente_operacional';
-            break;
+        case 'compras': case 'locacao': case 'operacional': case 'logistica':
+            managerFunction = 'gerente_operacional'; break;
         case 'comercial':
-            managerFunction = 'gerente_comercial';
-            break;
-        case 'producao':
-        case 'almoxarifado':
-            managerFunction = 'gerente_producao';
-            break;
+            managerFunction = 'gerente_comercial'; break;
+        case 'producao': case 'almoxarifado':
+            managerFunction = 'gerente_producao'; break;
         case 'financeiro':
-            managerFunction = 'gerente_financeiro';
-            break;
-        default:
-            managerFunction = 'gerente'; // Fallback para gerente genérico
+            managerFunction = 'gerente_financeiro'; break;
+        default: managerFunction = 'gerente';
     }
     const managers = await getManagersByFunction(managerFunction);
     managers.forEach(manager => {
-        if (manager.email && !recipients.includes(manager.email)) {
-            recipients.push(manager.email);
-        }
+        if (manager.email && !recipients.includes(manager.email)) recipients.push(manager.email);
     });
-    // Notificar Produtor do projeto
+    // Adicionar outros notificáveis
     if (project.produtorId) {
         const producer = await getUserData(project.produtorId);
-        if ((producer === null || producer === void 0 ? void 0 : producer.email) && !recipients.includes(producer.email)) {
-            recipients.push(producer.email);
-        }
-    }
-    // Notificar Consultor do projeto
-    if (project.consultorId) {
-        const consultant = await getUserData(project.consultorId);
-        if ((consultant === null || consultant === void 0 ? void 0 : consultant.email) && !recipients.includes(consultant.email)) {
-            recipients.push(consultant.email);
-        }
+        if (producer?.email && !recipients.includes(producer.email)) recipients.push(producer.email);
     }
     if (recipients.length > 0) {
         await sendEmailViaSendGrid(recipients, `Aprovação Necessária: ${ticket.titulo}`, 'ticket_escalated_to_manager', ticket, project, { managerFunction });
@@ -369,19 +331,13 @@ async function handleTicketEscalatedToManager(ticket, project) {
 async function handleManagerDecision(before, after, project) {
     console.log(`✅ Processando decisão do gerente: ${after.status}`);
     const recipients = [];
-    // Notificar Produtor do projeto
     if (project.produtorId) {
         const producer = await getUserData(project.produtorId);
-        if (producer === null || producer === void 0 ? void 0 : producer.email) {
-            recipients.push(producer.email);
-        }
+        if (producer?.email) recipients.push(producer.email);
     }
-    // Notificar Consultor do projeto
     if (project.consultorId) {
         const consultant = await getUserData(project.consultorId);
-        if ((consultant === null || consultant === void 0 ? void 0 : consultant.email) && !recipients.includes(consultant.email)) {
-            recipients.push(consultant.email);
-        }
+        if (consultant?.email && !recipients.includes(consultant.email)) recipients.push(consultant.email);
     }
     if (recipients.length > 0) {
         const decision = after.status === 'aprovado' ? 'Aprovado' : 'Rejeitado';
@@ -394,13 +350,9 @@ async function handleManagerDecision(before, after, project) {
 // 5. Função para tratar chamado executado pelo operador
 async function handleTicketExecuted(ticket, project) {
     console.log('🎯 Processando chamado executado');
-    // NOVO FLUXO CONDICIONAL: Verificar se foi criado por operador
     const isCreatedByOperator = ticket.criadoPorFuncao && ticket.criadoPorFuncao.startsWith('operador_');
     if (isCreatedByOperator) {
         console.log('🔄 Chamado criado por operador - retornando para validação do operador original');
-        // AÇÃO 1: Alterar status para aguardar validação do operador
-        // AÇÃO 2: Alterar responsável de volta para o criador
-        // AÇÃO 3: Alterar área de volta para a área do operador
         try {
             const creatorData = await getUserData(ticket.criadoPor);
             const updateData = {
@@ -408,61 +360,42 @@ async function handleTicketExecuted(ticket, project) {
                 responsavelAtual: ticket.criadoPor,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             };
-            // Se conseguir buscar dados do criador, usar sua área
-            if (creatorData === null || creatorData === void 0 ? void 0 : creatorData.area) {
+            if (creatorData?.area) {
                 updateData.area = creatorData.area;
-            }
-            else if (ticket.areaDeOrigem) {
-                // Fallback para área de origem se disponível
+            } else if (ticket.areaDeOrigem) {
                 updateData.area = ticket.areaDeOrigem;
             }
-            // Atualizar o chamado no Firestore
-            await admin.firestore()
-                .collection('chamados')
-                .doc(ticket.id)
-                .update(updateData);
+            await admin.firestore().collection('chamados').doc(ticket.id).update(updateData);
             console.log(`✅ Chamado ${ticket.id} retornado para validação do operador ${ticket.criadoPor}`);
-            // Notificar apenas o operador que criou o chamado
-            if (creatorData === null || creatorData === void 0 ? void 0 : creatorData.email) {
+            if (creatorData?.email) {
                 await sendEmailViaSendGrid([creatorData.email], `Chamado Concluído - Aguardando sua Validação: ${ticket.titulo}`, 'ticket_executed_operator_validation', ticket, project);
             }
-        }
-        catch (error) {
+        } catch (error) {
             console.error('❌ Erro ao retornar chamado para operador:', error);
-            // Em caso de erro, seguir fluxo padrão
             await handleTicketExecutedStandardFlow(ticket, project);
         }
-    }
-    else {
+    } else {
         console.log('📋 Chamado criado por produtor/consultor - seguindo fluxo padrão');
-        // FLUXO PADRÃO: Manter lógica atual para produtores/consultores
         await handleTicketExecutedStandardFlow(ticket, project);
     }
 }
 // Função auxiliar para fluxo padrão (produtor/consultor)
 async function handleTicketExecutedStandardFlow(ticket, project) {
     const recipients = [];
-    // Notificar Produtor do projeto
     if (project.produtorId) {
         const producer = await getUserData(project.produtorId);
-        if (producer === null || producer === void 0 ? void 0 : producer.email) {
-            recipients.push(producer.email);
-        }
+        if (producer?.email) recipients.push(producer.email);
     }
-    // Notificar Consultor do projeto
     if (project.consultorId) {
         const consultant = await getUserData(project.consultorId);
-        if ((consultant === null || consultant === void 0 ? void 0 : consultant.email) && !recipients.includes(consultant.email)) {
-            recipients.push(consultant.email);
-        }
+        if (consultant?.email && !recipients.includes(consultant.email)) recipients.push(consultant.email);
     }
     if (recipients.length > 0) {
         await sendEmailViaSendGrid(recipients, `Chamado Concluído - Aguardando sua Validação: ${ticket.titulo}`, 'ticket_executed', ticket, project);
     }
 }
 // Função para upload de imagens
-exports.uploadImage = (0, onCall)(async (request) => {
-    // Verificar autenticação
+exports.uploadImage = onCall(async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "Usuário não autenticado");
     }
@@ -471,30 +404,20 @@ exports.uploadImage = (0, onCall)(async (request) => {
         throw new HttpsError("invalid-argument", "Dados inválidos");
     }
     try {
-        // Converter base64 para buffer
         const buffer = Buffer.from(imageData, "base64");
-        // Criar referência no Storage
         const bucket = admin.storage().bucket();
         const file = bucket.file(`chamados/${ticketId}/${fileName}`);
-        // Upload do arquivo
         await file.save(buffer, {
             metadata: {
-                contentType: "image/jpeg", // ou detectar automaticamente
-                metadata: {
-                    uploadedBy: request.auth.uid,
-                    ticketId: ticketId
-                }
+                contentType: "image/jpeg",
+                metadata: { uploadedBy: request.auth.uid, ticketId: ticketId }
             }
         });
-        // Tornar o arquivo público (opcional)
         await file.makePublic();
-        // Retornar URL pública
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${file.name}`;
         return { url: publicUrl };
-    }
-    catch (error) {
+    } catch (error) {
         console.error("Erro no upload da imagem:", error);
         throw new HttpsError("internal", "Erro interno do servidor");
     }
 });
-//# sourceMappingURL=index.js.map
