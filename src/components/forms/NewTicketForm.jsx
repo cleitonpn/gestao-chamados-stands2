@@ -5,7 +5,6 @@ import { ticketService, TICKET_TYPES, PRIORITIES } from '../../services/ticketSe
 import { userService, AREAS } from '../../services/userService';
 import { imageService } from '../../services/imageService';
 import { TICKET_CATEGORIES, getCategoriesByArea } from '../../constants/ticketCategories';
-// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES - JÁ EXISTENTE
 import notificationService from '../../services/notificationService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,20 +15,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-// ✅ ADIÇÃO: Importando o ícone de cadeado
-import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp, Lock } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+// ✅ NOVAS IMPORTAÇÕES
+import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp, Lock, Link as LinkIcon } from 'lucide-react';
+import { useNavigate, useLocation, Link } from 'react-router-dom'; // ✅ useLocation e Link adicionados
 import { collection, getDocs, doc, setDoc, getDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
-// 🤖 SERVIÇO DE TEMPLATES IA DINÂMICOS (sem alterações)
+// A classe DynamicAITemplateService permanece inalterada
 class DynamicAITemplateService {
   constructor() {
     this.templatesCollection = 'ai_templates';
     this.analyticsCollection = 'ai_analytics';
   }
 
-  // Carregar templates IA do Firebase
   async loadAITemplates() {
     try {
       const templatesRef = collection(db, this.templatesCollection);
@@ -49,12 +47,10 @@ class DynamicAITemplateService {
     }
   }
 
-  // Analisar chamados e gerar novos templates
   async analyzeAndUpdateTemplates() {
     try {
       console.log('🔍 Iniciando análise automática de chamados...');
       
-      // Buscar chamados recentes (últimos 30 dias)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
@@ -73,7 +69,6 @@ class DynamicAITemplateService {
       
       console.log('📊 Chamados analisados:', tickets.length);
       
-      // Agrupar por área e tipo
       const patterns = {};
       tickets.forEach(ticket => {
         const key = `${ticket.area}_${ticket.tipo}`;
@@ -94,7 +89,6 @@ class DynamicAITemplateService {
         patterns[key].count++;
       });
       
-      // Gerar templates para padrões com mais de 3 ocorrências
       const newTemplates = [];
       Object.entries(patterns).forEach(([key, pattern]) => {
         if (pattern.count >= 3) {
@@ -105,7 +99,6 @@ class DynamicAITemplateService {
         }
       });
       
-      // Salvar novos templates no Firebase
       for (const template of newTemplates) {
         await this.saveTemplate(template);
       }
@@ -119,10 +112,8 @@ class DynamicAITemplateService {
     }
   }
 
-  // Gerar template baseado no padrão identificado
   generateTemplateFromPattern(key, pattern) {
     try {
-      // Encontrar palavras mais comuns nos títulos
       const titleWords = pattern.titles.join(' ').toLowerCase().split(' ');
       const titleWordCount = {};
       titleWords.forEach(word => {
@@ -131,7 +122,6 @@ class DynamicAITemplateService {
         }
       });
       
-      // Prioridade mais comum
       const priorityCount = {};
       pattern.priorities.forEach(priority => {
         priorityCount[priority] = (priorityCount[priority] || 0) + 1;
@@ -140,7 +130,6 @@ class DynamicAITemplateService {
         priorityCount[a] > priorityCount[b] ? a : b
       );
       
-      // Gerar título do template
       const commonWords = Object.entries(titleWordCount)
         .sort(([,a], [,b]) => b - a)
         .slice(0, 3)
@@ -149,7 +138,6 @@ class DynamicAITemplateService {
       const templateTitle = this.generateSmartTitle(pattern.area, pattern.tipo, commonWords);
       const templateDescription = this.generateSmartDescription(pattern.area, pattern.tipo, pattern.descriptions);
       
-      // Calcular confiança baseada na frequência
       const confidence = Math.min(0.95, 0.5 + (pattern.count * 0.05));
       
       return {
@@ -174,7 +162,6 @@ class DynamicAITemplateService {
     }
   }
 
-  // Gerar título inteligente
   generateSmartTitle(area, tipo, commonWords) {
     const areaNames = {
       'comunicacao_visual': 'Comunicação Visual',
@@ -199,9 +186,7 @@ class DynamicAITemplateService {
     return `${tipoName} - ${areaName}`;
   }
 
-  // Gerar descrição inteligente
   generateSmartDescription(area, tipo, descriptions) {
-    // Extrair padrões comuns das descrições
     const commonPhrases = this.extractCommonPhrases(descriptions);
     
     const templates = {
@@ -222,9 +207,7 @@ class DynamicAITemplateService {
     return templates[area]?.[tipo] || `Solicitação relacionada a ${area} - ${tipo}.\n\nDescrição: [ESPECIFICAR]\nPrazo: [DATA]\nObservações: [INFORMAÇÕES_ADICIONAIS]`;
   }
 
-  // Extrair frases comuns das descrições
   extractCommonPhrases(descriptions) {
-    // Implementação simplificada - pode ser melhorada com NLP
     const allText = descriptions.join(' ').toLowerCase();
     const phrases = allText.match(/\b\w+\s+\w+\s+\w+\b/g) || [];
     
@@ -240,7 +223,6 @@ class DynamicAITemplateService {
       .map(([phrase]) => phrase);
   }
 
-  // Obter ícone para área
   getIconForArea(area) {
     const icons = {
       'comunicacao_visual': '🎨',
@@ -255,7 +237,6 @@ class DynamicAITemplateService {
     return icons[area] || '📋';
   }
 
-  // Salvar template no Firebase
   async saveTemplate(template) {
     try {
       const templateRef = doc(db, this.templatesCollection, template.id);
@@ -266,7 +247,6 @@ class DynamicAITemplateService {
     }
   }
 
-  // Registrar uso de template para aprendizado
   async recordTemplateUsage(templateId, success = true) {
     try {
       const usageRef = doc(db, 'ai_template_usage', `${templateId}_${Date.now()}`);
@@ -274,7 +254,7 @@ class DynamicAITemplateService {
         templateId,
         success,
         usedAt: new Date(),
-        userId: 'current_user' // Substituir pelo ID do usuário atual
+        userId: 'current_user'
       });
     } catch (error) {
       console.error('❌ Erro ao registrar uso:', error);
@@ -285,6 +265,7 @@ class DynamicAITemplateService {
 const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   const { user, userProfile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [formData, setFormData] = useState({
     titulo: '',
@@ -313,6 +294,37 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   const [aiTemplates, setAiTemplates] = useState([]);
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiService] = useState(new DynamicAITemplateService());
+  
+  const [linkedTicket, setLinkedTicket] = useState(null);
+  const [loadingLinkedTicket, setLoadingLinkedTicket] = useState(true);
+
+  useEffect(() => {
+    const linkedTicketId = location.state?.linkedTicketId;
+    if (linkedTicketId) {
+      const fetchLinkedTicket = async () => {
+        try {
+          const ticketData = await ticketService.getTicketById(linkedTicketId);
+          if (ticketData) {
+            const projectData = await projectService.getProjectById(ticketData.projetoId);
+            setLinkedTicket({ ...ticketData, projectName: projectData?.nome || 'N/A', eventName: projectData?.feira || 'N/A' });
+            if (projectData) {
+              setSelectedEvent(projectData.feira);
+              setSelectedProject(projectData.id);
+              setSelectedProjectData(projectData);
+            }
+          }
+        } catch (err) {
+          console.error("Erro ao buscar chamado vinculado:", err);
+        } finally {
+          setLoadingLinkedTicket(false);
+        }
+      };
+      fetchLinkedTicket();
+    } else {
+      setLoadingLinkedTicket(false);
+    }
+  }, [location.state]);
+
 
   useEffect(() => {
     loadProjects();
@@ -556,13 +568,11 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     try {
       let finalTicketData = { ...formData };
       
-      // ✅ INÍCIO DA CORREÇÃO: Salva a área de destino original antes de redirecionar para a produção
       if (userProfile?.funcao === 'consultor') {
         finalTicketData.areaDestinoOriginal = formData.area; 
         finalTicketData.area = AREAS.PRODUCTION;
         finalTicketData.observacoes = `${finalTicketData.observacoes || ''}\n\n[CHAMADO DE CONSULTOR] - Direcionado para o produtor avaliar e tratar ou escalar para área específica.`.trim();
       }
-      // ✅ FIM DA CORREÇÃO
 
       if (selectedAITemplate) {
         const aiTemplate = aiTemplates.find(t => t.id === selectedAITemplate);
@@ -582,7 +592,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
         areaDeOrigem: userProfile?.area || null,
         imagens: [],
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        chamadoPaiId: linkedTicket ? linkedTicket.id : null,
       };
 
       if (selectedOperator) {
@@ -591,13 +602,11 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
       ticketId = await ticketService.createTicket(ticketData);
 
-      // ✅ INÍCIO DA CORREÇÃO: Isola a falha da notificação
       try {
         await notificationService.notifyNewTicket(ticketId, ticketData, user.uid);
       } catch (notificationError) {
         console.error('Falha não-crítica ao enviar notificação:', notificationError);
       }
-      // ✅ FIM DA CORREÇÃO
       
       setTimeout(() => updateAITemplates(), 2000);
 
@@ -647,6 +656,16 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     { value: PRIORITIES.URGENT, label: 'Urgente', color: 'bg-red-100 text-red-800' }
   ];
 
+  if (loadingLinkedTicket) {
+    return (
+        <Card className="w-full max-w-2xl mx-auto">
+            <CardContent className="p-8 flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+            </CardContent>
+        </Card>
+    );
+  }
+
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
@@ -664,6 +683,30 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       </CardHeader>
       
       <CardContent>
+        {linkedTicket && (
+            <Card className="mb-6 bg-amber-50 border-amber-200">
+                <CardHeader>
+                    <CardTitle className="flex items-center text-base text-amber-900">
+                        <LinkIcon className="h-4 w-4 mr-2" />
+                        Chamado Vinculado
+                    </CardTitle>
+                    <CardDescription>
+                        Este novo chamado será vinculado ao chamado de logística abaixo.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm space-y-1">
+                    <p><strong>Título Original:</strong> {linkedTicket.titulo}</p>
+                    <p><strong>Projeto:</strong> {linkedTicket.projectName}</p>
+                    <p><strong>Evento:</strong> {linkedTicket.eventName}</p>
+                    <p><strong>ID do Chamado Original:</strong> 
+                        <Link to={`/chamado/${linkedTicket.id}`} className="text-blue-600 hover:underline ml-1">
+                            {linkedTicket.id}
+                        </Link>
+                    </p>
+                </CardContent>
+            </Card>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
             <Alert variant="destructive">
@@ -674,7 +717,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
           <div className="space-y-2">
             <Label htmlFor="event">Selecione o Evento *</Label>
-            <Select value={selectedEvent} onValueChange={handleEventChange}>
+            <Select value={selectedEvent} onValueChange={handleEventChange} disabled={!!linkedTicket}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecione o evento" />
               </SelectTrigger>
@@ -693,7 +736,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
             <Select 
               value={selectedProject} 
               onValueChange={handleProjectChange}
-              disabled={!selectedEvent}
+              disabled={!selectedEvent || !!linkedTicket}
             >
               <SelectTrigger>
                 <SelectValue placeholder={selectedEvent ? "Selecione o projeto" : "Primeiro selecione um evento"} />
@@ -822,7 +865,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             </span>
                             {template.generatedAt && (
                               <span className="text-xs text-gray-400 ml-2">
-                                � {new Date(template.generatedAt.seconds * 1000).toLocaleDateString()}
+                                 {new Date(template.generatedAt.seconds * 1000).toLocaleDateString()}
                               </span>
                             )}
                           </div>
