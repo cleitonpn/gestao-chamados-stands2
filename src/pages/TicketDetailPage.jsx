@@ -292,19 +292,16 @@ const TicketDetailPage = () => {
     }
   };
 
-  // AJUSTE 1: Adicionar a cor para o novo status
   const getStatusColor = (status) => {
     const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'aprovado': 'bg-green-100 text-green-800', 'reprovado': 'bg-red-100 text-red-800', 'arquivado': 'bg-gray-100 text-gray-700', 'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800' };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // AJUSTE 2: Adicionar o texto para o novo status
   const getStatusText = (status) => {
     const statusTexts = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'em_execucao': 'Em Execução', 'enviado_para_area': 'Enviado para Área', 'escalado_para_area': 'Escalado para Área', 'escalado_para_outra_area': 'Escalado para Outra Área', 'aguardando_aprovacao': 'Aguardando Aprovação', 'executado_aguardando_validacao': 'Executado - Aguardando Validação', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'devolvido': 'Devolvido', 'aprovado': 'Aprovado', 'reprovado': 'Reprovado', 'arquivado': 'Arquivado', 'executado_pelo_consultor': 'Executado pelo Consultor' };
     return statusTexts[status] || status;
   };
 
-  // AJUSTE 3: Adicionar a lógica de ações para o novo status do operador
   const getAvailableStatuses = () => {
     if (!ticket || !userProfile || !user) return [];
     const currentStatus = ticket.status;
@@ -526,7 +523,6 @@ const TicketDetailPage = () => {
     }
   };
 
-  // ✅ FUNÇÃO ALTERADA: handleStatusUpdate agora tem a lógica condicional
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
 
