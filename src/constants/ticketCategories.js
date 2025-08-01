@@ -49,6 +49,7 @@ export const TICKET_CATEGORIES = {
   financeiro: [
     { value: 'pedido_caixinha', label: 'Pedido de Caixinha' },
     { value: 'pagamento_documentacao', label: 'Pagamento de Documentação' },
+    { value: 'Pagamento frete', label: 'Pagamento frete' },
     { value: 'outros', label: 'Outros' }
   ],
   logotipia: [
