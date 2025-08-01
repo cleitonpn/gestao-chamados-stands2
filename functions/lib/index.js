@@ -139,17 +139,25 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
             status: 'aberto',
             prioridade: 'media',
             isConfidential: true,
+            isExtra: false,
             chamadoPaiId: originalTicketId,
             projetoId: originalTicketData.projetoId || null,
             criadoPor: uid,
             criadoPorNome: creatorData?.nome || 'Operador de Logística',
+            criadoPorFuncao: creatorData?.funcao || 'operador',
+            areaDeOrigem: creatorData?.area || 'logistica',
+            areasEnvolvidas: [creatorData?.area || 'logistica', 'financeiro'],
+            atribuidoA: null,
+            atribuidoEm: null,
+            concluidoEm: null,
+            concluidoPor: null,
+            imagens: [],
             criadoEm: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
         const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
         
-        // CORREÇÃO: Atualiza o novo chamado com seu próprio ID para consistência
         await newTicketRef.update({ id: newTicketRef.id });
 
         console.log(`✅ Chamado financeiro ${newTicketRef.id} criado e atualizado com seu ID.`);
@@ -166,15 +174,13 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
 // ||        FUNÇÃO DE NOTIFICAÇÃO DE MENSAGENS - VERSÃO CORRIGIDA     ||
 // =================================================================
 exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (event) => {
-    var _a;
-    const messageSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a;
+    const messageSnap = event.data;
     if (!messageSnap) {
         console.log('Dados da nova mensagem não disponíveis.');
         return;
     }
 
     const messageData = messageSnap.data();
-    
     const ticketId = messageData.ticketId;
     const senderId = messageData.remetenteId; 
 
@@ -183,11 +189,9 @@ exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (
         return;
     }
 
-    console.log(`💬 Nova mensagem no chamado ${ticketId} por ${senderId}. Iniciando notificação.`);
-
     try {
         const ticketDoc = await admin.firestore().collection('chamados').doc(ticketId).get();
-        if (!ticketDoc.exists) {
+        if (!ticketDoc.exists()) {
             console.error(`Chamado ${ticketId} não encontrado.`);
             return;
         }
