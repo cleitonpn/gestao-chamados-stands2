@@ -19,7 +19,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { 
   BarChart3, Users, FolderOpen, AlertTriangle, Clock, CheckCircle, TrendingUp, Activity,
   Timer, Target, Zap, Calendar, RefreshCw, Building, UserCheck, FilePlus2, DollarSign,
-  Eye, UserX, Edit, Filter, X as XIcon, Download, BellRing
+  Eye, UserX, Edit, Filter, X as XIcon, Download, BellRing, Loader2
 } from 'lucide-react';
 
 const AdminPanelPage = () => {
