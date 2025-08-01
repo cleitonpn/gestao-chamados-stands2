@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom'; // ✅ Link adicionado
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { ticketService, TICKET_STATUS } from '@/services/ticketService';
 import { projectService } from '@/services/projectService';
@@ -17,8 +17,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-// ✅ NOVAS IMPORTAÇÕES PARA O MODAL
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   ArrowLeft,
   Clock,
@@ -45,8 +43,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Archive,
-  ArchiveRestore,
-  Link as LinkIcon // ✅ Ícone adicionado
+  ArchiveRestore
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -98,15 +95,13 @@ const TicketDetailPage = () => {
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef(null);
 
-  // ✅ NOVOS ESTADOS PARA O POPUP DE VINCULAÇÃO
-  const [showLinkConfirmation, setShowLinkConfirmation] = useState(false);
-  const [parentTicketForLink, setParentTicketForLink] = useState(null);
-
   const loadTicketData = async () => {
     try {
       setLoading(true);
       setError(null);
       setAccessDenied(false);
+
+      console.log('Carregando dados do chamado:', ticketId);
 
       const ticketData = await ticketService.getTicketById(ticketId);
       if (!ticketData) {
@@ -114,22 +109,27 @@ const TicketDetailPage = () => {
       }
 
       setTicket(ticketData);
-
-      // ✅ ADIÇÃO: Se o chamado atual tiver um pai, busca os dados do pai para exibir o link
-      if (ticketData.chamadoPaiId) {
-          const parentTicketData = await ticketService.getTicketById(ticketData.chamadoPaiId);
-          setParentTicketForLink(parentTicketData);
-      }
+      console.log('Dados do chamado carregados:', ticketData);
 
       if (ticketData.projetoId) {
-        const projectData = await projectService.getProjectById(ticketData.projetoId);
-        setProject(projectData);
+        try {
+          const projectData = await projectService.getProjectById(ticketData.projetoId);
+          setProject(projectData);
+        } catch (err) {
+          console.warn('Erro ao carregar projeto:', err);
+        }
       }
 
-      const messagesData = await messageService.getMessagesByTicket(ticketId);
-      setMessages(messagesData || []);
+      try {
+        const messagesData = await messageService.getMessagesByTicket(ticketId);
+        setMessages(messagesData || []);
+      } catch (err) {
+        console.warn('Erro ao carregar mensagens:', err);
+        setMessages([]);
+      }
 
     } catch (err) {
+      console.error('Erro ao carregar dados do chamado:', err);
       setError(err.message || 'Erro ao carregar chamado');
     } finally {
       setLoading(false);
@@ -152,6 +152,7 @@ const TicketDetailPage = () => {
                                    (userProfile.area === ticket.area || userProfile.area === ticket.areaDeOrigem);
 
         if (!isCreator && !isAdmin && !isInvolvedOperator) {
+          console.warn('ACESSO NEGADO: Usuário não autorizado a ver este chamado confidencial.');
           setAccessDenied(true);
         }
       }
@@ -160,8 +161,10 @@ const TicketDetailPage = () => {
 
   const markNotificationsAsRead = async () => {
     if (!user?.uid || !ticketId) return;
+
     try {
       await notificationService.markTicketNotificationsAsRead(user.uid, ticketId);
+      console.log('✅ Notificações marcadas como lidas para o chamado:', ticketId);
     } catch (error) {
       console.error('❌ Erro ao marcar notificações como lidas:', error);
     }
@@ -176,11 +179,15 @@ const TicketDetailPage = () => {
         console.error('Erro ao carregar usuários:', error);
       }
     };
+
     loadUsers();
   }, []);
     
   const handleArchiveTicket = async () => {
-    if (!window.confirm('Tem certeza que deseja arquivar este chamado? Ele sairá da visualização principal e só poderá ser consultado.')) return;
+    if (!window.confirm('Tem certeza que deseja arquivar este chamado? Ele sairá da visualização principal e só poderá ser consultado.')) {
+        return;
+    }
+
     setUpdating(true);
     try {
         await ticketService.updateTicket(ticketId, {
@@ -192,13 +199,17 @@ const TicketDetailPage = () => {
         alert('Chamado arquivado com sucesso!');
         navigate('/dashboard');
     } catch (error) {
+        console.error('Erro ao arquivar chamado:', error);
         alert('Ocorreu um erro ao arquivar o chamado.');
         setUpdating(false);
     }
   };
 
   const handleUnarchiveTicket = async () => {
-    if (!window.confirm('Deseja desarquivar este chamado? Ele voltará para a lista de concluídos.')) return;
+    if (!window.confirm('Deseja desarquivar este chamado? Ele voltará para a lista de concluídos.')) {
+        return;
+    }
+
     setUpdating(true);
     try {
         await ticketService.updateTicket(ticketId, {
@@ -210,27 +221,79 @@ const TicketDetailPage = () => {
         alert('Chamado desarquivado com sucesso!');
         loadTicketData();
     } catch (error) {
+        console.error('Erro ao desarquivar chamado:', error);
         alert('Ocorreu um erro ao desarquivar o chamado.');
     } finally {
         setUpdating(false);
     }
   };
-    
+
   const getUserNameById = (userId) => {
       if (!users || !userId) return 'Sistema';
       const userFound = users.find(u => u.uid === userId || u.id === userId);
       return userFound?.nome || 'Usuário desconhecido';
   };
-  
+
   useEffect(() => {
     if (ticket && users.length > 0) {
         const events = [];
-        if (ticket.criadoEm) { events.push({ date: ticket.criadoEm, description: 'Chamado criado por', userName: ticket.criadoPorNome || getUserNameById(ticket.criadoPor), Icon: PlusCircle, color: 'text-blue-500' }); }
-        if (ticket.escaladoEm && ticket.motivoEscalonamentoGerencial) { events.push({ date: ticket.escaladoEm, description: 'Escalado para gerência por', userName: getUserNameById(ticket.escaladoPor), Icon: Shield, color: 'text-purple-500' }); }
-        if (ticket.aprovadoEm) { events.push({ date: ticket.aprovadoEm, description: 'Aprovado por', userName: getUserNameById(ticket.aprovadoPor), Icon: ThumbsUp, color: 'text-green-500' }); }
-        if (ticket.rejeitadoEm) { events.push({ date: ticket.rejeitadoEm, description: 'Rejeitado / Devolvido por', userName: getUserNameById(ticket.rejeitadoPor), Icon: ThumbsDown, color: 'text-red-500' }); }
-        if (ticket.concluidoEm) { events.push({ date: ticket.concluidoEm, description: 'Concluído por', userName: getUserNameById(ticket.concluidoPor), Icon: CheckCircle, color: 'text-green-600' }); }
-        const sortedEvents = events.sort((a, b) => (a.date.toDate ? a.date.toDate() : new Date(a.date)) - (b.date.toDate ? b.date.toDate() : new Date(b.date)));
+
+        if (ticket.criadoEm) {
+            events.push({
+                date: ticket.criadoEm,
+                description: 'Chamado criado por',
+                userName: ticket.criadoPorNome || getUserNameById(ticket.criadoPor),
+                Icon: PlusCircle,
+                color: 'text-blue-500'
+            });
+        }
+
+        if (ticket.escaladoEm && ticket.motivoEscalonamentoGerencial) {
+             events.push({
+                date: ticket.escaladoEm,
+                description: 'Escalado para gerência por',
+                userName: getUserNameById(ticket.escaladoPor),
+                Icon: Shield,
+                color: 'text-purple-500'
+            });
+        }
+
+        if (ticket.aprovadoEm) {
+            events.push({
+                date: ticket.aprovadoEm,
+                description: 'Aprovado por',
+                userName: getUserNameById(ticket.aprovadoPor),
+                Icon: ThumbsUp,
+                color: 'text-green-500'
+            });
+        }
+
+        if (ticket.rejeitadoEm) {
+            events.push({
+                date: ticket.rejeitadoEm,
+                description: 'Rejeitado / Devolvido por',
+                userName: getUserNameById(ticket.rejeitadoPor),
+                Icon: ThumbsDown,
+                color: 'text-red-500'
+            });
+        }
+
+        if (ticket.concluidoEm) {
+            events.push({
+                date: ticket.concluidoEm,
+                description: 'Concluído por',
+                userName: getUserNameById(ticket.concluidoPor),
+                Icon: CheckCircle,
+                color: 'text-green-600'
+            });
+        }
+
+        const sortedEvents = events.sort((a, b) => {
+            const dateA = a.date.toDate ? a.date.toDate() : new Date(a.date);
+            const dateB = b.date.toDate ? b.date.toDate() : new Date(b.date);
+            return dateA - dateB;
+        });
+
         setHistoryEvents(sortedEvents);
     }
   }, [ticket, users]);
@@ -238,9 +301,14 @@ const TicketDetailPage = () => {
   const detectMentions = (text, position) => {
     const beforeCursor = text.substring(0, position);
     const mentionMatch = beforeCursor.match(/@(\w*)$/);
+
     if (mentionMatch) {
       const query = mentionMatch[1].toLowerCase();
-      const filtered = users.filter(user => user.nome.toLowerCase().includes(query) || user.email.toLowerCase().includes(query)).slice(0, 5);
+      const filtered = users.filter(user =>
+        user.nome.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query)
+      ).slice(0, 5);
+
       setMentionQuery(query);
       setMentionSuggestions(filtered);
       setShowMentionSuggestions(true);
@@ -256,8 +324,12 @@ const TicketDetailPage = () => {
     const afterCursor = newMessage.substring(cursorPosition);
     const beforeMention = beforeCursor.replace(/@\w*$/, '');
     const newText = beforeMention + `@${user.nome} ` + afterCursor;
+
     setNewMessage(newText);
     setShowMentionSuggestions(false);
+    setMentionSuggestions([]);
+    setMentionQuery('');
+
     setTimeout(() => {
       if (textareaRef.current) {
         const newPosition = beforeMention.length + user.nome.length + 2;
@@ -270,58 +342,208 @@ const TicketDetailPage = () => {
   const handleTextareaChange = (e) => {
     const value = e.target.value;
     const position = e.target.selectionStart;
+
     setNewMessage(value);
     setCursorPosition(position);
     detectMentions(value, position);
   };
 
   const handleTextareaKeyDown = (e) => {
-    if (showMentionSuggestions && e.key === 'Escape') {
-      setShowMentionSuggestions(false);
+    if (showMentionSuggestions) {
+      if (e.key === 'Escape') {
+        setShowMentionSuggestions(false);
+        setMentionSuggestions([]);
+        setMentionQuery('');
+      }
     }
   };
 
   const formatDate = (date) => {
     if (!date) return 'Data não disponível';
+
     try {
-      let dateObj = (date.toDate && typeof date.toDate === 'function') ? date.toDate() : new Date(date);
-      if (isNaN(dateObj.getTime())) return 'Data inválida';
-      return dateObj.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      let dateObj;
+      if (date.toDate && typeof date.toDate === 'function') {
+        dateObj = date.toDate();
+      } else if (date instanceof Date) {
+        dateObj = date;
+      } else {
+        dateObj = new Date(date);
+      }
+
+      if (isNaN(dateObj.getTime())) {
+        return 'Data inválida';
+      }
+
+      return dateObj.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
     } catch (error) {
+      console.error('Erro ao formatar data:', error);
       return 'Erro na data';
     }
   };
 
   const getStatusColor = (status) => {
-    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'aprovado': 'bg-green-100 text-green-800', 'reprovado': 'bg-red-100 text-red-800', 'arquivado': 'bg-gray-100 text-gray-700' };
+    const colors = {
+      'aberto': 'bg-blue-100 text-blue-800',
+      'em_tratativa': 'bg-yellow-100 text-yellow-800',
+      'em_execucao': 'bg-blue-100 text-blue-800',
+      'enviado_para_area': 'bg-purple-100 text-purple-800',
+      'escalado_para_area': 'bg-purple-100 text-purple-800',
+      'escalado_para_outra_area': 'bg-purple-100 text-purple-800',
+      'aguardando_aprovacao': 'bg-orange-100 text-orange-800',
+      'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800',
+      'concluido': 'bg-green-100 text-green-800',
+      'cancelado': 'bg-red-100 text-red-800',
+      'devolvido': 'bg-pink-100 text-pink-800',
+      'aprovado': 'bg-green-100 text-green-800',
+      'reprovado': 'bg-red-100 text-red-800',
+      'arquivado': 'bg-gray-100 text-gray-700',
+      // ✅ NOVOS STATUS ADICIONADOS
+      'escalado_para_consultor': 'bg-cyan-100 text-cyan-800',
+      'executado_pelo_consultor': 'bg-teal-100 text-teal-800'
+    };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
   const getStatusText = (status) => {
-    const statusTexts = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'em_execucao': 'Em Execução', 'enviado_para_area': 'Enviado para Área', 'escalado_para_area': 'Escalado para Área', 'escalado_para_outra_area': 'Escalado para Outra Área', 'aguardando_aprovacao': 'Aguardando Aprovação', 'executado_aguardando_validacao': 'Executado - Aguardando Validação', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'devolvido': 'Devolvido', 'aprovado': 'Aprovado', 'reprovado': 'Reprovado', 'arquivado': 'Arquivado' };
+    const statusTexts = {
+      'aberto': 'Aberto',
+      'em_tratativa': 'Em Tratativa',
+      'em_execucao': 'Em Execução',
+      'enviado_para_area': 'Enviado para Área',
+      'escalado_para_area': 'Escalado para Área',
+      'escalado_para_outra_area': 'Escalado para Outra Área',
+      'aguardando_aprovacao': 'Aguardando Aprovação',
+      'executado_aguardando_validacao': 'Executado - Aguardando Validação',
+      'concluido': 'Concluído',
+      'cancelado': 'Cancelado',
+      'devolvido': 'Devolvido',
+      'aprovado': 'Aprovado',
+      'reprovado': 'Reprovado',
+      'arquivado': 'Arquivado',
+      // ✅ NOVOS STATUS ADICIONADOS
+      'escalado_para_consultor': 'Aguardando Consultor',
+      'executado_pelo_consultor': 'Executado pelo Consultor'
+    };
     return statusTexts[status] || status;
   };
 
   const getAvailableStatuses = () => {
-    if (!ticket || !userProfile || !user) return [];
+    if (!ticket || !userProfile || !user) {
+      return [];
+    }
+
     const currentStatus = ticket.status;
     const userRole = userProfile.funcao;
     const isCreator = ticket.criadoPor === user.uid;
-    if (isCreator && currentStatus === 'executado_aguardando_validacao') {
-        return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
+
+    const isProjectProducer = userProfile.funcao === 'produtor' && project && project.produtorId === user.uid;
+    const isConsultantTicketForProducer = ticket.criadoPorFuncao === 'consultor';
+
+    if (isProjectProducer && isConsultantTicketForProducer && (ticket.status === 'aberto' || ticket.status === 'em_tratativa')) {
+        const producerActions = [];
+        if (ticket.status === 'aberto') {
+            producerActions.push({ value: TICKET_STATUS.IN_TREATMENT, label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' });
+        }
+        producerActions.push({ value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação do consultor' });
+
+        producerActions.push({ value: 'send_to_area', label: 'Enviar para a Área', description: 'Encaminhar o chamado para a área final' });
+
+        return producerActions;
     }
+
+    if (isCreator && currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
+        return [
+            { value: TICKET_STATUS.COMPLETED, label: 'Validar e Concluir', description: 'O chamado foi resolvido corretamente.' },
+            { value: TICKET_STATUS.SENT_TO_AREA, label: 'Rejeitar / Devolver', description: 'Devolver para a área responsável com um motivo.' }
+        ];
+    }
+
     if (userRole === 'administrador') {
-      if (currentStatus === 'aberto') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
-      if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
-      if (currentStatus === 'executado_aguardando_validacao' && !isCreator) return [ { value: 'concluido', label: 'Forçar Conclusão (Admin)' } ];
-      if (currentStatus === 'aguardando_aprovacao') return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'rejeitado', label: 'Reprovar' } ];
-    }
-    if (userRole === 'operador') {
-      if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
-        if (currentStatus === 'aberto') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
-        if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
+      if (currentStatus === TICKET_STATUS.OPEN) {
+        return [
+          { value: TICKET_STATUS.IN_TREATMENT, label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
+        ];
+      }
+      if (currentStatus === TICKET_STATUS.IN_TREATMENT) {
+        return [
+          { value: TICKET_STATUS.EXECUTED_AWAITING_VALIDATION, label: 'Executado', description: 'Marcar como executado para validação' }
+        ];
+      }
+      if (currentStatus === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION && !isCreator) {
+        return [
+          { value: TICKET_STATUS.COMPLETED, label: 'Forçar Conclusão (Admin)', description: 'Finalizar chamado como administrador.' }
+        ];
+      }
+      if (currentStatus === 'aguardando_aprovacao') {
+        return [
+          { value: TICKET_STATUS.APPROVED, label: 'Aprovar', description: 'Aprovar e retornar para área' },
+          { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
+        ];
       }
     }
+
+    // ✅ LÓGICA DO OPERADOR ATUALIZADA
+    if (userRole === 'operador') {
+      const isFromUserArea = ticket.area === userProfile.area;
+      const isAssignedToUser = ticket.atribuidoA === user.uid;
+      const canManage = isFromUserArea || isAssignedToUser;
+
+      if (canManage) {
+        // CORREÇÃO: Adicionada a verificação para status de escalonamento
+        if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area') {
+          return [
+            { value: 'em_tratativa', label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
+          ];
+        }
+        if (currentStatus === 'em_tratativa') {
+          return [
+            { value: 'executado_aguardando_validacao', label: 'Executado', description: 'Marcar como executado para validação' }
+          ];
+        }
+      }
+    }
+
+    if (userRole === 'gerente') {
+      const isManagerOfArea = userProfile.area === 'producao';
+      const isEscalatedToThisManager = currentStatus === 'aguardando_aprovacao' &&
+                                       (ticket.gerenteResponsavelId === user.uid ||
+                                        (!ticket.gerenteResponsavelId && isManagerOfArea));
+
+      if (isEscalatedToThisManager) {
+        return [
+          { value: TICKET_STATUS.APPROVED, label: 'Aprovar', description: 'Aprovar e retornar para área' },
+          { value: TICKET_STATUS.REJECTED, label: 'Reprovar', description: 'Reprovar e encerrar chamado' }
+        ];
+      }
+      return [];
+    }
+
+    // ✅ NOVA LÓGICA PARA O CONSULTOR
+    if (userRole === 'consultor') {
+        const isResponsibleConsultant = ticket.consultorResponsavelId === user.uid;
+
+        // Se o chamado foi escalado para este consultor
+        if (currentStatus === 'escalado_para_consultor' && isResponsibleConsultant) {
+            return [
+                { value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área', description: 'Marcar como concluído e retornar o chamado para a área de origem.' }
+            ];
+        }
+
+        // Mantém a lógica original para quando o consultor é o criador
+        if (isCreator && currentStatus === 'concluido') {
+            return [
+                { value: 'concluido', label: 'Finalizar', description: 'Confirmar finalização do chamado' }
+            ];
+        }
+    }
+
     return [];
   };
 
@@ -516,125 +738,158 @@ const TicketDetailPage = () => {
     }
   };
 
-  // ✅ FUNÇÃO ALTERADA: handleStatusUpdate agora tem a lógica condicional
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
 
-    if ( newStatus === 'executado_aguardando_validacao' && userProfile?.area === 'logistica' ) {
-      setShowLinkConfirmation(true);
-      return;
-    }
-
-    await proceedWithStatusUpdate(newStatus);
-  };
-    
-  const proceedWithStatusUpdate = async (statusToUpdate) => {
-    if ((statusToUpdate === 'rejeitado' || (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && !conclusionDescription.trim()) {
+    if ((newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && !conclusionDescription.trim()) {
       alert('Por favor, forneça um motivo para a rejeição');
       return;
     }
+
     setUpdating(true);
     try {
       let updateData = {};
       let systemMessageContent = '';
 
-      if (statusToUpdate === 'send_to_area') {
+      if (newStatus === 'send_to_area') {
         const targetArea = ticket.areaDestinoOriginal;
+
         if (!targetArea) {
-            alert('Erro Crítico: A área de destino original não foi encontrada neste chamado.');
+            alert('Erro Crítico: A área de destino original não foi encontrada neste chamado. O chamado não pode ser enviado. Por favor, contate o suporte. (O campo areaDestinoOriginal está faltando no ticket).');
             setUpdating(false);
             return;
         }
+
+        const newAreasEnvolvidas = [...new Set([...(ticket.areasEnvolvidas || []), targetArea])];
+
         updateData = {
-          status: 'aberto',
+          status: TICKET_STATUS.OPEN,
           area: targetArea,
-          areasEnvolvidas: [...new Set([...(ticket.areasEnvolvidas || []), targetArea])],
+          areasEnvolvidas: newAreasEnvolvidas,
           atualizadoPor: user.uid,
           updatedAt: new Date(),
         };
         systemMessageContent = `📲 **Chamado enviado pelo produtor para a área de destino: ${targetArea.replace('_', ' ').toUpperCase()}.**`;
+
       } else {
-        updateData = { status: statusToUpdate, atualizadoPor: user.uid, updatedAt: new Date() };
-        if (statusToUpdate === 'concluido') {
+        updateData = {
+          status: newStatus,
+          atualizadoPor: user.uid,
+          updatedAt: new Date()
+        };
+
+        if (newStatus === TICKET_STATUS.COMPLETED) {
           updateData.conclusaoDescricao = conclusionDescription;
           updateData.conclusaoImagens = conclusionImages;
           updateData.concluidoEm = new Date();
           updateData.concluidoPor = user.uid;
           systemMessageContent = `✅ **Chamado concluído**\n\n**Descrição:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'rejeitado') {
+        } else if (newStatus === TICKET_STATUS.REJECTED) {
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
-          systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao') {
+          const managerName = userProfile?.nome || user?.email || 'Gerente';
+          systemMessageContent = `❌ **Chamado reprovado pelo gerente ${managerName}**\n\n**Motivo:** ${conclusionDescription}\n\nO chamado foi encerrado devido à reprovação gerencial.`;
+        } else if (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION) {
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           updateData.area = ticket.areaDeOrigem || ticket.area;
-          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
-        } else if (statusToUpdate === 'aprovado') {
+          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(newStatus)}`;
+        } else if (newStatus === TICKET_STATUS.APPROVED) {
             if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
+                const targetArea = ticket.areaDeOrigem || ticket.area;
                 updateData.status = 'em_tratativa';
-                updateData.area = ticket.areaDeOrigem || ticket.area;
+                updateData.area = targetArea;
                 updateData.aprovadoEm = new Date();
                 updateData.aprovadoPor = user.uid;
-                systemMessageContent = `✅ **Chamado aprovado pelo gerente** e retornado para a área responsável.`;
+                const managerName = userProfile?.nome || user?.email || 'Gerente';
+                systemMessageContent = `✅ **Chamado aprovado pelo gerente ${managerName}**\n\nO chamado foi aprovado e retornará para a área responsável para execução.`;
             }
         } else {
-            systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
+            systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(newStatus)}`;
         }
       }
+
       await ticketService.updateTicket(ticketId, updateData);
-      const statusMessage = { userId: user.uid, remetenteNome: userProfile.nome || user.email, conteudo: systemMessageContent, criadoEm: new Date(), type: 'status_update' };
+
+      const statusMessage = {
+        userId: user.uid,
+        remetenteNome: userProfile.nome || user.email,
+        conteudo: systemMessageContent,
+        criadoEm: new Date(),
+        type: 'status_update'
+      };
       await messageService.sendMessage(ticketId, statusMessage);
-      await notificationService.notifyStatusChange(ticketId, ticket, updateData.status, ticket.status, user.uid);
+
+      try {
+        await notificationService.notifyStatusChange(
+          ticketId,
+          ticket,
+          updateData.status,
+          ticket.status,
+          user.uid
+        );
+        console.log('✅ Notificação de mudança de status enviada');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de mudança de status:', notificationError);
+      }
+
       await loadTicketData();
       setNewStatus('');
       setConclusionDescription('');
       setConclusionImages([]);
       alert('Status atualizado com sucesso!');
     } catch (error) {
+      console.error('Erro ao atualizar status:', error);
       alert('Erro ao atualizar status: ' + error.message);
     } finally {
       setUpdating(false);
     }
   };
-  
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() && chatImages.length === 0) return;
+
     setSendingMessage(true);
     try {
-      const messageData = { userId: user.uid, remetenteNome: userProfile.nome || user.email, conteudo: newMessage.trim(), imagens: chatImages, criadoEm: new Date(), type: 'user_message' };
+      const messageData = {
+        userId: user.uid,
+        remetenteNome: userProfile.nome || user.email,
+        conteudo: newMessage.trim(),
+        imagens: chatImages,
+        criadoEm: new Date(),
+        type: 'user_message'
+      };
+
       await messageService.sendMessage(ticketId, messageData);
-      await notificationService.notifyNewMessage(ticketId, ticket, messageData, user.uid);
+
+      try {
+        await notificationService.notifyNewMessage(
+          ticketId,
+          ticket,
+          messageData,
+          user.uid
+        );
+        console.log('✅ Notificação de nova mensagem enviada');
+      } catch (notificationError) {
+        console.error('❌ Erro ao enviar notificação de nova mensagem:', notificationError);
+      }
+
       await loadTicketData();
       setNewMessage('');
       setChatImages([]);
     } catch (error) {
+      console.error('Erro ao enviar mensagem:', error);
       alert('Erro ao enviar mensagem: ' + error.message);
     } finally {
       setSendingMessage(false);
     }
   };
-    
-  // ✅ NOVAS FUNÇÕES PARA GERIR O POPUP E O REDIRECIONAMENTO
-  const handleConfirmLinkAndRedirect = async () => {
-    setUpdating(true); // Ativa o loading
-    setShowLinkConfirmation(false); // Fecha o modal
-    await proceedWithStatusUpdate('executado_aguardando_validacao');
-    // A navegação só acontece após a finalização do chamado
-    navigate('/novo-chamado', { state: { linkedTicketId: ticketId } });
-  };
-
-  const handleConfirmWithoutLinking = async () => {
-    setUpdating(true); // Ativa o loading
-    setShowLinkConfirmation(false); // Fecha o modal
-    await proceedWithStatusUpdate('executado_aguardando_validacao');
-  };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Carregando chamado...</p>
@@ -732,22 +987,6 @@ const TicketDetailPage = () => {
             </div>
           </div>
         </div>
-
-        {parentTicketForLink && (
-            <Card className="mb-6 bg-amber-50 border-amber-200">
-                <CardHeader>
-                    <CardTitle className="flex items-center text-base text-amber-900">
-                        <LinkIcon className="h-4 w-4 mr-2" />
-                        Este chamado é vinculado ao Chamado Pai
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <Link to={`/chamado/${parentTicketForLink.id}`} className="text-blue-600 hover:underline">
-                        Ver Chamado Original: {parentTicketForLink.titulo}
-                    </Link>
-                </CardContent>
-            </Card>
-        )}
 
         {isArchived && (
           <Alert variant="default" className="mb-6 bg-gray-100 border-gray-300">
@@ -1325,25 +1564,6 @@ const TicketDetailPage = () => {
           </div>
         </div>
       </div>
-      
-      <Dialog open={showLinkConfirmation} onOpenChange={setShowLinkConfirmation}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Criar Chamado Financeiro Vinculado?</DialogTitle>
-            <DialogDescription>
-              Você executou um chamado de logística. Deseja criar um novo chamado para o financeiro, já vinculado a este?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="sm:justify-between">
-            <Button variant="ghost" onClick={handleConfirmWithoutLinking} disabled={updating}>
-              Não, Apenas Finalizar
-            </Button>
-            <Button onClick={handleConfirmLinkAndRedirect} disabled={updating}>
-              Sim, Criar Chamado Vinculado
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
