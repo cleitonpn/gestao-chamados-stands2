@@ -1,6 +1,5 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// ✅ NOVA FUNÇÃO ADICIONADA À LISTA DE EXPORTAÇÃO
 exports.createFinancialTicket = exports.onNewMessageCreated = exports.cleanupDeletedTicket = exports.uploadImage = exports.onTicketUpdated = void 0;
 const admin = require("firebase-admin");
 const { onDocumentUpdated, onDocumentDeleted, onDocumentCreated } = require("firebase-functions/v2/firestore");
@@ -97,7 +96,6 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
     }
 }
 
-
 // =================================================================
 // ||        ✅ FUNÇÃO ATUALIZADA PARA CRIAR CHAMADO FINANCEIRO      ||
 // =================================================================
@@ -125,7 +123,6 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
         const originalTicketData = originalTicketSnap.data();
         const creatorData = await getUserData(uid);
         
-        // Monta a descrição, incluindo a observação se ela existir
         let descricao = `**Dados para Pagamento:**\n- Valor: R$ ${valor}\n- Condições: ${condicoesPagamento}\n- Motorista: ${nomeMotorista}\n- Placa: ${placaVeiculo}\n`;
         if (observacaoPagamento && observacaoPagamento.trim() !== '') {
             descricao += `- Observação: ${observacaoPagamento}\n`;
@@ -133,7 +130,7 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
         descricao += `\n**Referente ao Chamado de Logística:** #${originalTicketId}`;
 
         const newFinancialTicket = {
-            titulo: `Pagamento Frete: ${originalTicketData.titulo}`,
+            titulo: `Pagamento Frete: ${originalTicketData.titulo || 'Título não encontrado'}`, // Fallback
             descricao: descricao,
             area: 'financeiro',
             tipo: 'pagamento_frete',
@@ -141,10 +138,9 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
             prioridade: 'media',
             isConfidential: true,
             chamadoPaiId: originalTicketId,
-            projetoId: originalTicketData.projetoId,
+            projetoId: originalTicketData.projetoId || null, // Fallback
             criadoPor: uid,
             criadoPorNome: creatorData?.nome || 'Operador de Logística',
-            // ✅ CORREÇÃO APLICADA AQUI: Usando o timestamp do servidor
             criadoEm: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
@@ -165,28 +161,24 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
 // ||        FUNÇÃO DE NOTIFICAÇÃO DE MENSAGENS - VERSÃO CORRIGIDA     ||
 // =================================================================
 exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (event) => {
-    var _a;
-    const messageSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a;
+    const messageSnap = event.data;
     if (!messageSnap) {
         console.log('Dados da nova mensagem não disponíveis.');
         return;
     }
 
     const messageData = messageSnap.data();
-    
     const ticketId = messageData.ticketId;
-    const senderId = messageData.remetenteId; 
+    const senderId = messageData.remetenteId;
 
     if (!ticketId || !senderId) {
         console.error('Mensagem não possui ticketId ou remetenteId. Abortando notificação.', messageData);
         return;
     }
 
-    console.log(`💬 Nova mensagem no chamado ${ticketId} por ${senderId}. Iniciando notificação.`);
-
     try {
         const ticketDoc = await admin.firestore().collection('chamados').doc(ticketId).get();
-        if (!ticketDoc.exists) {
+        if (!ticketDoc.exists()) {
             console.error(`Chamado ${ticketId} não encontrado.`);
             return;
         }
@@ -223,10 +215,11 @@ exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (
         const uniqueUserIds = Array.from(recipients);
 
         uniqueUserIds.forEach(userId => {
-            const notificationRef = admin.firestore().collection('notifications').doc();
+            // ✅ CORREÇÃO: Caminho correto para salvar a notificação
+            const userNotificationsRef = admin.firestore().collection('notifications').doc(userId).collection('notifications');
+            const notificationRef = userNotificationsRef.doc(); // Cria um novo doc com ID aleatório
             batch.set(notificationRef, {
                 ...notificationData,
-                userId: userId,
                 lida: false,
                 criadoEm: new Date(),
             });
