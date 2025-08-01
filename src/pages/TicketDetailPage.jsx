@@ -404,7 +404,6 @@ const TicketDetailPage = () => {
       'aprovado': 'bg-green-100 text-green-800',
       'reprovado': 'bg-red-100 text-red-800',
       'arquivado': 'bg-gray-100 text-gray-700',
-      // ✅ NOVOS STATUS ADICIONADOS
       'escalado_para_consultor': 'bg-cyan-100 text-cyan-800',
       'executado_pelo_consultor': 'bg-teal-100 text-teal-800'
     };
@@ -427,7 +426,6 @@ const TicketDetailPage = () => {
       'aprovado': 'Aprovado',
       'reprovado': 'Reprovado',
       'arquivado': 'Arquivado',
-      // ✅ NOVOS STATUS ADICIONADOS
       'escalado_para_consultor': 'Aguardando Consultor',
       'executado_pelo_consultor': 'Executado pelo Consultor'
     };
@@ -489,14 +487,12 @@ const TicketDetailPage = () => {
       }
     }
 
-    // ✅ LÓGICA DO OPERADOR ATUALIZADA
     if (userRole === 'operador') {
       const isFromUserArea = ticket.area === userProfile.area;
       const isAssignedToUser = ticket.atribuidoA === user.uid;
       const canManage = isFromUserArea || isAssignedToUser;
 
       if (canManage) {
-        // CORREÇÃO: Adicionada a verificação para status de escalonamento
         if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area') {
           return [
             { value: 'em_tratativa', label: 'Iniciar Tratativa', description: 'Começar a trabalhar no chamado' }
@@ -525,18 +521,13 @@ const TicketDetailPage = () => {
       return [];
     }
 
-    // ✅ NOVA LÓGICA PARA O CONSULTOR
     if (userRole === 'consultor') {
         const isResponsibleConsultant = ticket.consultorResponsavelId === user.uid;
-
-        // Se o chamado foi escalado para este consultor
         if (currentStatus === 'escalado_para_consultor' && isResponsibleConsultant) {
             return [
                 { value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área', description: 'Marcar como concluído e retornar o chamado para a área de origem.' }
             ];
         }
-
-        // Mantém a lógica original para quando o consultor é o criador
         if (isCreator && currentStatus === 'concluido') {
             return [
                 { value: 'concluido', label: 'Finalizar', description: 'Confirmar finalização do chamado' }
@@ -1460,25 +1451,25 @@ const TicketDetailPage = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
+                  {(newStatus === TICKET_STATUS.COMPLETED || newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="conclusion-description">
-                          {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição'}
+                          {newStatus === TICKET_STATUS.COMPLETED ? 'Descrição da Conclusão' : 'Motivo da Rejeição'}
                         </Label>
                         <Textarea
                           id="conclusion-description"
-                          placeholder={newStatus === 'concluido' ? "Descreva como o problema foi resolvido..." : "Explique o motivo da rejeição..."}
+                          placeholder={newStatus === TICKET_STATUS.COMPLETED ? "Descreva como o problema foi resolvido..." : "Explique o motivo da rejeição..."}
                           value={conclusionDescription}
                           onChange={(e) => setConclusionDescription(e.target.value)}
                           rows={3}
-                          className={(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) ? "border-red-300 focus:border-red-500" : ""}
+                          className={(newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) ? "border-red-300 focus:border-red-500" : ""}
                         />
-                        {(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
+                        {(newStatus === TICKET_STATUS.REJECTED || (newStatus === TICKET_STATUS.SENT_TO_AREA && ticket.status === TICKET_STATUS.EXECUTED_AWAITING_VALIDATION)) && (
                           <p className="text-xs text-red-600 mt-1">* Campo obrigatório para rejeição</p>
                         )}
                       </div>
-                      {newStatus === 'concluido' && (
+                      {newStatus === TICKET_STATUS.COMPLETED && (
                         <div>
                           <Label>Evidências (Imagens)</Label>
                           <ImageUpload
@@ -1495,10 +1486,10 @@ const TicketDetailPage = () => {
                   <Button
                     onClick={handleStatusUpdate}
                     disabled={!newStatus || updating}
-                    className={`w-full ${newStatus === 'rejeitado' ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                    variant={newStatus === 'rejeitado' ? 'destructive' : 'default'}
+                    className={`w-full ${newStatus === TICKET_STATUS.REJECTED ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                    variant={newStatus === TICKET_STATUS.REJECTED ? 'destructive' : 'default'}
                   >
-                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === 'rejeitado' ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === TICKET_STATUS.REJECTED ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
                     {updating ? 'Atualizando...' : 'Confirmar Ação'}
                   </Button>
                 </CardContent>
@@ -1569,3 +1560,4 @@ const TicketDetailPage = () => {
 };
 
 export default TicketDetailPage;
+}
