@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 // ✅ NOVAS FUNÇÕES ADICIONADAS À LISTA DE EXPORTAÇÃO
-exports.notifyStalledTickets = exports.uploadImage = exports.onTicketUpdated = void 0;
+exports.createFinancialTicket = exports.onTicketUpdated = exports.uploadImage = void 0;
 const admin = require("firebase-admin");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
@@ -116,55 +116,78 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
 }
 
 // =================================================================
-// ||        ✅ NOVA FUNÇÃO PARA NOTIFICAR SOBRE CHAMADOS PARADOS      ||
+// ||        ✅ NOVA FUNÇÃO PARA CRIAR CHAMADO FINANCEIRO         ||
 // =================================================================
-exports.notifyStalledTickets = onCall({ cors: true }, async (request) => {
-    if (!request.auth || request.auth.token.funcao !== 'administrador') {
-        throw new HttpsError('permission-denied', 'Apenas administradores podem executar esta operação.');
+exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Usuário não autenticado.");
     }
 
-    const { tickets } = request.data;
-    if (!tickets || !Array.isArray(tickets) || tickets.length === 0) {
-        throw new HttpsError('invalid-argument', 'Uma lista de chamados para notificar é necessária.');
+    const { originalTicketId, valor, condicoesPagamento, nomeMotorista, placaVeiculo, observacaoPagamento } = request.data;
+    const uid = request.auth.uid;
+
+    if (!originalTicketId || !valor || !condicoesPagamento || !nomeMotorista || !placaVeiculo) {
+        throw new HttpsError("invalid-argument", "Os campos de valor, condições, motorista e placa são obrigatórios.");
     }
 
-    const db = admin.firestore();
-    let successCount = 0;
-    const batch = db.batch();
+    try {
+        const db = admin.firestore();
+        const originalTicketRef = db.collection('chamados').doc(originalTicketId);
+        const originalTicketSnap = await originalTicketRef.get();
 
-    for (const item of tickets) {
-        try {
-            const { ticketId, assigneeId } = item;
-            if (!ticketId || !assigneeId) continue;
-
-            const ticketSnap = await db.collection('chamados').doc(ticketId).get();
-            if (!ticketSnap.exists()) continue;
-
-            const ticketData = ticketSnap.data();
-            
-            const notificationPayload = {
-                titulo: `Lembrete: Chamado parado há +24h`,
-                mensagem: `O chamado #${ticketData.numero || ticketId.slice(-6)} - "${ticketData.titulo}" está sem atualização.`,
-                link: `/chamado/${ticketId}`,
-                lida: false,
-                criadoEm: new Date(),
-                tipo: 'lembrete_chamado_parado',
-                ticketId: ticketId
-            };
-            
-            // Corrigido para a estrutura de subcoleção correta
-            const userNotificationsRef = db.collection('notifications').doc(assigneeId).collection('notifications');
-            const notificationRef = userNotificationsRef.doc();
-            batch.set(notificationRef, notificationPayload);
-            successCount++;
-        } catch (error) {
-            console.error(`Erro ao preparar notificação para o chamado ${item.ticketId}:`, error);
+        if (!originalTicketSnap.exists()) {
+            throw new HttpsError("not-found", "O chamado de logística original não foi encontrado.");
         }
+
+        const originalTicketData = originalTicketSnap.data();
+        const creatorData = await getUserData(uid);
+        
+        let descricao = `**Dados para Pagamento:**\n- Valor: R$ ${valor}\n- Condições: ${condicoesPagamento}\n- Motorista: ${nomeMotorista}\n- Placa: ${placaVeiculo}\n`;
+        if (observacaoPagamento && observacaoPagamento.trim() !== '') {
+            descricao += `- Observação: ${observacaoPagamento}\n`;
+        }
+        descricao += `\n**Referente ao Chamado de Logística:** #${originalTicketId}`;
+
+        const newFinancialTicket = {
+            titulo: `Pagamento Frete: ${originalTicketData.titulo || 'Título não encontrado'}`,
+            descricao: descricao,
+            area: 'financeiro',
+            tipo: 'pagamento_frete',
+            status: 'aberto',
+            prioridade: 'media',
+            isConfidential: true,
+            isExtra: false,
+            chamadoPaiId: originalTicketId,
+            projetoId: originalTicketData.projetoId || null,
+            criadoPor: uid,
+            criadoPorNome: creatorData?.nome || 'Operador de Logística',
+            criadoPorFuncao: creatorData?.funcao || 'operador',
+            areaDeOrigem: creatorData?.area || 'logistica',
+            areasEnvolvidas: [creatorData?.area || 'logistica', 'financeiro'],
+            atribuidoA: null,
+            atribuidoEm: null,
+            concluidoEm: null,
+            concluidoPor: null,
+            executadoEm: null,
+            historicoStatus: [],
+            imagens: [],
+            criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
+        
+        await newTicketRef.update({ id: newTicketRef.id });
+
+        console.log(`✅ Chamado financeiro ${newTicketRef.id} criado e atualizado com seu ID.`);
+        return { success: true, newTicketId: newTicketRef.id };
+
+    } catch (error) {
+        console.error("❌ Erro ao criar chamado financeiro:", error);
+        throw new HttpsError("internal", "Ocorreu um erro interno ao criar o chamado financeiro.");
     }
-    
-    await batch.commit();
-    return { message: `${successCount} de ${tickets.length} responsáveis foram notificados.` };
 });
+
 
 // Função principal para monitorar atualizações de chamados
 exports.onTicketUpdated = (0, onDocumentUpdated)('chamados/{ticketId}', async (event) => {
@@ -215,6 +238,19 @@ exports.onTicketUpdated = (0, onDocumentUpdated)('chamados/{ticketId}', async (e
         else if (before.status !== 'executado_aguardando_validacao' &&
             after.status === 'executado_aguardando_validacao') {
             await handleTicketExecuted(after, projectData);
+        }
+        // ✅ 6. NOVA LÓGICA PARA O FLUXO DO CONSULTOR
+        else if (before.status !== 'executado_pelo_consultor' && after.status === 'executado_pelo_consultor') {
+            console.log('👨‍🎯 Processando devolução do consultor para a área de origem.');
+            if (after.areaDeOrigem) {
+                await admin.firestore().collection('chamados').doc(ticketId).update({
+                    status: 'em_tratativa',
+                    area: after.areaDeOrigem,
+                    consultorResponsavelId: null, 
+                    motivoEscalonamentoConsultor: null
+                });
+                console.log(`✅ Chamado ${ticketId} devolvido para a área: ${after.areaDeOrigem}`);
+            }
         }
         console.log(`✅ Processamento de atualização concluído para chamado ${ticketId}`);
     }
