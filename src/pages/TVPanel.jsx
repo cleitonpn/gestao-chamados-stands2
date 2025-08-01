@@ -131,7 +131,7 @@ const TVPanel = () => {
         return acc;
       }, {}));
       
-      const slaConfig = { baixa: 48, media: 24, alta: 12, urgente: 2 };
+      const slaConfig = { baixa: 240, media: 24, alta: 12, urgente: 2 };
       let violatedCount = 0; let atRiskCount = 0;
       tickets.filter(t => t && !['concluido', 'cancelado', 'arquivado'].includes(t.status)).forEach(ticket => {
         const slaHours = slaConfig[ticket.prioridade];
