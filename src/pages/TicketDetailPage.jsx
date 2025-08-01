@@ -45,7 +45,7 @@ import {
   Shield,
   ThumbsUp,
   ThumbsDown,
-  Archive,
+  Archive, 
   ArchiveRestore,
   DollarSign // ✅ ÍCONE ADICIONADO
 } from 'lucide-react';
@@ -733,7 +733,8 @@ const TicketDetailPage = () => {
       setUpdating(false);
     }
   };
-
+    
+  // ✅ FUNÇÃO ALTERADA: handleStatusUpdate agora tem a lógica condicional
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
 
@@ -749,6 +750,7 @@ const TicketDetailPage = () => {
     await proceedWithStatusUpdate(newStatus);
   };
     
+  // ✅ NOVA FUNÇÃO: Contém a lógica original completa de `handleStatusUpdate`
   const proceedWithStatusUpdate = async (statusToUpdate) => {
     if ((statusToUpdate === 'rejeitado' || (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && !conclusionDescription.trim()) {
       alert('Por favor, forneça um motivo para a rejeição');
@@ -852,6 +854,7 @@ const TicketDetailPage = () => {
     }
   };
 
+  // ✅ NOVA FUNÇÃO: Lida com a submissão do modal financeiro
   const handleSubmitFinancialTicket = async (skip = false) => {
     setIsCreatingFinancialTicket(true);
     try {
