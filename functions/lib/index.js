@@ -125,7 +125,6 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
         const originalTicketData = originalTicketSnap.data();
         const creatorData = await getUserData(uid);
         
-        // Monta a descrição, incluindo a observação se ela existir
         let descricao = `**Dados para Pagamento:**\n- Valor: R$ ${valor}\n- Condições: ${condicoesPagamento}\n- Motorista: ${nomeMotorista}\n- Placa: ${placaVeiculo}\n`;
         if (observacaoPagamento && observacaoPagamento.trim() !== '') {
             descricao += `- Observação: ${observacaoPagamento}\n`;
@@ -163,7 +162,6 @@ exports.createFinancialTicket = onCall({ cors: true }, async (request) => {
 // =================================================================
 // ||        FUNÇÃO DE NOTIFICAÇÃO DE MENSAGENS - VERSÃO CORRIGIDA     ||
 // =================================================================
-// Gatilho corrigido para escutar a coleção principal 'mensagens'
 exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (event) => {
     var _a;
     const messageSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a;
@@ -174,11 +172,9 @@ exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (
 
     const messageData = messageSnap.data();
     
-    // Lógica corrigida para pegar os dados do documento da mensagem
     const ticketId = messageData.ticketId;
-    const senderId = messageData.remetenteId; // Corrigido de userId para remetenteId
+    const senderId = messageData.remetenteId; 
 
-    // Verificação para garantir que os campos necessários existem
     if (!ticketId || !senderId) {
         console.error('Mensagem não possui ticketId ou remetenteId. Abortando notificação.', messageData);
         return;
@@ -243,7 +239,6 @@ exports.onNewMessageCreated = onDocumentCreated('mensagens/{messageId}', async (
 });
 
 
-// (O resto do seu código, como onTicketUpdated, permanece o mesmo)
 exports.onTicketUpdated = onDocumentUpdated('chamados/{ticketId}', async (event) => {
     var _a, _b;
     const beforeSnap = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before;
