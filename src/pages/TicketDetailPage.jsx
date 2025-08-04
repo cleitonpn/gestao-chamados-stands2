@@ -17,7 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+// A importação do Dialog não é mais necessária para este fluxo
 import {
   ArrowLeft,
   Clock,
@@ -97,9 +97,11 @@ const TicketDetailPage = () => {
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef(null);
 
-  // Estados para o popup de vinculação
-  const [showLinkConfirmation, setShowLinkConfirmation] = useState(false);
+  // Estado para exibir link do chamado pai
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
+
+  // REMOÇÃO: O estado do pop-up não é mais necessário
+  // const [showLinkConfirmation, setShowLinkConfirmation] = useState(false);
 
   const loadTicketData = async () => {
     try {
@@ -334,7 +336,6 @@ const TicketDetailPage = () => {
       }
     }
 
-    // Lógica de ação para o perfil de consultor.
     if (userRole === 'consultor' && ticket.consultorResponsavelId === user.uid) {
         if (ticket.status === 'escalado_para_consultor') {
             return [{ value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área' }];
@@ -534,15 +535,10 @@ const TicketDetailPage = () => {
       setUpdating(false);
     }
   };
-
+  
+  // LÓGICA DO POP-UP DE LOGÍSTICA REMOVIDA DAQUI E SUBSTITUÍDA PELO CARD DE VINCULAÇÃO
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
-
-    if ( newStatus === 'executado_aguardando_validacao' && userProfile?.area === 'logistica' ) {
-      setShowLinkConfirmation(true);
-      return;
-    }
-
     await proceedWithStatusUpdate(newStatus);
   };
     
@@ -640,19 +636,9 @@ const TicketDetailPage = () => {
     }
   };
     
-  // Funções para gerir o popup e o redirecionamento
-  const handleConfirmLinkAndRedirect = async () => {
-    setUpdating(true);
-    setShowLinkConfirmation(false);
-    await proceedWithStatusUpdate('executado_aguardando_validacao');
-    navigate('/novo-chamado', { state: { linkedTicketId: ticketId } });
-  };
-
-  const handleConfirmWithoutLinking = async () => {
-    setUpdating(true);
-    setShowLinkConfirmation(false);
-    await proceedWithStatusUpdate('executado_aguardando_validacao');
-  };
+  // REMOÇÃO: Funções do pop-up não são mais necessárias
+  // const handleConfirmLinkAndRedirect = async () => { ... };
+  // const handleConfirmWithoutLinking = async () => { ... };
 
   if (loading) {
     return (
@@ -1219,6 +1205,31 @@ const TicketDetailPage = () => {
               </CardContent>
             </Card>
 
+            {/* NOVO CARD PARA VINCULAR CHAMADOS */}
+            {!isArchived && (
+              <Card>
+                <CardHeader className="pb-3 sm:pb-4">
+                  <CardTitle className="flex items-center text-base sm:text-lg">
+                    <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Vincular Chamado
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Crie um novo chamado para outra área que ficará vinculado a este.
+                  </p>
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() => navigate('/novo-chamado', { state: { linkedTicketId: ticket.id } })}
+                  >
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Criar Chamado Vinculado
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             {!isArchived && availableStatuses.length > 0 && (
               <Card>
                 <CardHeader className="pb-3 sm:pb-4">
@@ -1348,24 +1359,7 @@ const TicketDetailPage = () => {
         </div>
       </div>
       
-      <Dialog open={showLinkConfirmation} onOpenChange={setShowLinkConfirmation}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Criar Chamado Financeiro Vinculado?</DialogTitle>
-            <DialogDescription>
-              Você executou um chamado de logística. Deseja criar um novo chamado para o financeiro, já vinculado a este?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="sm:justify-between">
-            <Button variant="ghost" onClick={handleConfirmWithoutLinking} disabled={updating}>
-              Não, Apenas Finalizar
-            </Button>
-            <Button onClick={handleConfirmLinkAndRedirect} disabled={updating}>
-              Sim, Criar Chamado Vinculado
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* REMOÇÃO: O Dialog/Pop-up não é mais necessário aqui */}
     </div>
   );
 };
