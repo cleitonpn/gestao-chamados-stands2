@@ -691,7 +691,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                         Chamado Vinculado
                     </CardTitle>
                     <CardDescription>
-                        Este novo chamado será vinculado ao chamado de logística abaixo.
+                        Este novo chamado será vinculado ao chamado abaixo.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="text-sm space-y-1">
