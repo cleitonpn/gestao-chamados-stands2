@@ -291,12 +291,12 @@ const TicketDetailPage = () => {
   };
 
   const getStatusColor = (status) => {
-    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'aprovado': 'bg-green-100 text-green-800', 'reprovado': 'bg-red-100 text-red-800', 'arquivado': 'bg-gray-100 text-gray-700', 'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800' };
+    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'aprovado': 'bg-green-100 text-green-800', 'reprovado': 'bg-red-100 text-red-800', 'arquivado': 'bg-gray-100 text-gray-700', 'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800', 'escalado_para_consultor': 'bg-cyan-100 text-cyan-800' };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
   const getStatusText = (status) => {
-    const statusTexts = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'em_execucao': 'Em Execução', 'enviado_para_area': 'Enviado para Área', 'escalado_para_area': 'Escalado para Área', 'escalado_para_outra_area': 'Escalado para Outra Área', 'aguardando_aprovacao': 'Aguardando Aprovação', 'executado_aguardando_validacao': 'Executado - Aguardando Validação', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'devolvido': 'Devolvido', 'aprovado': 'Aprovado', 'reprovado': 'Reprovado', 'arquivado': 'Arquivado', 'executado_pelo_consultor': 'Executado pelo Consultor' };
+    const statusTexts = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'em_execucao': 'Em Execução', 'enviado_para_area': 'Enviado para Área', 'escalado_para_area': 'Escalado para Área', 'escalado_para_outra_area': 'Escalado para Outra Área', 'aguardando_aprovacao': 'Aguardando Aprovação', 'executado_aguardando_validacao': 'Executado - Aguardando Validação', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'devolvido': 'Devolvido', 'aprovado': 'Aprovado', 'reprovado': 'Reprovado', 'arquivado': 'Arquivado', 'executado_pelo_consultor': 'Executado pelo Consultor', 'escalado_para_consultor': 'Escalado para Consultor' };
     return statusTexts[status] || status;
   };
 
@@ -311,7 +311,6 @@ const TicketDetailPage = () => {
     }
 
     if (userRole === 'administrador') {
-      // AJUSTE FINAL: Unifica os status de chegada de um chamado em uma nova área
       if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
       if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
       if (currentStatus === 'executado_aguardando_validacao' && !isCreator) return [ { value: 'concluido', label: 'Forçar Conclusão (Admin)' } ];
@@ -320,7 +319,6 @@ const TicketDetailPage = () => {
     
     if (userRole === 'operador') {
       if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
-        // AJUSTE FINAL: Unifica os status de chegada de um chamado em uma nova área
         if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
             return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
         }
@@ -335,6 +333,14 @@ const TicketDetailPage = () => {
         }
       }
     }
+
+    // Lógica de ação para o perfil de consultor.
+    if (userRole === 'consultor' && ticket.consultorResponsavelId === user.uid) {
+        if (ticket.status === 'escalado_para_consultor') {
+            return [{ value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área' }];
+        }
+    }
+    
     return [];
   };
 
@@ -592,7 +598,12 @@ const TicketDetailPage = () => {
                 updateData.aprovadoPor = user.uid;
                 systemMessageContent = `✅ **Chamado aprovado pelo gerente** e retornado para a área responsável.`;
             }
-        } else {
+        } else if (statusToUpdate === 'executado_pelo_consultor') {
+            updateData.area = ticket.areaDeOrigem;
+            updateData.consultorResponsavelId = null; // Limpa a responsabilidade do consultor
+            systemMessageContent = `👨‍🎯 **Chamado executado pelo consultor e devolvido para:** ${ticket.areaDeOrigem?.replace('_', ' ').toUpperCase()}`;
+        }
+        else {
             systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
         }
       }
