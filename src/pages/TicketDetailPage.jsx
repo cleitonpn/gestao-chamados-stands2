@@ -17,7 +17,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-// A importação do Dialog não é mais necessária para este fluxo
 import {
   ArrowLeft,
   Clock,
@@ -99,9 +98,6 @@ const TicketDetailPage = () => {
 
   // Estado para exibir link do chamado pai
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
-
-  // REMOÇÃO: O estado do pop-up não é mais necessário
-  // const [showLinkConfirmation, setShowLinkConfirmation] = useState(false);
 
   const loadTicketData = async () => {
     try {
@@ -293,12 +289,50 @@ const TicketDetailPage = () => {
   };
 
   const getStatusColor = (status) => {
-    const colors = { 'aberto': 'bg-blue-100 text-blue-800', 'em_tratativa': 'bg-yellow-100 text-yellow-800', 'em_execucao': 'bg-blue-100 text-blue-800', 'enviado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_area': 'bg-purple-100 text-purple-800', 'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 'concluido': 'bg-green-100 text-green-800', 'cancelado': 'bg-red-100 text-red-800', 'devolvido': 'bg-pink-100 text-pink-800', 'aprovado': 'bg-green-100 text-green-800', 'reprovado': 'bg-red-100 text-red-800', 'arquivado': 'bg-gray-100 text-gray-700', 'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800', 'escalado_para_consultor': 'bg-cyan-100 text-cyan-800' };
+    const colors = { 
+        'aberto': 'bg-blue-100 text-blue-800', 
+        'em_tratativa': 'bg-yellow-100 text-yellow-800', 
+        'em_execucao': 'bg-blue-100 text-blue-800', 
+        'enviado_para_area': 'bg-purple-100 text-purple-800', 
+        'escalado_para_area': 'bg-purple-100 text-purple-800', 
+        'escalado_para_outra_area': 'bg-purple-100 text-purple-800', 
+        'aguardando_aprovacao': 'bg-orange-100 text-orange-800', 
+        'executado_aguardando_validacao': 'bg-indigo-100 text-indigo-800', 
+        'concluido': 'bg-green-100 text-green-800', 
+        'cancelado': 'bg-red-100 text-red-800', 
+        'devolvido': 'bg-pink-100 text-pink-800', 
+        'aprovado': 'bg-green-100 text-green-800', 
+        'reprovado': 'bg-red-100 text-red-800', 
+        'arquivado': 'bg-gray-100 text-gray-700', 
+        'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800', 
+        'escalado_para_consultor': 'bg-cyan-100 text-cyan-800',
+        // NOVO AJUSTE: Adicionada a cor para o novo status de validação
+        'executado_aguardando_validacao_operador': 'bg-indigo-100 text-indigo-800'
+    };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
   const getStatusText = (status) => {
-    const statusTexts = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'em_execucao': 'Em Execução', 'enviado_para_area': 'Enviado para Área', 'escalado_para_area': 'Escalado para Área', 'escalado_para_outra_area': 'Escalado para Outra Área', 'aguardando_aprovacao': 'Aguardando Aprovação', 'executado_aguardando_validacao': 'Executado - Aguardando Validação', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'devolvido': 'Devolvido', 'aprovado': 'Aprovado', 'reprovado': 'Reprovado', 'arquivado': 'Arquivado', 'executado_pelo_consultor': 'Executado pelo Consultor', 'escalado_para_consultor': 'Escalado para Consultor' };
+    const statusTexts = { 
+        'aberto': 'Aberto', 
+        'em_tratativa': 'Em Tratativa', 
+        'em_execucao': 'Em Execução', 
+        'enviado_para_area': 'Enviado para Área', 
+        'escalado_para_area': 'Escalado para Área', 
+        'escalado_para_outra_area': 'Escalado para Outra Área', 
+        'aguardando_aprovacao': 'Aguardando Aprovação', 
+        'executado_aguardando_validacao': 'Aguardando Validação', 
+        'concluido': 'Concluído', 
+        'cancelado': 'Cancelado', 
+        'devolvido': 'Devolvido', 
+        'aprovado': 'Aprovado', 
+        'reprovado': 'Reprovado', 
+        'arquivado': 'Arquivado', 
+        'executado_pelo_consultor': 'Executado pelo Consultor', 
+        'escalado_para_consultor': 'Escalado para Consultor',
+        // NOVO AJUSTE: Adicionado o texto para o novo status de validação
+        'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador'
+    };
     return statusTexts[status] || status;
   };
 
@@ -308,7 +342,8 @@ const TicketDetailPage = () => {
     const userRole = userProfile.funcao;
     const isCreator = ticket.criadoPor === user.uid;
 
-    if (isCreator && currentStatus === 'executado_aguardando_validacao') {
+    // NOVO AJUSTE: A condição agora verifica os DOIS status de validação
+    if (isCreator && (currentStatus === 'executado_aguardando_validacao' || currentStatus === 'executado_aguardando_validacao_operador')) {
         return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
     }
 
@@ -325,7 +360,7 @@ const TicketDetailPage = () => {
             return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
         }
         if (currentStatus === 'em_tratativa') {
-            return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
+            return [ { value: 'executado_aguardando_validacao_operador', label: 'Executado' } ];
         }
         if (currentStatus === 'executado_pelo_consultor') {
             return [
@@ -535,8 +570,7 @@ const TicketDetailPage = () => {
       setUpdating(false);
     }
   };
-  
-  // LÓGICA DO POP-UP DE LOGÍSTICA REMOVIDA DAQUI E SUBSTITUÍDA PELO CARD DE VINCULAÇÃO
+
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
     await proceedWithStatusUpdate(newStatus);
@@ -580,12 +614,12 @@ const TicketDetailPage = () => {
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao') {
+        } else if (statusToUpdate === 'enviado_para_area' && ticket.status.startsWith('executado_aguardando_validacao')) {
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           updateData.area = ticket.areaDeOrigem || ticket.area;
-          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
+          systemMessageContent = `🔄 **Chamado devolvido para:** ${updateData.area.replace(/_/g, ' ')}`;
         } else if (statusToUpdate === 'aprovado') {
             if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
                 updateData.status = 'em_tratativa';
@@ -596,7 +630,7 @@ const TicketDetailPage = () => {
             }
         } else if (statusToUpdate === 'executado_pelo_consultor') {
             updateData.area = ticket.areaDeOrigem;
-            updateData.consultorResponsavelId = null; // Limpa a responsabilidade do consultor
+            updateData.consultorResponsavelId = null; 
             systemMessageContent = `👨‍🎯 **Chamado executado pelo consultor e devolvido para:** ${ticket.areaDeOrigem?.replace('_', ' ').toUpperCase()}`;
         }
         else {
@@ -635,10 +669,6 @@ const TicketDetailPage = () => {
       setSendingMessage(false);
     }
   };
-    
-  // REMOÇÃO: Funções do pop-up não são mais necessárias
-  // const handleConfirmLinkAndRedirect = async () => { ... };
-  // const handleConfirmWithoutLinking = async () => { ... };
 
   if (loading) {
     return (
@@ -1205,7 +1235,6 @@ const TicketDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* NOVO CARD PARA VINCULAR CHAMADOS */}
             {!isArchived && (
               <Card>
                 <CardHeader className="pb-3 sm:pb-4">
@@ -1254,22 +1283,22 @@ const TicketDetailPage = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
+                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status.startsWith('executado_aguardando_validacao'))) && (
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="conclusion-description">
-                          {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição'}
+                          {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição/Devolução'}
                         </Label>
                         <Textarea
                           id="conclusion-description"
-                          placeholder={newStatus === 'concluido' ? "Descreva como o problema foi resolvido..." : "Explique o motivo da rejeição..."}
+                          placeholder={newStatus === 'concluido' ? "Descreva como o problema foi resolvido..." : "Explique o motivo..."}
                           value={conclusionDescription}
                           onChange={(e) => setConclusionDescription(e.target.value)}
                           rows={3}
-                          className={(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) ? "border-red-300 focus:border-red-500" : ""}
+                          className={(newStatus === 'rejeitado' || newStatus === 'enviado_para_area') ? "border-red-300 focus:border-red-500" : ""}
                         />
-                        {(newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && (
-                          <p className="text-xs text-red-600 mt-1">* Campo obrigatório para rejeição</p>
+                        {(newStatus === 'rejeitado' || newStatus === 'enviado_para_area') && (
+                          <p className="text-xs text-red-600 mt-1">* Campo obrigatório</p>
                         )}
                       </div>
                       {newStatus === 'concluido' && (
@@ -1289,10 +1318,10 @@ const TicketDetailPage = () => {
                   <Button
                     onClick={handleStatusUpdate}
                     disabled={!newStatus || updating}
-                    className={`w-full ${newStatus === 'rejeitado' ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                    variant={newStatus === 'rejeitado' ? 'destructive' : 'default'}
+                    className={`w-full ${newStatus === 'rejeitado' || newStatus === 'enviado_para_area' ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                    variant={newStatus === 'rejeitado' || newStatus === 'enviado_para_area' ? 'destructive' : 'default'}
                   >
-                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : newStatus === 'rejeitado' ? <XCircle className="h-4 w-4 mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
                     {updating ? 'Atualizando...' : 'Confirmar Ação'}
                   </Button>
                 </CardContent>
@@ -1358,8 +1387,6 @@ const TicketDetailPage = () => {
           </div>
         </div>
       </div>
-      
-      {/* REMOÇÃO: O Dialog/Pop-up não é mais necessário aqui */}
     </div>
   );
 };
