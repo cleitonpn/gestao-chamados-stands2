@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom'; // ✅ Link adicionado
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { ticketService, TICKET_STATUS } from '@/services/ticketService';
+import { ticketService } from '@/services/ticketService';
 import { projectService } from '@/services/projectService';
-import { userService, AREAS } from '@/services/userService';
+import { userService } from '@/services/userService';
 import { messageService } from '@/services/messageService';
 import notificationService from '@/services/notificationService';
 import ImageUpload from '@/components/ImageUpload';
@@ -17,7 +17,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-// ✅ NOVAS IMPORTAÇÕES PARA O MODAL
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   ArrowLeft,
@@ -46,7 +45,7 @@ import {
   ThumbsDown,
   Archive,
   ArchiveRestore,
-  Link as LinkIcon // ✅ Ícone adicionado
+  Link as LinkIcon
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -98,7 +97,7 @@ const TicketDetailPage = () => {
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef(null);
 
-  // ✅ NOVOS ESTADOS PARA O POPUP DE VINCULAÇÃO
+  // Estados para o popup de vinculação
   const [showLinkConfirmation, setShowLinkConfirmation] = useState(false);
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
 
@@ -115,7 +114,6 @@ const TicketDetailPage = () => {
 
       setTicket(ticketData);
 
-      // ✅ ADIÇÃO: Se o chamado atual tiver um pai, busca os dados do pai para exibir o link
       if (ticketData.chamadoPaiId) {
           const parentTicketData = await ticketService.getTicketById(ticketData.chamadoPaiId);
           setParentTicketForLink(parentTicketData);
@@ -307,20 +305,28 @@ const TicketDetailPage = () => {
     const currentStatus = ticket.status;
     const userRole = userProfile.funcao;
     const isCreator = ticket.criadoPor === user.uid;
+
     if (isCreator && currentStatus === 'executado_aguardando_validacao') {
         return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
     }
+
     if (userRole === 'administrador') {
-      if (currentStatus === 'aberto') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
+      // AJUSTE FINAL: Unifica os status de chegada de um chamado em uma nova área
+      if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
       if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
       if (currentStatus === 'executado_aguardando_validacao' && !isCreator) return [ { value: 'concluido', label: 'Forçar Conclusão (Admin)' } ];
       if (currentStatus === 'aguardando_aprovacao') return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'rejeitado', label: 'Reprovar' } ];
     }
+    
     if (userRole === 'operador') {
       if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
-        if (currentStatus === 'aberto') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
-        if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
-        // Lógica adicionada para permitir ação após retorno do consultor
+        // AJUSTE FINAL: Unifica os status de chegada de um chamado em uma nova área
+        if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
+            return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
+        }
+        if (currentStatus === 'em_tratativa') {
+            return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
+        }
         if (currentStatus === 'executado_pelo_consultor') {
             return [
                 { value: 'em_tratativa', label: 'Continuar Tratativa' },
@@ -623,18 +629,17 @@ const TicketDetailPage = () => {
     }
   };
     
-  // ✅ NOVAS FUNÇÕES PARA GERIR O POPUP E O REDIRECIONAMENTO
+  // Funções para gerir o popup e o redirecionamento
   const handleConfirmLinkAndRedirect = async () => {
-    setUpdating(true); // Ativa o loading
-    setShowLinkConfirmation(false); // Fecha o modal
+    setUpdating(true);
+    setShowLinkConfirmation(false);
     await proceedWithStatusUpdate('executado_aguardando_validacao');
-    // A navegação só acontece após a finalização do chamado
     navigate('/novo-chamado', { state: { linkedTicketId: ticketId } });
   };
 
   const handleConfirmWithoutLinking = async () => {
-    setUpdating(true); // Ativa o loading
-    setShowLinkConfirmation(false); // Fecha o modal
+    setUpdating(true);
+    setShowLinkConfirmation(false);
     await proceedWithStatusUpdate('executado_aguardando_validacao');
   };
 
