@@ -254,15 +254,30 @@ const DashboardPage = () => {
     }
   };
 
-  useEffect(() => {
-    if (authInitialized && user && userProfile && user.uid) {
+ useEffect(() => {
+  if (authInitialized && user && userProfile && user.uid) {
+    // 1. Carrega os dados imediatamente quando a página abre
+    console.log("Carregando dados iniciais...");
+    loadDashboardData();
+
+    // 2. Configura um intervalo para recarregar os dados a cada 3 minutos
+    const tresMinutos = 3 * 60 * 1000;
+    const intervalId = setInterval(() => {
+      console.log("Recarregando dados automaticamente...");
       loadDashboardData();
-    } else if (authInitialized && !user) {
-      navigate('/login');
-    } else if (authInitialized && user && !userProfile) {
-      setLoading(false);
-    }
-  }, [user, userProfile, authInitialized, navigate]);
+    }, tresMinutos);
+
+    // 3. Limpa o intervalo quando o usuário sai da página (MUITO IMPORTANTE)
+    return () => {
+      clearInterval(intervalId);
+    };
+
+  } else if (authInitialized && !user) {
+    navigate('/login');
+  } else if (authInitialized && user && !userProfile) {
+    setLoading(false);
+  }
+}, [user, userProfile, authInitialized, navigate]);
 
   useEffect(() => {
     if (tickets.length > 0 && user?.uid) {
