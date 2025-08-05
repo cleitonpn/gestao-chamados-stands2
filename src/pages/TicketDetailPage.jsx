@@ -44,7 +44,8 @@ import {
   ThumbsDown,
   Archive,
   ArchiveRestore,
-  Link as LinkIcon
+  Link as LinkIcon,
+  ClipboardEdit, // Ícone adicionado
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -95,6 +96,10 @@ const TicketDetailPage = () => {
   const [mentionQuery, setMentionQuery] = useState('');
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef(null);
+  
+  // Estados para o fluxo de correção e reenvio
+  const [isResubmitting, setIsResubmitting] = useState(false);
+  const [additionalInfo, setAdditionalInfo] = useState('');
 
   // Estado para exibir link do chamado pai
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
@@ -306,7 +311,6 @@ const TicketDetailPage = () => {
         'arquivado': 'bg-gray-100 text-gray-700', 
         'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800', 
         'escalado_para_consultor': 'bg-cyan-100 text-cyan-800',
-        // NOVO AJUSTE: Adicionada a cor para o novo status de validação
         'executado_aguardando_validacao_operador': 'bg-indigo-100 text-indigo-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
@@ -330,7 +334,6 @@ const TicketDetailPage = () => {
         'arquivado': 'Arquivado', 
         'executado_pelo_consultor': 'Executado pelo Consultor', 
         'escalado_para_consultor': 'Escalado para Consultor',
-        // NOVO AJUSTE: Adicionado o texto para o novo status de validação
         'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador'
     };
     return statusTexts[status] || status;
@@ -342,7 +345,6 @@ const TicketDetailPage = () => {
     const userRole = userProfile.funcao;
     const isCreator = ticket.criadoPor === user.uid;
 
-    // NOVO AJUSTE: A condição agora verifica os DOIS status de validação
     if (isCreator && (currentStatus === 'executado_aguardando_validacao' || currentStatus === 'executado_aguardando_validacao_operador')) {
         return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
     }
@@ -357,7 +359,11 @@ const TicketDetailPage = () => {
     if (userRole === 'operador') {
       if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
         if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
-            return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
+            const actions = [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
+            if (ticket.areaDeOrigem) {
+                actions.push({ value: 'enviado_para_area', label: 'Rejeitar / Devolver' });
+            }
+            return actions;
         }
         if (currentStatus === 'em_tratativa') {
             return [ { value: 'executado_aguardando_validacao_operador', label: 'Executado' } ];
@@ -577,8 +583,8 @@ const TicketDetailPage = () => {
   };
     
   const proceedWithStatusUpdate = async (statusToUpdate) => {
-    if ((statusToUpdate === 'rejeitado' || (statusToUpdate === 'enviado_para_area' && ticket.status === 'executado_aguardando_validacao')) && !conclusionDescription.trim()) {
-      alert('Por favor, forneça um motivo para a rejeição');
+    if ((statusToUpdate === 'rejeitado' || statusToUpdate === 'enviado_para_area') && !conclusionDescription.trim()) {
+      alert('Por favor, forneça um motivo para a rejeição/devolução');
       return;
     }
     setUpdating(true);
@@ -614,12 +620,18 @@ const TicketDetailPage = () => {
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
           systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'enviado_para_area' && ticket.status.startsWith('executado_aguardando_validacao')) {
+        } else if (statusToUpdate === 'enviado_para_area') {
+           if (!ticket.areaDeOrigem) {
+             alert('Erro Crítico: A área de origem para devolução não foi encontrada.');
+             setUpdating(false);
+             return;
+          }
           updateData.motivoRejeicao = conclusionDescription;
           updateData.rejeitadoEm = new Date();
           updateData.rejeitadoPor = user.uid;
-          updateData.area = ticket.areaDeOrigem || ticket.area;
-          systemMessageContent = `🔄 **Chamado devolvido para:** ${updateData.area.replace(/_/g, ' ')}`;
+          updateData.areaQueRejeitou = ticket.area;
+          updateData.area = ticket.areaDeOrigem;
+          systemMessageContent = `🔄 **Chamado devolvido para:** ${updateData.area.replace(/_/g, ' ')}\n\n**Motivo:** ${conclusionDescription}`;
         } else if (statusToUpdate === 'aprovado') {
             if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
                 updateData.status = 'em_tratativa';
@@ -667,6 +679,50 @@ const TicketDetailPage = () => {
       alert('Erro ao enviar mensagem: ' + error.message);
     } finally {
       setSendingMessage(false);
+    }
+  };
+  
+  const handleResubmitTicket = async () => {
+    if (!additionalInfo.trim()) {
+      alert('Por favor, preencha as informações solicitadas antes de reenviar.');
+      return;
+    }
+    if (!ticket.areaQueRejeitou) {
+      alert('Erro: Não foi possível identificar a área de destino para o reenvio.');
+      return;
+    }
+
+    setIsResubmitting(true);
+    try {
+      const updateData = {
+        status: 'aberto', 
+        area: ticket.areaQueRejeitou,
+        areaDeOrigem: ticket.area,
+        areaQueRejeitou: null,
+        descricao: `${ticket.descricao}\n\n--- INFORMAÇÕES ADICIONAIS (em ${new Date().toLocaleString('pt-BR')}) ---\n${additionalInfo}`,
+        atualizadoPor: user.uid,
+        updatedAt: new Date()
+      };
+
+      await ticketService.updateTicket(ticketId, updateData);
+
+      const resubmitMessage = {
+        userId: user.uid,
+        remetenteNome: userProfile.nome || user.email,
+        conteudo: `📬 **Chamado reenviado com informações adicionais para a área: ${ticket.areaQueRejeitou.replace('_', ' ').toUpperCase()}**\n\n**Informações adicionadas:**\n${additionalInfo}`,
+        criadoEm: new Date(),
+        type: 'status_update'
+      };
+      await messageService.sendMessage(ticketId, resubmitMessage);
+      
+      await loadTicketData();
+      setAdditionalInfo('');
+      alert('Chamado reenviado com sucesso!');
+
+    } catch (error) {
+      alert('Ocorreu um erro ao reenviar o chamado: ' + error.message);
+    } finally {
+      setIsResubmitting(false);
     }
   };
 
@@ -905,6 +961,58 @@ const TicketDetailPage = () => {
                 )}
               </CardContent>
             </Card>
+
+            {user && ticket.criadoPor === user.uid && ticket.status === 'enviado_para_area' && ticket.areaQueRejeitou && (
+              <Card className="bg-yellow-50 border-yellow-300">
+                <CardHeader>
+                  <CardTitle className="flex items-center text-yellow-900">
+                    <ClipboardEdit className="h-5 w-5 mr-2" />
+                    Ação Necessária: Corrigir e Reenviar Chamado
+                  </CardTitle>
+                  <CardDescription className="text-yellow-800">
+                    Este chamado foi devolvido pela área de{' '}
+                    <strong className="font-semibold">{ticket.areaQueRejeitou.replace('_', ' ').toUpperCase()}</strong>. 
+                    Por favor, adicione as informações solicitadas e reenvie.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {ticket.motivoRejeicao && (
+                       <div className="p-3 bg-white border border-gray-200 rounded-md">
+                         <Label className="text-xs font-medium text-gray-700">Motivo da Devolução</Label>
+                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{ticket.motivoRejeicao}</p>
+                       </div>
+                    )}
+                    <div>
+                      <Label htmlFor="additional-info" className="font-semibold text-gray-800">
+                        Novas Informações / Correções *
+                      </Label>
+                      <Textarea
+                        id="additional-info"
+                        placeholder="Forneça aqui os detalhes ou correções solicitadas pela outra área..."
+                        value={additionalInfo}
+                        onChange={(e) => setAdditionalInfo(e.target.value)}
+                        rows={4}
+                        className="mt-2"
+                        disabled={isResubmitting}
+                      />
+                    </div>
+                    <Button 
+                      onClick={handleResubmitTicket} 
+                      disabled={!additionalInfo.trim() || isResubmitting} 
+                      className="w-full bg-yellow-600 hover:bg-yellow-700 text-white"
+                    >
+                      {isResubmitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Send className="h-4 w-4 mr-2" />
+                      )}
+                      Reenviar para {ticket.areaQueRejeitou.replace('_', ' ')}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -1193,7 +1301,6 @@ const TicketDetailPage = () => {
             )}
           </div>
 
-          {/* Sidebar */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             <Card>
               <CardHeader className="pb-3 sm:pb-4">
@@ -1283,7 +1390,7 @@ const TicketDetailPage = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || (newStatus === 'enviado_para_area' && ticket.status.startsWith('executado_aguardando_validacao'))) && (
+                  {(newStatus === 'concluido' || newStatus === 'rejeitado' || newStatus === 'enviado_para_area') && (
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="conclusion-description">
