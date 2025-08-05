@@ -123,7 +123,7 @@ const DashboardPage = () => {
         break;
       case 'aguardando_validacao':
         filteredTickets = filteredTickets.filter(ticket => 
-          ticket.status === 'executado_aguardando_validacao'                                    
+          ticket.status === 'executado_aguardando_validacao' || ticket.status === 'executado_aguardando_validacao_operador'
         );
         break;
       case 'concluidos':
@@ -162,7 +162,7 @@ const DashboardPage = () => {
         }
         return false;
       }).length,
-      aguardando_validacao: activeTickets.filter(t => t.status === 'executado_aguardando_validacao').length,
+     aguardando_validacao: activeTickets.filter(t => t.status === 'executado_aguardando_validacao' || t.status === 'executado_aguardando_validacao_operador').length,
       concluidos: activeTickets.filter(t => t.status === 'concluido').length,
       aguardando_aprovacao: activeTickets.filter(t => t.status === 'aguardando_aprovacao').length,
       arquivados: tickets.filter(t => t.status === 'arquivado').length
