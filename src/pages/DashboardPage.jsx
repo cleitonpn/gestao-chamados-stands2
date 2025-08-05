@@ -124,6 +124,7 @@ const DashboardPage = () => {
       case 'aguardando_validacao':
         filteredTickets = filteredTickets.filter(ticket => 
           ticket.status === 'executado_aguardando_validacao'
+          ticket.status === 'executado_aguardando_validacao_operador'                                       
         );
         break;
       case 'concluidos':
