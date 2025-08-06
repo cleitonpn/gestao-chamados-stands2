@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { projectService } from '../services/projectService';
-import { ticketService } from '../services/ticketService';
-import { userService } from '../services/userService';
+import { ticketService, PRIORITIES } from '../services/ticketService';
+import { userService, AREAS } from '../services/userService';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -16,11 +16,139 @@ import * as XLSX from 'xlsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
-  BarChart3, Users, FolderOpen, AlertTriangle, Clock, CheckCircle, TrendingUp, Activity,
+  BarChart3, Users, FolderOpen, AlertTriangle, CheckCircle, TrendingUp,
   Timer, Target, Zap, Calendar, RefreshCw, Building, UserCheck, FilePlus2, DollarSign,
-  Eye, UserX, Edit, Filter, X as XIcon, Download, BellRing, Loader2
+  Eye, UserX, Edit, Filter, X as XIcon, Download, BellRing, Loader2, ChevronsUpDown, ShieldQuestion
 } from 'lucide-react';
+
+// Componente para a nova Central de Chamados
+const TicketCommandCenter = ({ tickets, users, projects, onUpdate }) => {
+    const [filters, setFilters] = useState({ status: '', area: '', priority: '', assigneeId: '' });
+    const [updatingTicketId, setUpdatingTicketId] = useState(null);
+
+    const handleUpdateTicket = async (ticketId, updateData) => {
+        setUpdatingTicketId(ticketId);
+        try {
+            await ticketService.updateTicket(ticketId, updateData);
+            onUpdate(); // Recarrega todos os dados no painel principal
+        } catch (error) {
+            alert(`Erro ao atualizar o chamado: ${error.message}`);
+        } finally {
+            setUpdatingTicketId(null);
+        }
+    };
+
+    const filteredTickets = useMemo(() => {
+        return tickets.filter(ticket => {
+            const statusMatch = filters.status ? ticket.status === filters.status : true;
+            const areaMatch = filters.area ? ticket.area === filters.area : true;
+            const priorityMatch = filters.priority ? ticket.prioridade === filters.priority : true;
+            const assigneeMatch = filters.assigneeId ? ticket.atribuidoA === filters.assigneeId : true;
+            return statusMatch && areaMatch && priorityMatch && assigneeMatch;
+        });
+    }, [tickets, filters]);
+
+    const getStatusText = (status) => {
+        const statusMap = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'arquivado': 'Arquivado' };
+        return statusMap[status] || status;
+    };
+    
+    const statusOptions = [...new Set(tickets.map(t => t.status))].map(s => ({ value: s, label: getStatusText(s) }));
+    const areaOptions = Object.entries(AREAS).map(([key, value]) => ({ value, label: value.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) }));
+    const priorityOptions = Object.entries(PRIORITIES).map(([key, value]) => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) }));
+    const userOptions = users.map(u => ({ value: u.id, label: u.nome }));
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Central de Comando de Chamados</CardTitle>
+                <CardDescription>Filtre, visualize e gerencie todos os chamados em um só lugar.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 p-4 border rounded-lg">
+                    <Select value={filters.status} onValueChange={v => setFilters({...filters, status: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Status" /></SelectTrigger>
+                        <SelectContent>{statusOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.area} onValueChange={v => setFilters({...filters, area: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Área" /></SelectTrigger>
+                        <SelectContent>{areaOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.priority} onValueChange={v => setFilters({...filters, priority: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Prioridade" /></SelectTrigger>
+                        <SelectContent>{priorityOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.assigneeId} onValueChange={v => setFilters({...filters, assigneeId: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Responsável" /></SelectTrigger>
+                        <SelectContent>{userOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                </div>
+                <div className="max-h-[600px] overflow-auto">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-[40%]">Chamado</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Responsável</TableHead>
+                                <TableHead>Prioridade</TableHead>
+                                <TableHead>Ações</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {filteredTickets.map(ticket => (
+                                <TableRow key={ticket.id}>
+                                    <TableCell>
+                                        <p className="font-medium truncate" title={ticket.titulo}>{ticket.titulo}</p>
+                                        <p className="text-xs text-gray-500">{projects.find(p => p.id === ticket.projetoId)?.nome || 'Projeto não encontrado'}</p>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Select 
+                                            value={ticket.status} 
+                                            onValueChange={newStatus => handleUpdateTicket(ticket.id, { status: newStatus, updatedAt: new Date() })}
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs"/>
+                                            <SelectContent>{statusOptions.map(opt => <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Select 
+                                            value={ticket.atribuidoA || ''} 
+                                            onValueChange={newUserId => handleUpdateTicket(ticket.id, { atribuidoA: newUserId, updatedAt: new Date() })}
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Atribuir..." /></SelectTrigger>
+                                            <SelectContent>{userOptions.map(opt => <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                         <Select 
+                                            value={ticket.prioridade} 
+                                            onValueChange={newPrio => handleUpdateTicket(ticket.id, { prioridade: newPrio, updatedAt: new Date() })}
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs"/>
+                                            <SelectContent>{priorityOptions.map(opt => <SelectItem key={opt.value} value={opt.value} className="text-xs">{opt.label}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        {updatingTicketId === ticket.id 
+                                          ? <Loader2 className="h-4 w-4 animate-spin"/> 
+                                          : <Button variant="ghost" size="sm" onClick={() => window.open(`/chamado/${ticket.id}`, '_blank')}><Eye className="h-4 w-4"/></Button>
+                                        }
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
+
 
 const AdminPanelPage = () => {
   const { user, userProfile, authInitialized } = useAuth();
@@ -87,6 +215,7 @@ const AdminPanelPage = () => {
   };
 
   const calculateStatistics = (projectsData, ticketsData, usersData, currentFilters) => {
+    // A lógica de cálculo de estatísticas permanece a mesma...
     let filteredTickets = [...ticketsData];
     let filteredProjects = [...projectsData];
 
@@ -345,15 +474,56 @@ const AdminPanelPage = () => {
             </CardContent>
         </Card>
 
-        <Tabs defaultValue="projetos" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-6">
+        <Tabs defaultValue="geral" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <TabsTrigger value="geral">📊 Visão Geral</TabsTrigger>
+            <TabsTrigger value="command_center">🕹️ Central de Chamados</TabsTrigger>
             <TabsTrigger value="projetos">📁 Projetos</TabsTrigger>
-            <TabsTrigger value="chamados">🎫 Chamados</TabsTrigger>
-            <TabsTrigger value="performance">⚡ Performance</TabsTrigger>
-            <TabsTrigger value="areas">🏢 Áreas</TabsTrigger>
             <TabsTrigger value="extras">💲 Extras</TabsTrigger>
             <TabsTrigger value="usuarios">👥 Usuários</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="geral" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader><CardTitle>Carga de Trabalho por Área (Em Tratativa)</CardTitle></CardHeader>
+              <CardContent className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={stats.chamados.emTratativaPorArea} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" />
+                          <YAxis type="category" dataKey="name" width={120} fontSize={12} />
+                          <Tooltip />
+                          <Bar dataKey="value" fill="#8884d8" name="Chamados" />
+                      </BarChart>
+                  </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Aguardando Aprovação por Gerente</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                  {stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).length > 0 ? (
+                    stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).map((data, i) => (
+                        <div key={i} className="flex justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                            <span>{data.nome}</span>
+                            <Badge variant="destructive">{data.count}</Badge>
+                        </div>
+                    ))
+                  ) : (<p className="text-sm text-gray-500">Nenhum chamado aguardando aprovação.</p>)}
+              </CardContent>
+            </Card>
+             <Card>
+                <CardHeader><CardTitle>Tempo Médio de 1ª Resposta</CardTitle></CardHeader>
+                <CardContent><p className="text-3xl font-bold">{stats.performance.tempoMedioTratativa}</p><p className="text-sm text-gray-500">Desde a criação até o início da tratativa.</p></CardContent>
+            </Card>
+              <Card>
+                <CardHeader><CardTitle>Tempo Médio de Execução</CardTitle></CardHeader>
+                <CardContent><p className="text-3xl font-bold">{stats.performance.tempoMedioExecucao}</p><p className="text-sm text-gray-500">Desde o início da tratativa até a execução.</p></CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="command_center">
+             <TicketCommandCenter tickets={allTickets} users={allUsers} projects={allProjects} onUpdate={loadAdminData} />
+          </TabsContent>
             
           <TabsContent value="projetos" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
@@ -378,58 +548,6 @@ const AdminPanelPage = () => {
                 ))}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="chamados" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-             <Card>
-                <CardHeader><CardTitle>Chamados Abertos por Produtor</CardTitle></CardHeader>
-                <CardContent className="space-y-2">{stats.chamados.porProdutor?.map((data, i) => (<div key={i} className="flex justify-between p-2 bg-gray-50 rounded-md"><span>{data.nome}</span><Badge>{data.chamadosAbertos}</Badge></div>))}</CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle>Chamados Abertos por Consultor</CardTitle></CardHeader>
-                <CardContent className="space-y-2">{stats.chamados.porConsultor?.map((data, i) => (<div key={i} className="flex justify-between p-2 bg-gray-50 rounded-md"><span>{data.nome}</span><Badge>{data.chamadosAbertos}</Badge></div>))}</CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="performance" className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card>
-                  <CardHeader><CardTitle>Tempo Médio de 1ª Resposta</CardTitle></CardHeader>
-                  <CardContent><p className="text-3xl font-bold">{stats.performance.tempoMedioTratativa}</p><p className="text-sm text-gray-500">Desde a criação até o início da tratativa.</p></CardContent>
-              </Card>
-                <Card>
-                  <CardHeader><CardTitle>Tempo Médio de Execução</CardTitle></CardHeader>
-                  <CardContent><p className="text-3xl font-bold">{stats.performance.tempoMedioExecucao}</p><p className="text-sm text-gray-500">Desde o início da tratativa até a execução.</p></CardContent>
-              </Card>
-          </TabsContent>
-
-          <TabsContent value="areas" className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card>
-                  <CardHeader><CardTitle>Carga de Trabalho (Em Tratativa)</CardTitle></CardHeader>
-                  <CardContent className="h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={stats.chamados.emTratativaPorArea} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis type="number" />
-                              <YAxis type="category" dataKey="name" width={120} fontSize={12} />
-                              <Tooltip />
-                              <Bar dataKey="value" fill="#8884d8" name="Chamados" />
-                          </BarChart>
-                      </ResponsiveContainer>
-                  </CardContent>
-              </Card>
-              <Card>
-                  <CardHeader><CardTitle>Aguardando Aprovação por Gerente</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                      {stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).length > 0 ? (
-                        stats.chamados.aguardandoAprovacaoGerente?.filter(g => g.count > 0).map((data, i) => (
-                            <div key={i} className="flex justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                                <span>{data.nome}</span>
-                                <Badge variant="destructive">{data.count}</Badge>
-                            </div>
-                        ))
-                      ) : (<p className="text-sm text-gray-500">Nenhum chamado aguardando aprovação.</p>)}
-                  </CardContent>
-              </Card>
           </TabsContent>
 
           <TabsContent value="extras" className="space-y-4">
@@ -482,7 +600,6 @@ const AdminPanelPage = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
         </Tabs>
       </div>
     </div>
