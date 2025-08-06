@@ -20,19 +20,88 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   BarChart3, Users, AlertTriangle, CheckCircle, TrendingUp, RefreshCw, DollarSign,
-  Eye, UserX, Edit, X as XIcon, Download, BellRing, Loader2, KeyRound, Plus, Shield
+  Eye, UserX, Edit, X as XIcon, Download, BellRing, Loader2, KeyRound, Plus, Shield, ExternalLink
 } from 'lucide-react';
 
+// NOVO COMPONENTE PARA O POPUP DE VISUALIZAÇÃO RÁPIDA
+const TicketDetailView = ({ ticketId, onNavigate }) => {
+    const [ticket, setTicket] = useState(null);
+    const [project, setProject] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (ticketId) {
+            const loadDetails = async () => {
+                setLoading(true);
+                try {
+                    const ticketData = await ticketService.getTicketById(ticketId);
+                    setTicket(ticketData);
+                    if (ticketData.projetoId) {
+                        const projectData = await projectService.getProjectById(ticketData.projetoId);
+                        setProject(projectData);
+                    }
+                } catch (error) {
+                    console.error("Erro ao carregar detalhes do chamado:", error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            loadDetails();
+        }
+    }, [ticketId]);
+
+    if (loading) {
+        return <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+    }
+
+    if (!ticket) {
+        return <div className="p-8 text-center">Não foi possível carregar os detalhes do chamado.</div>;
+    }
+
+    return (
+        <div>
+            <DialogHeader>
+                <DialogTitle>Detalhes do Chamado #{ticket.numero || ticketId.slice(-6)}</DialogTitle>
+                <DialogDescription>{ticket.titulo}</DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.descricao}</p>
+                {ticket.imagens && ticket.imagens.length > 0 && (
+                    <div>
+                        <h4 className="font-semibold mb-2">Imagens:</h4>
+                        <div className="grid grid-cols-3 gap-2">
+                            {ticket.imagens.map((img, idx) => <a href={img.url} target="_blank" rel="noopener noreferrer" key={idx}><img src={img.url} className="rounded-md object-cover h-24 w-full" /></a>)}
+                        </div>
+                    </div>
+                )}
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                    <div><Label>Projeto</Label><p>{project?.nome || 'N/A'}</p></div>
+                    <div><Label>Criado por</Label><p>{ticket.criadoPorNome}</p></div>
+                    <div><Label>Status</Label><p><Badge>{ticket.status}</Badge></p></div>
+                    <div><Label>Prioridade</Label><p><Badge variant="outline">{ticket.prioridade}</Badge></p></div>
+                </div>
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => onNavigate(`/chamado/${ticketId}`)}>
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Ver Detalhes Completos
+                </Button>
+            </DialogFooter>
+        </div>
+    );
+};
+
 // Componente para a Central de Chamados Aprimorada
-const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicketIds }) => {
+const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicketIds, onViewTicket }) => {
     const [filters, setFilters] = useState({ status: '', area: '', priority: '', assigneeId: '', search: '' });
     const [updatingTicketId, setUpdatingTicketId] = useState(null);
 
+    // ... (demais funções do TicketCommandCenter permanecem as mesmas)
     const handleUpdateTicket = async (ticketId, updateData) => {
         setUpdatingTicketId(ticketId);
         try {
             await ticketService.updateTicket(ticketId, { ...updateData, updatedAt: new Date() });
-            onUpdate(); // Recarrega todos os dados no painel principal
+            onUpdate();
         } catch (error) {
             alert(`Erro ao atualizar o chamado: ${error.message}`);
         } finally {
@@ -68,7 +137,7 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
             const searchMatch = filters.search ? (
                 ticket.titulo.toLowerCase().includes(searchText) ||
                 (ticketProject?.nome || '').toLowerCase().includes(searchText) ||
-                ticket.id.toLowerCase().includes(searchText)
+                (ticket.numero?.toString() || '').includes(searchText)
             ) : true;
             const statusMatch = filters.status ? ticket.status === filters.status : true;
             const areaMatch = filters.area ? ticket.area === filters.area : true;
@@ -91,7 +160,7 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
             </CardHeader>
             <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4 p-4 border rounded-lg">
-                    <Input placeholder="Buscar por título, projeto, ID..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} />
+                    <Input placeholder="Buscar por título, projeto, nº..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} />
                     <Select value={filters.status} onValueChange={v => setFilters({...filters, status: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Status" /></SelectTrigger><SelectContent>{statusOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
                     <Select value={filters.area} onValueChange={v => setFilters({...filters, area: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Área" /></SelectTrigger><SelectContent>{areaOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
                     <Select value={filters.priority} onValueChange={v => setFilters({...filters, priority: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Prioridade" /></SelectTrigger><SelectContent>{priorityOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
@@ -117,7 +186,7 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
                                     <TableCell><Select value={ticket.prioridade || ''} onValueChange={v => handleUpdateTicket(ticket.id, { prioridade: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"/><SelectContent>{priorityOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
                                     <TableCell className="flex items-center justify-center gap-1">
                                         {updatingTicketId === ticket.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <>
-                                            <Button variant="ghost" size="icon" onClick={() => navigate(`/chamado/${ticket.id}`)} title="Ver Detalhes"><Eye className="h-4 w-4"/></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => onViewTicket(ticket.id)} title="Ver Detalhes"><Eye className="h-4 w-4"/></Button>
                                             <Button variant="ghost" size="icon" onClick={() => handleNotifyStalled(ticket.id, ticket.atribuidoA)} disabled={!isStalled || !ticket.atribuidoA} title="Notificar Responsável"><BellRing className={`h-4 w-4 ${isStalled && "text-red-500"}`}/></Button>
                                         </>}
                                     </TableCell>
@@ -148,12 +217,15 @@ const AdminPanelPage = () => {
   
   const [selectedExtraTickets, setSelectedExtraTickets] = useState(new Set());
   
+  const [viewingTicketId, setViewingTicketId] = useState(null); // State para controlar o popup
+  
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userFormData, setUserFormData] = useState({ nome: '', email: '', funcao: '', area: '', telefone: '', observacoes: '' });
   const [userFormLoading, setUserFormLoading] = useState(false);
   const [userFormError, setUserFormError] = useState('');
 
+  // ... (demais funções do AdminPanelPage: useEffects, loadAdminData, calculateStatistics, etc. permanecem as mesmas)
   useEffect(() => {
     if (authInitialized && userProfile?.funcao !== 'administrador') navigate('/dashboard');
   }, [authInitialized, userProfile, navigate]);
@@ -357,7 +429,7 @@ const AdminPanelPage = () => {
           </TabsContent>
 
           <TabsContent value="command_center">
-             <TicketCommandCenter tickets={allTickets} users={allUsers} projects={allProjects} onUpdate={loadAdminData} stalledTicketIds={stats.stalledTicketIds}/>
+             <TicketCommandCenter tickets={allTickets} users={allUsers} projects={allProjects} onUpdate={loadAdminData} stalledTicketIds={stats.stalledTicketIds} onViewTicket={setViewingTicketId} />
           </TabsContent>
           
           <TabsContent value="extras" className="space-y-4">
@@ -397,7 +469,7 @@ const AdminPanelPage = () => {
                 <div><CardTitle>Gerenciamento de Usuários</CardTitle><CardDescription>Adicione, edite ou desative usuários do sistema.</CardDescription></div>
                 <Dialog open={showUserDialog} onOpenChange={(isOpen) => { if(!isOpen) resetUserForm(); setShowUserDialog(isOpen); }}>
                   <DialogTrigger asChild><Button onClick={() => setShowUserDialog(true)}><Plus className="mr-2 h-4 w-4"/>Novo Usuário</Button></DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="sm:max-w-2xl">
                     <DialogHeader><DialogTitle>{editingUser ? 'Editar Usuário' : 'Novo Usuário'}</DialogTitle></DialogHeader>
                     <form onSubmit={handleUserSubmit} className="space-y-4 pt-4">
                         <div className="grid grid-cols-2 gap-4">
@@ -432,6 +504,12 @@ const AdminPanelPage = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={!!viewingTicketId} onOpenChange={(isOpen) => { if (!isOpen) setViewingTicketId(null) }}>
+            <DialogContent className="sm:max-w-2xl">
+                {viewingTicketId && <TicketDetailView ticketId={viewingTicketId} onNavigate={navigate}/>}
+            </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
