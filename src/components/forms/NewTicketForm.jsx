@@ -15,9 +15,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-// ✅ NOVAS IMPORTAÇÕES
 import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp, Lock, Link as LinkIcon } from 'lucide-react';
-import { useNavigate, useLocation, Link } from 'react-router-dom'; // ✅ useLocation e Link adicionados
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { collection, getDocs, doc, setDoc, getDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 
@@ -358,21 +357,19 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   useEffect(() => {
     if (formData.area) {
       loadTypesByArea(formData.area);
+      // Carrega operadores apenas se a área não for Produção
+      if (formData.area !== AREAS.PRODUCTION) {
+        loadOperatorsByArea(formData.area);
+      } else {
+        setOperators([]);
+        setSelectedOperator('');
+      }
     } else {
       setAvailableTypes([]);
       setOperators([]);
       setSelectedOperator('');
     }
   }, [formData.area]);
-
-  useEffect(() => {
-    if (formData.area && formData.tipo) {
-      loadOperatorsByArea(formData.area);
-    } else {
-      setOperators([]);
-      setSelectedOperator('');
-    }
-  }, [formData.area, formData.tipo]);
 
   const loadProjects = async () => {
     try {
@@ -560,6 +557,11 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     e.preventDefault();
     if (!validateForm()) return;
 
+    if (formData.area === AREAS.PRODUCTION && !selectedProjectData?.produtorId) {
+        setError('Não é possível criar o chamado: o projeto selecionado não possui um produtor responsável definido.');
+        return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -596,8 +598,19 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
         chamadoPaiId: linkedTicket ? linkedTicket.id : null,
       };
 
-      if (selectedOperator) {
-        Object.assign(ticketData, { atribuidoA: selectedOperator, status: 'em_tratativa', atribuidoEm: new Date(), atribuidoPor: user.uid });
+      if (formData.area === AREAS.PRODUCTION) {
+        const producerId = selectedProjectData.produtorId;
+        Object.assign(ticketData, { 
+          atribuidoA: producerId,
+          atribuidoEm: new Date(), 
+          atribuidoPor: user.uid 
+        });
+      } else if (selectedOperator) {
+        Object.assign(ticketData, { 
+          atribuidoA: selectedOperator,
+          atribuidoEm: new Date(), 
+          atribuidoPor: user.uid 
+        });
       }
 
       ticketId = await ticketService.createTicket(ticketData);
@@ -971,6 +984,42 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
               </Select>
             </div>
           </div>
+          
+          {formData.area && formData.area !== AREAS.PRODUCTION && (
+            <div className="space-y-2 pt-4 border-t">
+              <Label htmlFor="operator">Atribuir para Operador (Opcional)</Label>
+              <Select
+                value={selectedOperator}
+                onValueChange={setSelectedOperator}
+                disabled={!formData.area || operators.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={
+                    operators.length > 0
+                      ? "Selecione um operador para agilizar"
+                      : "Nenhum operador encontrado para esta área"
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {operators.map((op) => (
+                    <SelectItem key={op.id} value={op.id}>
+                      {op.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {formData.area === AREAS.PRODUCTION && selectedProjectData && (
+            <Alert variant="default" className="bg-blue-50 border-blue-200 mt-4">
+              <AlertCircle className="h-4 w-4 text-blue-700" />
+              <AlertDescription className="text-blue-800">
+                O chamado será <strong>automaticamente atribuído</strong> ao produtor do projeto: 
+                <span className="font-semibold ml-1">{selectedProjectData.produtorNome || 'Não identificado'}</span>.
+              </AlertDescription>
+            </Alert>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="prioridade">Prioridade *</Label>
