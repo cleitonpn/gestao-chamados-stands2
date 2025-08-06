@@ -107,7 +107,10 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
                                 <TableRow key={ticket.id} className={isStalled ? "bg-red-50" : ""}>
                                     <TableCell>
                                         <p className="font-medium truncate" title={ticket.titulo}>{ticket.titulo}</p>
-                                        <p className="text-xs text-gray-500">{projects.find(p => p.id === ticket.projetoId)?.nome || 'N/A'}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-gray-500">{projects.find(p => p.id === ticket.projetoId)?.nome || 'N/A'}</p>
+                                            {isStalled && <AlertTriangle className="h-4 w-4 text-red-500" title="Chamado parado há mais de 24h"/>}
+                                        </div>
                                     </TableCell>
                                     <TableCell><Select value={ticket.status || ''} onValueChange={v => handleUpdateTicket(ticket.id, { status: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"/><SelectContent>{statusOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
                                     <TableCell><Select value={ticket.atribuidoA || ''} onValueChange={v => handleUpdateTicket(ticket.id, { atribuidoA: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Atribuir..."/></SelectTrigger><SelectContent>{userOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
@@ -141,11 +144,10 @@ const AdminPanelPage = () => {
   const [allUsers, setAllUsers] = useState([]);
   
   const [filters, setFilters] = useState({ dateRange: { from: '', to: '' } });
-  const [stats, setStats] = useState({ kpis: {}, trendData: [], statusDistribution: [], workloadByArea: [], stalledTicketIds: new Set() });
+  const [stats, setStats] = useState({ kpis: {}, trendData: [], statusDistribution: [], stalledTicketIds: new Set(), extraTickets: [] });
   
   const [selectedExtraTickets, setSelectedExtraTickets] = useState(new Set());
   
-  // State para gerenciamento de usuários (portado de UsersPage)
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userFormData, setUserFormData] = useState({ nome: '', email: '', funcao: '', area: '', telefone: '', observacoes: '' });
@@ -234,13 +236,49 @@ const AdminPanelPage = () => {
     const getStatusText = (status) => ({ 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'concluido': 'Concluído' }[status] || status);
     const pieData = Object.entries(statusDistribution).map(([name, value]) => ({ name: getStatusText(name), value }));
     const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+    const extraTickets = filteredTickets.filter(t => t.isExtra === true);
 
     setStats({
         kpis,
         trendData: Object.values(trendDataMap).sort((a,b) => new Date(a.date) - new Date(b.date)),
         statusDistribution: pieData.map((entry, index) => ({...entry, fill: PIE_COLORS[index % PIE_COLORS.length]})),
         stalledTicketIds: new Set(stalledTickets.map(t => t.id)),
+        extraTickets: extraTickets,
     });
+  };
+  
+  const handleToggleExtraTicket = (ticketId) => {
+    const newSelection = new Set(selectedExtraTickets);
+    if (newSelection.has(ticketId)) newSelection.delete(ticketId);
+    else newSelection.add(ticketId);
+    setSelectedExtraTickets(newSelection);
+  };
+  
+  const handleExportExtras = () => {
+    const dataToExport = stats.extraTickets.filter(ticket => selectedExtraTickets.has(ticket.id))
+        .map(ticket => ({
+            'ID Chamado': ticket.id, 'Título': ticket.titulo,
+            'Projeto': allProjects.find(p => p.id === ticket.projetoId)?.nome || 'N/A',
+            'Motivo Extra': ticket.motivoExtra,
+            'Criado Em': ticket.createdAt?.toDate().toLocaleDateString('pt-BR'),
+            'Faturado': ticket.faturado ? 'Sim' : 'Não'
+        }));
+    if (dataToExport.length === 0) return alert("Selecione ao menos um chamado extra para exportar.");
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Chamados Extras");
+    XLSX.writeFile(workbook, `Relatorio_Extras_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+  
+  const handleMarkAsBilled = async () => {
+    if (selectedExtraTickets.size === 0) return alert("Selecione ao menos um chamado para marcar como faturado.");
+    if (!window.confirm(`Tem certeza que deseja marcar ${selectedExtraTickets.size} chamado(s) como faturado(s)?`)) return;
+    try {
+        await Promise.all(Array.from(selectedExtraTickets).map(ticketId => ticketService.updateTicket(ticketId, { faturado: true })));
+        alert("Chamados marcados como faturados!");
+        setSelectedExtraTickets(new Set());
+        loadAdminData();
+    } catch (error) { alert("Ocorreu um erro.") }
   };
   
   const handleUserInputChange = (field, value) => { setUserFormData(prev => ({ ...prev, [field]: value })); if (userFormError) setUserFormError(''); };
@@ -322,7 +360,36 @@ const AdminPanelPage = () => {
              <TicketCommandCenter tickets={allTickets} users={allUsers} projects={allProjects} onUpdate={loadAdminData} stalledTicketIds={stats.stalledTicketIds}/>
           </TabsContent>
           
-          <TabsContent value="extras">{/* ... Conteúdo dos Extras (pode ser adicionado aqui) ... */}</TabsContent>
+          <TabsContent value="extras" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2"><DollarSign className="h-5 w-5 text-green-600"/>Chamados Extras Registrados</div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={handleExportExtras} disabled={selectedExtraTickets.size === 0}><Download className="h-4 w-4 mr-2" />Exportar CSV</Button>
+                    <Button size="sm" onClick={handleMarkAsBilled} disabled={selectedExtraTickets.size === 0}><CheckCircle className="h-4 w-4 mr-2" />Marcar como Faturado</Button>
+                  </div>
+                </CardTitle>
+                <CardDescription>Total de {stats.extraTickets.length || 0} chamados extras no período. Selecione para realizar ações.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {stats.extraTickets.map(ticket => (
+                    <div key={ticket.id} className={`flex justify-between items-center p-3 rounded-lg border transition-colors ${selectedExtraTickets.has(ticket.id) ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                      <div className="flex items-center gap-3">
+                        <Checkbox id={`extra-${ticket.id}`} checked={selectedExtraTickets.has(ticket.id)} onCheckedChange={() => handleToggleExtraTicket(ticket.id)} />
+                        <label htmlFor={`extra-${ticket.id}`} className="cursor-pointer">
+                          <p className={`font-medium ${ticket.faturado ? 'line-through text-gray-500' : ''}`}>{ticket.titulo}</p>
+                          <p className="text-sm text-gray-500">Projeto: {allProjects.find(p => p.id === ticket.projetoId)?.nome || 'N/A'}</p>
+                        </label>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/chamado/${ticket.id}`)}><Eye className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
           
           <TabsContent value="usuarios">
             <Card>
@@ -338,8 +405,8 @@ const AdminPanelPage = () => {
                             <div><Label>Email *</Label><Input type="email" value={userFormData.email} onChange={e => handleUserInputChange('email', e.target.value)} /></div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                           <div><Label>Função *</Label><Select value={userFormData.funcao} onValueChange={v => handleUserInputChange('funcao', v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{roleOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
-                           <div><Label>Área</Label><Select value={userFormData.area} onValueChange={v => handleUserInputChange('area', v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{areaOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+                           <div><Label>Função *</Label><Select value={userFormData.funcao} onValueChange={v => handleUserInputChange('funcao', v)}><SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger><SelectContent>{roleOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+                           <div><Label>Área</Label><Select value={userFormData.area} onValueChange={v => handleUserInputChange('area', v)}><SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger><SelectContent>{areaOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
                         </div>
                          <div><Label>Telefone</Label><Input value={userFormData.telefone} onChange={e => handleUserInputChange('telefone', e.target.value)} /></div>
                          <div><Label>Observações</Label><Input value={userFormData.observacoes} onChange={e => handleUserInputChange('observacoes', e.target.value)} /></div>
