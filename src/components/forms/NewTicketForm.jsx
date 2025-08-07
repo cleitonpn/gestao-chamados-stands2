@@ -570,12 +570,6 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     try {
       let finalTicketData = { ...formData };
       
-      if (userProfile?.funcao === 'consultor') {
-        finalTicketData.areaDestinoOriginal = formData.area; 
-        finalTicketData.area = AREAS.PRODUCTION;
-        finalTicketData.observacoes = `${finalTicketData.observacoes || ''}\n\n[CHAMADO DE CONSULTOR] - Direcionado para o produtor avaliar e tratar ou escalar para área específica.`.trim();
-      }
-
       if (selectedAITemplate) {
         const aiTemplate = aiTemplates.find(t => t.id === selectedAITemplate);
         if (aiTemplate) {
