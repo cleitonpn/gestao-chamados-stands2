@@ -591,64 +591,48 @@ const TicketDetailPage = () => {
     try {
       let updateData = {};
       let systemMessageContent = '';
-
-      if (statusToUpdate === 'send_to_area') {
-        const targetArea = ticket.areaDestinoOriginal;
-        if (!targetArea) {
-            alert('Erro Crítico: A área de destino original não foi encontrada neste chamado.');
-            setUpdating(false);
-            return;
+      
+      updateData = { status: statusToUpdate, atualizadoPor: user.uid, updatedAt: new Date() };
+      if (statusToUpdate === 'concluido') {
+        updateData.conclusaoDescricao = conclusionDescription;
+        updateData.conclusaoImagens = conclusionImages;
+        updateData.concluidoEm = new Date();
+        updateData.concluidoPor = user.uid;
+        systemMessageContent = `✅ **Chamado concluído**\n\n**Descrição:** ${conclusionDescription}`;
+      } else if (statusToUpdate === 'rejeitado') {
+        updateData.motivoRejeicao = conclusionDescription;
+        updateData.rejeitadoEm = new Date();
+        updateData.rejeitadoPor = user.uid;
+        systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
+      } else if (statusToUpdate === 'enviado_para_area') {
+         if (!ticket.areaDeOrigem) {
+           alert('Erro Crítico: A área de origem para devolução não foi encontrada.');
+           setUpdating(false);
+           return;
         }
-        updateData = {
-          status: 'aberto',
-          area: targetArea,
-          areasEnvolvidas: [...new Set([...(ticket.areasEnvolvidas || []), targetArea])],
-          atualizadoPor: user.uid,
-          updatedAt: new Date(),
-        };
-        systemMessageContent = `📲 **Chamado enviado pelo produtor para a área de destino: ${targetArea.replace('_', ' ').toUpperCase()}.**`;
-      } else {
-        updateData = { status: statusToUpdate, atualizadoPor: user.uid, updatedAt: new Date() };
-        if (statusToUpdate === 'concluido') {
-          updateData.conclusaoDescricao = conclusionDescription;
-          updateData.conclusaoImagens = conclusionImages;
-          updateData.concluidoEm = new Date();
-          updateData.concluidoPor = user.uid;
-          systemMessageContent = `✅ **Chamado concluído**\n\n**Descrição:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'rejeitado') {
-          updateData.motivoRejeicao = conclusionDescription;
-          updateData.rejeitadoEm = new Date();
-          updateData.rejeitadoPor = user.uid;
-          systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'enviado_para_area') {
-           if (!ticket.areaDeOrigem) {
-             alert('Erro Crítico: A área de origem para devolução não foi encontrada.');
-             setUpdating(false);
-             return;
+        updateData.motivoRejeicao = conclusionDescription;
+        updateData.rejeitadoEm = new Date();
+        updateData.rejeitadoPor = user.uid;
+        updateData.areaQueRejeitou = ticket.area;
+        updateData.area = ticket.areaDeOrigem;
+        systemMessageContent = `🔄 **Chamado devolvido para:** ${updateData.area.replace(/_/g, ' ')}\n\n**Motivo:** ${conclusionDescription}`;
+      } else if (statusToUpdate === 'aprovado') {
+          if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
+              updateData.status = 'em_tratativa';
+              updateData.area = ticket.areaDeOrigem || ticket.area;
+              updateData.aprovadoEm = new Date();
+              updateData.aprovadoPor = user.uid;
+              systemMessageContent = `✅ **Chamado aprovado pelo gerente** e retornado para a área responsável.`;
           }
-          updateData.motivoRejeicao = conclusionDescription;
-          updateData.rejeitadoEm = new Date();
-          updateData.rejeitadoPor = user.uid;
-          updateData.areaQueRejeitou = ticket.area;
+      } else if (statusToUpdate === 'executado_pelo_consultor') {
           updateData.area = ticket.areaDeOrigem;
-          systemMessageContent = `🔄 **Chamado devolvido para:** ${updateData.area.replace(/_/g, ' ')}\n\n**Motivo:** ${conclusionDescription}`;
-        } else if (statusToUpdate === 'aprovado') {
-            if (ticket.status === 'aguardando_aprovacao' && userProfile.funcao === 'gerente') {
-                updateData.status = 'em_tratativa';
-                updateData.area = ticket.areaDeOrigem || ticket.area;
-                updateData.aprovadoEm = new Date();
-                updateData.aprovadoPor = user.uid;
-                systemMessageContent = `✅ **Chamado aprovado pelo gerente** e retornado para a área responsável.`;
-            }
-        } else if (statusToUpdate === 'executado_pelo_consultor') {
-            updateData.area = ticket.areaDeOrigem;
-            updateData.consultorResponsavelId = null; 
-            systemMessageContent = `👨‍🎯 **Chamado executado pelo consultor e devolvido para:** ${ticket.areaDeOrigem?.replace('_', ' ').toUpperCase()}`;
-        }
-        else {
-            systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
-        }
+          updateData.consultorResponsavelId = null; 
+          systemMessageContent = `👨‍🎯 **Chamado executado pelo consultor e devolvido para:** ${ticket.areaDeOrigem?.replace('_', ' ').toUpperCase()}`;
       }
+      else {
+          systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
+      }
+
       await ticketService.updateTicket(ticketId, updateData);
       const statusMessage = { userId: user.uid, remetenteNome: userProfile.nome || user.email, conteudo: systemMessageContent, criadoEm: new Date(), type: 'status_update' };
       await messageService.sendMessage(ticketId, statusMessage);
