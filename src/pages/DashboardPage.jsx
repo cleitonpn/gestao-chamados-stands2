@@ -663,7 +663,7 @@ const DashboardPage = () => {
                             className={`h-5 w-5 sm:h-6 sm:w-6 ${
                               isActive ? 'text-white' : card.iconColor
                             }`} 
-                            {
+                          />
                           <div>
                             <p className={`text-xs sm:text-sm font-medium ${
                               isActive ? 'text-white' : 'text-gray-900'
