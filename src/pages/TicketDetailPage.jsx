@@ -56,11 +56,33 @@ const TicketDetailPage = () => {
   // Estados principais
   const [ticket, setTicket] = useState(null);
   const [project, setProject] = useState(null);
+const [projectsMap, setProjectsMap] = useState({});
+const [linkedProjectIds, setLinkedProjectIds] = useState([]);
+const [activeProjectId, setActiveProjectId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  // Resolve nome do responsável do projeto a partir de possíveis formatos (Id/Uid/Nome/Email/responsaveis{})
+  const resolveUserNameByProjectField = (proj, base) => {
+    if (!proj) return null;
+    const id = proj?.[base + 'Id'] || proj?.[base + 'Uid'] || proj?.responsaveis?.[base]?.id;
+    if (id && Array.isArray(users)) {
+      const u = users.find(u => u.uid === id || u.id === id);
+      if (u?.nome) return u.nome;
+    }
+    const nome = proj?.[base + 'Nome'] || proj?.responsaveis?.[base]?.nome;
+    if (nome) return nome;
+    const email = proj?.[base + 'Email'] || proj?.responsaveis?.[base]?.email;
+    if (email && Array.isArray(users)) {
+      const u = users.find(u => u.email === email);
+      if (u?.nome) return u.nome;
+      return email;
+    }
+    return null;
+  };
+
 
   // Estados do chat
   const [newMessage, setNewMessage] = useState('');
@@ -83,6 +105,7 @@ const TicketDetailPage = () => {
   const [managementArea, setManagementArea] = useState('');
   const [managementReason, setManagementReason] = useState('');
   const [isEscalatingToManagement, setIsEscalatingToManagement] = useState(false);
+  
 
   // Estados para escalação para consultor
   const [consultorReason, setConsultorReason] = useState('');
@@ -122,12 +145,27 @@ const TicketDetailPage = () => {
           setParentTicketForLink(parentTicketData);
       }
 
-      if (ticketData.projetoId) {
-        const projectData = await projectService.getProjectById(ticketData.projetoId);
-        setProject(projectData);
+      const _linkedIds = Array.isArray(ticketData.projetos) && ticketData.projetos.length > 0
+        ? ticketData.projetos
+        : (ticketData.projetoId ? [ticketData.projetoId] : []);
+      setLinkedProjectIds(_linkedIds);
+      if (_linkedIds.length > 0) {
+        const entries = await Promise.all(
+          _linkedIds.map(async (pid) => {
+            try { const pdata = await projectService.getProjectById(pid); return [pid, pdata]; }
+            catch(e) { console.error('Erro ao carregar projeto', pid, e); return [pid, null]; }
+          })
+        );
+        const map = Object.fromEntries(entries);
+        setProjectsMap(map);
+        setActiveProjectId(_linkedIds[0]);
+        setProject(map[_linkedIds[0]] || null);
+      } else {
+        setProjectsMap({});
+        setActiveProjectId(null);
+        setProject(null);
       }
-
-      const messagesData = await messageService.getMessagesByTicket(ticketId);
+const messagesData = await messageService.getMessagesByTicket(ticketId);
       setMessages(messagesData || []);
 
     } catch (err) {
@@ -135,6 +173,13 @@ const TicketDetailPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Selecionar um projeto vinculado
+  const handleSelectProject = (pid) => {
+    setActiveProjectId(pid);
+    const p = projectsMap[pid] || null;
+    setProject(p);
   };
 
   useEffect(() => {
@@ -146,13 +191,17 @@ const TicketDetailPage = () => {
 
   useEffect(() => {
     if (ticket && userProfile && user) {
-      if (ticket.isConfidential) {
-        const isCreator = ticket.criadoPor === user.uid;
-        const isAdmin = userProfile.funcao === 'administrador';
-        const isInvolvedOperator = userProfile.funcao === 'operador' &&
-                                   (userProfile.area === ticket.area || userProfile.area === ticket.areaDeOrigem);
-
-        if (!isCreator && !isAdmin && !isInvolvedOperator) {
+      if (ticket.confidencial || ticket.isConfidential) {
+        const isCreator   = ticket.criadoPor === user.uid;
+        const isAdmin     = userProfile.funcao === 'administrador';
+        const isGerente   = userProfile.funcao === 'gerente';
+        const isOperator  = userProfile.funcao === 'operador';
+        const areaOp      = userProfile.area;
+        const operatorInvolved = isOperator && (
+          [ticket.area, ticket.areaDeOrigem, ticket.areaDestino, ticket.areaQueRejeitou].includes(areaOp) ||
+          (Array.isArray(ticket.areasEnvolvidas) && ticket.areasEnvolvidas.includes(areaOp))
+        );
+        if (!isCreator && !isAdmin && !isGerente && !operatorInvolved) {
           setAccessDenied(true);
         }
       }
@@ -349,6 +398,17 @@ const TicketDetailPage = () => {
         return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
     }
 
+    if (isCreator && currentStatus === 'enviado_para_area') {
+        return [{ value: 'cancelado', label: 'Cancelar Chamado' }];
+    }
+
+    if (userRole === 'gerente' && currentStatus === 'aguardando_aprovacao' && ticket.responsavelAtual === user.uid) {
+  return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'reprovado', label: 'Reprovar' } ];
+}
+    
+    if (userRole === 'produtor' && currentStatus === 'transferido_para_produtor' && ticket.produtorResponsavelId === user.uid) {
+  return [{ value: 'executado_aguardando_validacao', label: 'Executar' }];
+}
     if (userRole === 'administrador') {
       if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
       if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
@@ -359,7 +419,9 @@ const TicketDetailPage = () => {
     if (userRole === 'operador') {
       if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
         if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
-            const actions = [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
+            const actions = currentStatus === 'transferido_para_produtor'
+              ? [ { value: 'em_tratativa', label: 'Iniciar Tratativa (Produção)' }, { value: 'aberto', label: 'Transferir para Área Selecionada' } ]
+              : [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
             if (ticket.areaDeOrigem) {
                 actions.push({ value: 'enviado_para_area', label: 'Rejeitar / Devolver' });
             }
@@ -429,71 +491,62 @@ const TicketDetailPage = () => {
   };
 
   const handleManagementEscalation = async () => {
-    if (!managementArea) {
-      alert('Por favor, selecione uma gerência de destino');
-      return;
-    }
-    if (!managementReason.trim()) {
-      alert('Por favor, descreva o motivo da escalação para gerência');
-      return;
-    }
-
-    const targetArea = managementArea.replace('gerente_', '');
-    const targetManager = users.find(u => u.funcao === 'gerente' && u.area === targetArea);
-
-    if (!targetManager) {
-      alert(`Erro: Nenhum gerente encontrado para a área "${targetArea}". Verifique o cadastro de usuários.`);
+    if (!managementArea || !managementReason) {
+      alert('Por favor, selecione a gerência e forneça um motivo.');
       return;
     }
 
     setIsEscalatingToManagement(true);
     try {
+      // Encontra o gerente correspondente na lista de todos os usuários
+      const targetManager = users.find(user => user.area === managementArea.replace('gerente_', '') && user.funcao === 'gerente');
+
+      if (!targetManager) {
+        alert(`Erro: Nenhum gerente encontrado para a área "${managementArea}". Verifique o cadastro de usuários.`);
+        console.error('Nenhum gerente encontrado para a área:', managementArea);
+        setIsEscalatingToManagement(false);
+        return;
+      }
+
+      const managerUid = targetManager.id; // O ID do documento do usuário é o UID
+
       const updateData = {
         status: 'aguardando_aprovacao',
-        areaDeOrigem: ticket.area,
-        gerenteResponsavelId: targetManager.uid,
-        motivoEscalonamentoGerencial: managementReason,
-        escaladoPor: user.uid,
+        gerenciaDestino: managementArea,
         escaladoEm: new Date(),
-        atualizadoPor: user.uid,
-        updatedAt: new Date()
-      };
-
-      const managementNames = {
-        'gerente_operacional': 'Gerência Operacional',
-        'gerente_comercial': 'Gerência Comercial',
-        'gerente_producao': 'Gerência Produção',
-        'gerente_financeiro': 'Gerência Financeira'
+        escaladoPor: user.uid,
+        motivoEscalonamentoGerencial: managementReason,
+        responsavelAtual: managerUid, // <-- CORREÇÃO PRINCIPAL AQUI
+        dataUltimaAtualizacao: new Date()
       };
 
       await ticketService.updateTicket(ticketId, updateData);
 
+      // Mensagem para o chat
       const escalationMessage = {
         userId: user.uid,
         remetenteNome: userProfile.nome || user.email,
-        conteudo: `👨‍💼 **Chamado escalado para ${managementNames[managementArea]}**\n\n**Motivo:** ${managementReason}\n\n**Gerente Responsável:** ${targetManager.nome}`,
+        conteudo: `👨‍💼 **Chamado escalado para ${managementArea.replace('gerente_', '').replace('_', ' ').toUpperCase()}**\n\n**Motivo:** ${managementReason}\n\n**Gerente Responsável:** ${targetManager.nome}`,
         criadoEm: new Date(),
         type: 'management_escalation'
       };
       await messageService.sendMessage(ticketId, escalationMessage);
 
-      try {
-        await notificationService.notifyManagementEscalation(
-          ticketId,
-          ticket,
-          targetManager.uid,
-          user.uid,
-          managementReason
-        );
-        console.log('✅ Notificação de escalação gerencial enviada');
-      } catch (notificationError) {
-        console.error('❌ Erro ao enviar notificação de escalação gerencial:', notificationError);
-      }
-
+      // Notificação para o gerente
+      await notificationService.notifyManagementEscalation(
+        ticketId,
+        ticket,
+        managerUid, // Usando o UID do gerente encontrado
+        user.uid,
+        managementReason
+      );
+      console.log('✅ Notificação de escalação gerencial enviada');
+      
       await loadTicketData();
       setManagementArea('');
       setManagementReason('');
       alert('Chamado escalado para gerência com sucesso!');
+
     } catch (error) {
       console.error('Erro ao escalar para gerência:', error);
       alert('Erro ao escalar para gerência: ' + error.message);
@@ -606,9 +659,8 @@ const TicketDetailPage = () => {
         systemMessageContent = `❌ **Chamado reprovado pelo gerente**\n\n**Motivo:** ${conclusionDescription}`;
       } else if (statusToUpdate === 'enviado_para_area') {
          if (!ticket.areaDeOrigem) {
-           alert('Erro Crítico: A área de origem para devolução não foi encontrada.');
-           setUpdating(false);
-           return;
+           // fallback: assume área atual como origem se não existir registro legado
+           updateData.areaDeOrigem = ticket.area;
         }
         updateData.motivoRejeicao = conclusionDescription;
         updateData.rejeitadoEm = new Date();
@@ -628,8 +680,14 @@ const TicketDetailPage = () => {
           updateData.area = ticket.areaDeOrigem;
           updateData.consultorResponsavelId = null; 
           systemMessageContent = `👨‍🎯 **Chamado executado pelo consultor e devolvido para:** ${ticket.areaDeOrigem?.replace('_', ' ').toUpperCase()}`;
-      }
-      else {
+            } else if (statusToUpdate === 'cancelado') {
+updateData.canceladoEm = new Date();
+          updateData.canceladoPor = user.uid;
+          systemMessageContent = `🚫 **Chamado cancelado pelo criador**`;
+      } else if (statusToUpdate === 'aberto' && ticket.status === 'transferido_para_produtor') {
+          updateData.area = ticket.areaInicial || ticket.areaDeOrigem || ticket.area;
+          systemMessageContent = `🔄 **Transferido para área selecionada:** ${ (updateData.area || '').replace(/_/g, ' ').toUpperCase() }`;
+      } else {
           systemMessageContent = `🔄 **Status atualizado para:** ${getStatusText(statusToUpdate)}`;
       }
 
@@ -798,12 +856,14 @@ const TicketDetailPage = () => {
               </p>
             </div>
             <div className="flex items-center">
-              {ticket.isConfidential && (
+              {
+                (ticket.isConfidential || ticket.confidencial) && (
                 <Badge variant="outline" className="mr-2 border-orange-400 bg-orange-50 text-orange-700">
                   <Lock className="h-3 w-3 mr-1.5" />
                   Confidencial
                 </Badge>
-              )}
+              )
+            }
               <Badge className={getStatusColor(ticket.status)}>
                 {getStatusText(ticket.status)}
               </Badge>
@@ -886,19 +946,22 @@ const TicketDetailPage = () => {
                     </div>
                   </div>
                 )}
-                {ticket.isExtra && (
+                {
+                  (ticket.isExtra || ticket.itemExtra) && (
                   <div className="p-3 sm:p-4 bg-orange-50 border border-orange-200 rounded-lg">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-orange-600 font-semibold text-sm sm:text-base">🔥 ITEM EXTRA</span>
                     </div>
-                    {ticket.motivoExtra && (
+                    {
+                      (ticket.motivoExtra || ticket.motivoItemExtra) && (
                       <div>
                         <Label className="text-xs sm:text-sm font-medium text-orange-700">Motivo do Item Extra</Label>
                         <p className="text-sm sm:text-base text-orange-900 whitespace-pre-wrap break-words">{ticket.motivoExtra}</p>
                       </div>
                     )}
                   </div>
-                )}
+                )
+              }
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Área</Label>
@@ -1294,6 +1357,30 @@ const TicketDetailPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 sm:space-y-4">
+                {/* Projetos vinculados (multi) */}
+                {linkedProjectIds && linkedProjectIds.length > 1 && (
+                  <div className="mb-3">
+                    <div className="text-xs text-gray-500 mb-2">Projetos vinculados</div>
+                    <div className="flex flex-wrap gap-2">
+                      {linkedProjectIds.map((pid) => {
+                        const p = projectsMap[pid];
+                        const label = p?.nome || (ticket?.projetoNome && pid === (ticket?.projetoId || "" ) ? ticket.projetoNome : `Projeto ${pid.slice(-6)}`);
+                        const isActive = activeProjectId === pid;
+                        return (
+                          <button
+                            key={pid}
+                            onClick={() => handleSelectProject(pid)}
+                            className={`px-3 py-1 rounded-full border text-xs transition-colors ${isActive ? "bg-blue-600 text-white border-blue-600" : "bg-white hover:bg-gray-50"}`}
+                            title={p?.nome || pid}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <Label className="text-xs sm:text-sm font-medium text-gray-700">Nome</Label>
                   <p className="text-sm sm:text-base text-gray-900 break-words">{project?.nome || 'Projeto não encontrado'}</p>
@@ -1310,7 +1397,28 @@ const TicketDetailPage = () => {
                     <p className="text-sm sm:text-base text-gray-900 break-words">{project.local}</p>
                   </div>
                 )}
-                {project && (
+                
+                {project && (project.tipoMontagem || project.tipo_de_montagem || project.tipoMontagemPrincipal || project.montagem) && (
+                  <div>
+                    <Label className="text-xs sm:text-sm font-medium text-gray-700">Tipo de Montagem</Label>
+                    <p className="text-sm sm:text-base text-gray-900 break-words">
+                      {project.tipoMontagem || project.tipo_de_montagem || project.tipoMontagemPrincipal || project.montagem}
+                    </p>
+                  </div>
+                )}
+                <div>
+                  <Label className="text-xs sm:text-sm font-medium text-gray-700">Produtor</Label>
+                  <p className="text-sm sm:text-base text-gray-900 break-words">
+                    {resolveUserNameByProjectField(project, 'produtor') || 'Não identificado'}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-xs sm:text-sm font-medium text-gray-700">Consultor</Label>
+                  <p className="text-sm sm:text-base text-gray-900 break-words">
+                    {resolveUserNameByProjectField(project, 'consultor') || 'Não identificado'}
+                  </p>
+                </div>
+{project && (
                   <div className="pt-3 mt-3 border-t">
                     <Button
                       variant="outline"
@@ -1419,7 +1527,7 @@ const TicketDetailPage = () => {
               </Card>
             )}
 
-            {!isArchived && userProfile?.funcao === 'administrador' && ticket.status === 'concluido' && (
+            {!isArchived && userProfile?.funcao === 'administrador' && (ticket.status === 'concluido' || ticket.status === 'cancelado') && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center text-base sm:text-lg">
