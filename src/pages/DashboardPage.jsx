@@ -382,30 +382,54 @@ const DashboardPage = () => {
         allProjects.forEach(project => { projectNamesMap[project.id] = project.nome; });
         setProjectNames(projectNamesMap);
       } else if (userProfile?.funcao === 'operador') {
-        console.log('⚙️ Operador: carregando chamados da área (inclui histórico)');
-        const [allProjects, allTickets, allUsers] = await Promise.all([
-          projectService.getAllProjects(),
-          ticketService.getAllTickets(),
-          userService.getAllUsers()
-        ]);
-        const areaOp = userProfile.area;
-        const operatorTickets = allTickets.filter(t => {
-          const atual = t.area === areaOp;
-          const origem = t.areaDeOrigem === areaOp;
-          const destino = t.areaDestino === areaOp;
-          const devolvido = t.status === 'enviado_para_area' && (t.area === areaOp || t.areaDeOrigem === areaOp);
-          const rejeitou = t.areaQueRejeitou === areaOp;
-          const envolvido = Array.isArray(t.areasEnvolvidas) && t.areasEnvolvidas.includes(areaOp);
-          const atribuido = t.atribuidoA === user.uid;
-          const abertoPeloUsuario = t.criadoPor === user.uid;
-          return (atual || origem || destino || devolvido || rejeitou || envolvido || atribuido || abertoPeloUsuario) && filterConfidential(t);
-        });
-        setProjects(allProjects);
-        setTickets(operatorTickets);
-        setUsers(allUsers);
-        const projectNamesMap = {};
-        allProjects.forEach(project => { projectNamesMap[project.id] = project.nome; });
-        setProjectNames(projectNamesMap);
+  console.log('⚙️ Operador: carregando chamados da área (inclui histórico)');
+  const [allProjects, allTickets, allUsers] = await Promise.all([
+    projectService.getAllProjects(),
+    ticketService.getAllTickets(),
+    userService.getAllUsers()
+  ]);
+  
+  const areaOp = userProfile.area;
+  const operatorTickets = allTickets.filter(t => {
+    // ✅ CONDIÇÕES EXPANDIDAS PARA GARANTIR VISIBILIDADE
+    const atual = t.area === areaOp;
+    const origem = t.areaDeOrigem === areaOp || t.areaInicial === areaOp || t.areaOriginal === areaOp;
+    const destino = t.areaDestino === areaOp;
+    const devolvido = t.status === 'enviado_para_area' && (t.area === areaOp || t.areaDeOrigem === areaOp);
+    const rejeitou = t.areaQueRejeitou === areaOp;
+    const envolvido = Array.isArray(t.areasEnvolvidas) && t.areasEnvolvidas.includes(areaOp);
+    const atribuido = t.atribuidoA === user.uid;
+    const abertoPeloUsuario = t.criadoPor === user.uid;
+    
+    // ✅ NOVA CONDIÇÃO: Chamados escalados para a área do operador
+    const escaladoParaArea = t.status === 'escalado_para_outra_area' && t.areaEscalada === areaOp;
+    
+    // ✅ NOVA CONDIÇÃO: Chamados transferidos para a área
+    const transferidoParaArea = t.status === 'transferido_para_area' && t.areaDestino === areaOp;
+    
+    // ✅ CONDIÇÃO ESPECIAL PARA FINANCEIRO: Incluir chamados que precisam de aprovação financeira
+    const precisaFinanceiro = areaOp === 'financeiro' && (
+      t.tipo === 'despesas_programada' || 
+      t.tipo === 'despesas_nao_programadas' ||
+      t.area === 'financeiro' ||
+      t.areaDeOrigem === 'financeiro' ||
+      t.gerenciaDestino === 'gerente_financeiro'
+    );
+    
+    return (atual || origem || destino || devolvido || rejeitou || envolvido || 
+            atribuido || abertoPeloUsuario || escaladoParaArea || 
+            transferidoParaArea || precisaFinanceiro) && filterConfidential(t);
+  });
+  
+  setProjects(allProjects);
+  setTickets(operatorTickets);
+  setUsers(allUsers);
+  
+  const projectNamesMap = {};
+  allProjects.forEach(project => { 
+    projectNamesMap[project.id] = project.nome; 
+  });
+  setProjectNames(projectNamesMap);
       } else if (userProfile?.funcao === 'gerente') {
         console.log('👔 Gerente: carregando TODOS os dados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
