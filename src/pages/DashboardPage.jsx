@@ -324,13 +324,29 @@ const DashboardPage = () => {
       console.log('🔍 Carregando dados para:', userProfile?.funcao);
       
       const filterConfidential = (ticket) => {
-        if (!ticket.isConfidential) {
-          return true;
-        }
-        const isCreator = ticket.criadoPor === user.uid;
-        const isAdmin = userProfile?.funcao === 'administrador';
-        return isCreator || isAdmin;
-      };
+  // ✅ VERIFICA AMBOS OS CAMPOS POSSÍVEIS
+  const isConfidential = ticket.isConfidential || ticket.confidencial;
+  
+  if (!isConfidential) {
+    return true;
+  }
+  
+  const isCreator = ticket.criadoPor === user.uid;
+  const isAdmin = userProfile?.funcao === 'administrador';
+  
+  // ✅ NOVA LÓGICA: Operadores podem ver chamados confidenciais da sua área
+  const isOperatorOfArea = userProfile?.funcao === 'operador' && (
+    ticket.area === userProfile?.area ||
+    ticket.areaDeOrigem === userProfile?.area ||
+    ticket.areaInicial === userProfile?.area ||
+    ticket.areaOriginal === userProfile?.area
+  );
+  
+  // ✅ GERENTES PODEM VER TODOS OS CONFIDENCIAIS
+  const isManager = userProfile?.funcao === 'gerente';
+  
+  return isCreator || isAdmin || isOperatorOfArea || isManager;
+};
 
       if (userProfile?.funcao === 'administrador') {
         console.log('👑 Administrador: carregando TODOS os dados');
