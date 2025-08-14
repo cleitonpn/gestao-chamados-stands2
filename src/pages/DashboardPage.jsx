@@ -71,6 +71,15 @@ const DashboardPage = () => {
 
   const [activeFilter, setActiveFilter] = useState('todos');
 
+  // Tickets considerados 'abertos/ativos' para Produtor/Consultor
+  const isActiveTicket = (t) => !['concluido','cancelado','arquivado'].includes(t.status);
+  const ticketHasAnyProject = (t, ids) => {
+    if (!ids || ids.length === 0) return false;
+    if (Array.isArray(t.projetos) && t.projetos.length) return t.projetos.some(id => ids.includes(id));
+    if (t.projetoId) return ids.includes(t.projetoId);
+    return false;
+  };
+
   const getProjectName = (projetoId) => {
     return projectNames[projetoId] || 'Projeto não encontrado';
   };
@@ -202,15 +211,25 @@ const DashboardPage = () => {
     return grouped;
   };
   const getTicketsByProject = () => {
-    const grouped = {};
-    const displayedTickets = getDisplayedTickets();
-    displayedTickets.forEach(ticket => {
-      const projectName = ticket.projetoId ? getProjectName(ticket.projetoId) : 'Sem Projeto';
-      if (!grouped[projectName]) grouped[projectName] = [];
-      grouped[projectName].push(ticket);
-    });
-    return grouped;
-  };
+  const grouped = {};
+  const displayedTickets = getDisplayedTickets();
+  displayedTickets.forEach(ticket => {
+    const ids = Array.isArray(ticket.projetos) && ticket.projetos.length > 0
+      ? ticket.projetos
+      : (ticket.projetoId ? [ticket.projetoId] : []);
+    if (ids.length === 0) {
+      if (!grouped['Sem Projeto']) grouped['Sem Projeto'] = [];
+      grouped['Sem Projeto'].push(ticket);
+    } else {
+      ids.forEach(pid => {
+        const name = getProjectName(pid);
+        if (!grouped[name]) grouped[name] = [];
+        grouped[name].push(ticket);
+      });
+    }
+  });
+  return grouped;
+};
 
   const toggleEventExpansion = (eventName) => setExpandedEvents(prev => ({ ...prev, [eventName]: !prev[eventName] }));
   const toggleProjectExpansion = (projectName) => setExpandedProjects(prev => ({ ...prev, [projectName]: !prev[projectName] }));
@@ -337,81 +356,56 @@ const DashboardPage = () => {
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        
-        const produtorProjects = allProjects.filter(project => 
-          project.produtorId === user.uid
-        );
-        
+        const produtorProjects = allProjects.filter(project => project.produtorId === user.uid);
         const produtorProjectIds = produtorProjects.map(p => p.id);
-        
-        const produtorTickets = allTickets.filter(ticket => {
-          const isRelatedToProject = produtorProjectIds.includes(ticket.projetoId);
-          return isRelatedToProject && filterConfidential(ticket);
-        });
-        
+        const produtorTickets = allTickets.filter(t => ticketHasAnyProject(t, produtorProjectIds) && isActiveTicket(t) && filterConfidential(t));
         setProjects(produtorProjects);
         setTickets(produtorTickets);
         setUsers(allUsers);
-        
         const projectNamesMap = {};
-        produtorProjects.forEach(project => {
-          projectNamesMap[project.id] = project.nome;
-        });
+        produtorProjects.forEach(project => { projectNamesMap[project.id] = project.nome; });
         setProjectNames(projectNamesMap);
-        
       } else if (userProfile?.funcao === 'consultor') {
-        console.log('👨‍💼 Consultor: carregando projetos próprios e chamados específicos');
+        console.log('👨‍💼 Consultor: carregando projetos próprios e chamados (somente abertos)');
         const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        
-        const consultorProjects = allProjects.filter(project => 
-          project.consultorId === user.uid
-        );
-        
+        const consultorProjects = allProjects.filter(project => project.consultorId === user.uid);
         const consultorProjectIds = consultorProjects.map(p => p.id);
-        
-        const consultorTickets = allTickets.filter(ticket => {
-          const isFromConsultorProject = consultorProjectIds.includes(ticket.projetoId);
-          const isOpenedByConsultor = ticket.criadoPor === user.uid;
-          const isEscalatedToConsultor = ticket.escalonamentos?.some(esc => 
-            esc.consultorId === user.uid || esc.responsavelId === user.uid
-          );
-          
-          const isRelated = isFromConsultorProject || isOpenedByConsultor || isEscalatedToConsultor;
-          return isRelated && filterConfidential(ticket);
-        });
-        
+        const consultorTickets = allTickets.filter(t => ticketHasAnyProject(t, consultorProjectIds) && isActiveTicket(t) && filterConfidential(t));
         setProjects(consultorProjects);
         setTickets(consultorTickets);
         setUsers(allUsers);
-        
         const projectNamesMap = {};
-        allProjects.forEach(project => {
-          projectNamesMap[project.id] = project.nome;
-        });
+        allProjects.forEach(project => { projectNamesMap[project.id] = project.nome; });
         setProjectNames(projectNamesMap);
-        
       } else if (userProfile?.funcao === 'operador') {
-        console.log('⚙️ Operador: carregando chamados da área');
-        const [allProjects, operatorTickets, allUsers] = await Promise.all([
+        console.log('⚙️ Operador: carregando chamados da área (inclui histórico)');
+        const [allProjects, allTickets, allUsers] = await Promise.all([
           projectService.getAllProjects(),
-          ticketService.getTicketsByAreaInvolved(userProfile.area),
+          ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        
+        const areaOp = userProfile.area;
+        const operatorTickets = allTickets.filter(t => {
+          const atual = t.area === areaOp;
+          const origem = t.areaDeOrigem === areaOp;
+          const destino = t.areaDestino === areaOp;
+          const devolvido = t.status === 'enviado_para_area' && (t.area === areaOp || t.areaDeOrigem === areaOp);
+          const rejeitou = t.areaQueRejeitou === areaOp;
+          const envolvido = Array.isArray(t.areasEnvolvidas) && t.areasEnvolvidas.includes(areaOp);
+          const atribuido = t.atribuidoA === user.uid;
+          const abertoPeloUsuario = t.criadoPor === user.uid;
+          return (atual || origem || destino || devolvido || rejeitou || envolvido || atribuido || abertoPeloUsuario) && filterConfidential(t);
+        });
         setProjects(allProjects);
         setTickets(operatorTickets);
         setUsers(allUsers);
-        
         const projectNamesMap = {};
-        allProjects.forEach(project => {
-          projectNamesMap[project.id] = project.nome;
-        });
+        allProjects.forEach(project => { projectNamesMap[project.id] = project.nome; });
         setProjectNames(projectNamesMap);
-        
       } else if (userProfile?.funcao === 'gerente') {
         console.log('👔 Gerente: carregando TODOS os dados');
         const [allProjects, allTickets, allUsers] = await Promise.all([
@@ -759,7 +753,7 @@ const DashboardPage = () => {
                                   )}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                      {ticket.isConfidential && (
+                                      {(ticket.isConfidential || ticket.confidencial) && (
                                         <Lock className="h-4 w-4 text-orange-500 flex-shrink-0" title="Chamado Confidencial" />
                                       )}
                                       <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
@@ -769,7 +763,7 @@ const DashboardPage = () => {
                                         </Badge>
                                       )}
                                     </div>
-                                    <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">{ticket.descricao}</p>
+                                    <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">{(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : ticket.descricao}</p>
                                   </div>
                                   
                                   <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
