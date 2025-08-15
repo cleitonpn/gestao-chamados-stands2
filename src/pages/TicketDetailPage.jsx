@@ -494,6 +494,17 @@ const TicketDetailPage = () => {
                             <div class="info-value" style="white-space: pre-wrap;">${item.dadosPagamento}</div>
                           </div>
                         ` : ''}
+                        ${(item.qtdHR || item.qtdBau || item.qtdCarreta || item.qtdGuincho) ? `
+                          <div class="info-item" style="grid-column: 1 / -1;">
+                            <div class="info-label">🚛 Tipos de Caminhão:</div>
+                            <div class="info-value">
+                              ${item.qtdHR ? `HR: ${item.qtdHR}` : ''}
+                              ${item.qtdBau ? `${item.qtdHR ? ' | ' : ''}Baú: ${item.qtdBau}` : ''}
+                              ${item.qtdCarreta ? `${(item.qtdHR || item.qtdBau) ? ' | ' : ''}Carreta: ${item.qtdCarreta}` : ''}
+                              ${item.qtdGuincho ? `${(item.qtdHR || item.qtdBau || item.qtdCarreta) ? ' | ' : ''}Guincho: ${item.qtdGuincho}` : ''}
+                            </div>
+                          </div>
+                        ` : ''}
                       ` : ''}
                     </div>
                   </div>
@@ -1613,6 +1624,39 @@ updateData.canceladoEm = new Date();
                                   <div className="sm:col-span-2">
                                     <Label className="text-sm font-medium text-blue-700">Dados de Pagamento</Label>
                                     <p className="text-blue-900 whitespace-pre-wrap">{item.dadosPagamento}</p>
+                                  </div>
+                                )}
+                                
+                                {/* Tipos de Caminhões */}
+                                {(item.qtdHR || item.qtdBau || item.qtdCarreta || item.qtdGuincho) && (
+                                  <div className="sm:col-span-2">
+                                    <Label className="text-sm font-medium text-blue-700">🚛 Tipos de Caminhão</Label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
+                                      {item.qtdHR && (
+                                        <div className="text-center p-2 bg-blue-50 rounded border">
+                                          <div className="text-xs text-blue-600 font-medium">HR</div>
+                                          <div className="text-sm font-bold text-blue-800">{item.qtdHR}</div>
+                                        </div>
+                                      )}
+                                      {item.qtdBau && (
+                                        <div className="text-center p-2 bg-blue-50 rounded border">
+                                          <div className="text-xs text-blue-600 font-medium">Baú</div>
+                                          <div className="text-sm font-bold text-blue-800">{item.qtdBau}</div>
+                                        </div>
+                                      )}
+                                      {item.qtdCarreta && (
+                                        <div className="text-center p-2 bg-blue-50 rounded border">
+                                          <div className="text-xs text-blue-600 font-medium">Carreta</div>
+                                          <div className="text-sm font-bold text-blue-800">{item.qtdCarreta}</div>
+                                        </div>
+                                      )}
+                                      {item.qtdGuincho && (
+                                        <div className="text-center p-2 bg-blue-50 rounded border">
+                                          <div className="text-xs text-blue-600 font-medium">Guincho</div>
+                                          <div className="text-sm font-bold text-blue-800">{item.qtdGuincho}</div>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 )}
                               </>
