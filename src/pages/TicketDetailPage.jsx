@@ -45,7 +45,7 @@ import {
   Archive,
   ArchiveRestore,
   Link as LinkIcon,
-  ClipboardEdit, // Ícone adicionado
+  ClipboardEdit,
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -56,14 +56,22 @@ const TicketDetailPage = () => {
   // Estados principais
   const [ticket, setTicket] = useState(null);
   const [project, setProject] = useState(null);
-const [projectsMap, setProjectsMap] = useState({});
-const [linkedProjectIds, setLinkedProjectIds] = useState([]);
-const [activeProjectId, setActiveProjectId] = useState(null);
+  const [projectsMap, setProjectsMap] = useState({});
+  const [linkedProjectIds, setLinkedProjectIds] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
   const [accessDenied, setAccessDenied] = useState(false);
+
+  // Estados para anexar links
+  const [attachedLinks, setAttachedLinks] = useState([]);
+  const [newLinkUrl, setNewLinkUrl] = useState('');
+  const [newLinkDescription, setNewLinkDescription] = useState('');
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [savingLink, setSavingLink] = useState(false);
+
   // Resolve nome do responsável do projeto a partir de possíveis formatos (Id/Uid/Nome/Email/responsaveis{})
   const resolveUserNameByProjectField = (proj, base) => {
     if (!proj) return null;
@@ -82,7 +90,6 @@ const [activeProjectId, setActiveProjectId] = useState(null);
     }
     return null;
   };
-
 
   // Estados do chat
   const [newMessage, setNewMessage] = useState('');
@@ -105,7 +112,6 @@ const [activeProjectId, setActiveProjectId] = useState(null);
   const [managementArea, setManagementArea] = useState('');
   const [managementReason, setManagementReason] = useState('');
   const [isEscalatingToManagement, setIsEscalatingToManagement] = useState(false);
-  
 
   // Estados para escalação para consultor
   const [consultorReason, setConsultorReason] = useState('');
@@ -126,6 +132,83 @@ const [activeProjectId, setActiveProjectId] = useState(null);
 
   // Estado para exibir link do chamado pai
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
+
+  // Função para adicionar link
+  const handleAddLink = async () => {
+    if (!newLinkUrl.trim()) {
+      alert('Por favor, insira uma URL válida');
+      return;
+    }
+
+    try {
+      setSavingLink(true);
+      
+      const linkData = {
+        url: newLinkUrl.trim(),
+        description: newLinkDescription.trim() || 'Link anexado',
+        addedBy: user.uid,
+        addedByName: userProfile?.nome || user.email,
+        addedAt: new Date()
+      };
+
+      // Atualizar o array de links anexados
+      const updatedLinks = [...(ticket.attachedLinks || []), linkData];
+      
+      // Salvar no banco de dados
+      await ticketService.updateTicket(ticketId, {
+        attachedLinks: updatedLinks,
+        updatedAt: new Date()
+      });
+
+      // Atualizar estado local
+      setAttachedLinks(updatedLinks);
+      setTicket(prev => ({ ...prev, attachedLinks: updatedLinks }));
+      
+      // Limpar formulário
+      setNewLinkUrl('');
+      setNewLinkDescription('');
+      setShowLinkForm(false);
+      
+      // Adicionar mensagem no chat informando sobre o link
+      await messageService.addMessage(ticketId, {
+        conteudo: `📎 Link anexado: ${linkData.description}\n🔗 ${linkData.url}`,
+        remetenteId: user.uid,
+        remetenteNome: userProfile?.nome || user.email,
+        tipo: 'link_attachment'
+      });
+      
+      // Recarregar mensagens
+      const messagesData = await messageService.getMessagesByTicket(ticketId);
+      setMessages(messagesData || []);
+      
+    } catch (error) {
+      console.error('Erro ao anexar link:', error);
+      alert('Erro ao anexar link. Tente novamente.');
+    } finally {
+      setSavingLink(false);
+    }
+  };
+
+  // Função para remover link
+  const handleRemoveLink = async (linkIndex) => {
+    if (!confirm('Tem certeza que deseja remover este link?')) return;
+    
+    try {
+      const updatedLinks = attachedLinks.filter((_, index) => index !== linkIndex);
+      
+      await ticketService.updateTicket(ticketId, {
+        attachedLinks: updatedLinks,
+        updatedAt: new Date()
+      });
+      
+      setAttachedLinks(updatedLinks);
+      setTicket(prev => ({ ...prev, attachedLinks: updatedLinks }));
+      
+    } catch (error) {
+      console.error('Erro ao remover link:', error);
+      alert('Erro ao remover link. Tente novamente.');
+    }
+  };
 
   const loadTicketData = async () => {
     try {
@@ -165,7 +248,7 @@ const [activeProjectId, setActiveProjectId] = useState(null);
         setActiveProjectId(null);
         setProject(null);
       }
-const messagesData = await messageService.getMessagesByTicket(ticketId);
+      const messagesData = await messageService.getMessagesByTicket(ticketId);
       setMessages(messagesData || []);
 
     } catch (err) {
@@ -188,6 +271,13 @@ const messagesData = await messageService.getMessagesByTicket(ticketId);
       markNotificationsAsRead();
     }
   }, [ticketId, user]);
+
+  // useEffect para carregar links anexados
+  useEffect(() => {
+    if (ticket && ticket.attachedLinks) {
+      setAttachedLinks(ticket.attachedLinks);
+    }
+  }, [ticket]);
 
   useEffect(() => {
     if (ticket && userProfile && user) {
@@ -360,7 +450,8 @@ const messagesData = await messageService.getMessagesByTicket(ticketId);
         'arquivado': 'bg-gray-100 text-gray-700', 
         'executado_pelo_consultor': 'bg-yellow-100 text-yellow-800', 
         'escalado_para_consultor': 'bg-cyan-100 text-cyan-800',
-        'executado_aguardando_validacao_operador': 'bg-indigo-100 text-indigo-800'
+        'executado_aguardando_validacao_operador': 'bg-indigo-100 text-indigo-800',
+        'transferido_para_produtor': 'bg-blue-100 text-blue-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
@@ -383,7 +474,8 @@ const messagesData = await messageService.getMessagesByTicket(ticketId);
         'arquivado': 'Arquivado', 
         'executado_pelo_consultor': 'Executado pelo Consultor', 
         'escalado_para_consultor': 'Escalado para Consultor',
-        'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador'
+        'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador',
+        'transferido_para_produtor': 'Transferido para Produtor'
     };
     return statusTexts[status] || status;
   };
@@ -403,12 +495,13 @@ const messagesData = await messageService.getMessagesByTicket(ticketId);
     }
 
     if (userRole === 'gerente' && currentStatus === 'aguardando_aprovacao' && ticket.responsavelAtual === user.uid) {
-  return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'reprovado', label: 'Reprovar' } ];
-}
+      return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'reprovado', label: 'Reprovar' } ];
+    }
     
     if (userRole === 'produtor' && currentStatus === 'transferido_para_produtor' && ticket.produtorResponsavelId === user.uid) {
-  return [{ value: 'executado_aguardando_validacao', label: 'Executar' }];
-}
+      return [{ value: 'executado_aguardando_validacao', label: 'Executar' }];
+    }
+
     if (userRole === 'administrador') {
       if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
       if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
@@ -417,7 +510,7 @@ const messagesData = await messageService.getMessagesByTicket(ticketId);
     }
     
     if (userRole === 'operador') {
-      if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid)) {
+      if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid) || (userRole === 'produtor' && currentStatus === 'transferido_para_produtor')) {
         if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
             const actions = currentStatus === 'transferido_para_produtor'
               ? [ { value: 'em_tratativa', label: 'Iniciar Tratativa (Produção)' }, { value: 'aberto', label: 'Transferir para Área Selecionada' } ]
@@ -856,14 +949,12 @@ updateData.canceladoEm = new Date();
               </p>
             </div>
             <div className="flex items-center">
-              {
-                (ticket.isConfidential || ticket.confidencial) && (
+              {(ticket.isConfidential || ticket.confidencial) && (
                 <Badge variant="outline" className="mr-2 border-orange-400 bg-orange-50 text-orange-700">
                   <Lock className="h-3 w-3 mr-1.5" />
                   Confidencial
                 </Badge>
-              )
-            }
+              )}
               <Badge className={getStatusColor(ticket.status)}>
                 {getStatusText(ticket.status)}
               </Badge>
@@ -946,22 +1037,19 @@ updateData.canceladoEm = new Date();
                     </div>
                   </div>
                 )}
-                {
-                  (ticket.isExtra || ticket.itemExtra) && (
+                {(ticket.isExtra || ticket.itemExtra) && (
                   <div className="p-3 sm:p-4 bg-orange-50 border border-orange-200 rounded-lg">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-orange-600 font-semibold text-sm sm:text-base">🔥 ITEM EXTRA</span>
                     </div>
-                    {
-                      (ticket.motivoExtra || ticket.motivoItemExtra) && (
+                    {(ticket.motivoExtra || ticket.motivoItemExtra) && (
                       <div>
                         <Label className="text-xs sm:text-sm font-medium text-orange-700">Motivo do Item Extra</Label>
-                        <p className="text-sm sm:text-base text-orange-900 whitespace-pre-wrap break-words">{ticket.motivoExtra}</p>
+                        <p className="text-sm sm:text-base text-orange-900 whitespace-pre-wrap break-words">{ticket.motivoExtra || ticket.motivoItemExtra}</p>
                       </div>
                     )}
                   </div>
-                )
-              }
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Área</Label>
@@ -1061,6 +1149,128 @@ updateData.canceladoEm = new Date();
               </Card>
             )}
 
+            {/* Card para Anexar Links */}
+            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador' || userProfile.funcao === 'produtor') && (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <LinkIcon className="h-5 w-5" />
+                    Links Anexados
+                  </CardTitle>
+                  <CardDescription>
+                    Anexe links de documentos (Google Drive, OneDrive, etc.) relacionados a este chamado
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {/* Exibir links existentes */}
+                  {(ticket.attachedLinks || []).length > 0 && (
+                    <div className="space-y-3 mb-4">
+                      <Label className="text-sm font-medium">Links Anexados:</Label>
+                      {(ticket.attachedLinks || []).map((link, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <ExternalLink className="h-4 w-4 text-blue-600" />
+                              <a 
+                                href={link.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 font-medium truncate"
+                              >
+                                {link.description}
+                              </a>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Anexado por {link.addedByName} em {formatDate(link.addedAt)}
+                            </p>
+                          </div>
+                          {(userProfile.funcao === 'administrador' || link.addedBy === user.uid) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveLink(index)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Formulário para adicionar novo link */}
+                  {!showLinkForm ? (
+                    <Button 
+                      onClick={() => setShowLinkForm(true)}
+                      variant="outline"
+                      className="w-full border-dashed border-2 border-blue-300 text-blue-600 hover:bg-blue-50"
+                    >
+                      <PlusCircle className="h-4 w-4 mr-2" />
+                      Anexar Novo Link
+                    </Button>
+                  ) : (
+                    <div className="space-y-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                      <div>
+                        <Label htmlFor="link-url" className="text-sm font-medium">
+                          URL do Link *
+                        </Label>
+                        <Input
+                          id="link-url"
+                          type="url"
+                          placeholder="https://drive.google.com/..."
+                          value={newLinkUrl}
+                          onChange={(e) => setNewLinkUrl(e.target.value)}
+                          className="mt-1"
+                          disabled={savingLink}
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="link-description" className="text-sm font-medium">
+                          Descrição do Link
+                        </Label>
+                        <Input
+                          id="link-description"
+                          placeholder="Ex: Documentação do projeto, Orçamento aprovado..."
+                          value={newLinkDescription}
+                          onChange={(e) => setNewLinkDescription(e.target.value)}
+                          className="mt-1"
+                          disabled={savingLink}
+                        />
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <Button 
+                          onClick={handleAddLink}
+                          disabled={!newLinkUrl.trim() || savingLink}
+                          className="flex-1"
+                        >
+                          {savingLink ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <LinkIcon className="h-4 w-4 mr-2" />
+                          )}
+                          Anexar Link
+                        </Button>
+                        <Button 
+                          variant="outline"
+                          onClick={() => {
+                            setShowLinkForm(false);
+                            setNewLinkUrl('');
+                            setNewLinkDescription('');
+                          }}
+                          disabled={savingLink}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -1122,11 +1332,11 @@ updateData.canceladoEm = new Date();
                         value={newMessage}
                         onChange={handleTextareaChange}
                         onKeyDown={handleTextareaKeyDown}
-                        rows={3}
-                        disabled={isArchived || sendingMessage}
+                        className="min-h-[80px] pr-12"
+                        disabled={sendingMessage || isArchived}
                       />
-                      {showMentionSuggestions && mentionSuggestions.length > 0 && (
-                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {showMentionSuggestions && (
+                        <div className="absolute bottom-full left-0 right-0 bg-white border border-gray-200 rounded-md shadow-lg max-h-32 overflow-y-auto z-10">
                           {mentionSuggestions.map((user, index) => (
                             <button
                               key={index}
@@ -1134,45 +1344,43 @@ updateData.canceladoEm = new Date();
                               onClick={() => insertMention(user)}
                             >
                               <AtSign className="h-4 w-4 text-gray-400" />
-                              <span className="font-medium">{user.nome}</span>
-                              <span className="text-sm text-gray-500">({user.email})</span>
+                              <span className="text-sm">{user.nome}</span>
                             </button>
                           ))}
                         </div>
                       )}
                     </div>
                     {!isArchived && (
+                      <>
                         <ImageUpload
-                          onImagesUploaded={setChatImages}
-                          existingImages={chatImages}
+                          onImagesChange={setChatImages}
                           maxImages={3}
-                          buttonText="Anexar ao Chat"
-                          className="border-t pt-3"
+                          disabled={sendingMessage}
                         />
+                        <Button
+                          onClick={handleSendMessage}
+                          disabled={(!newMessage.trim() && chatImages.length === 0) || sendingMessage}
+                          className="w-full"
+                        >
+                          {sendingMessage ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Send className="h-4 w-4 mr-2" />
+                          )}
+                          Enviar Mensagem
+                        </Button>
+                      </>
                     )}
-                    <div className="flex items-center justify-end">
-                      <Button
-                        onClick={handleSendMessage}
-                        disabled={isArchived || sendingMessage || (!newMessage.trim() && chatImages.length === 0)}
-                      >
-                        {sendingMessage ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <Send className="h-4 w-4 mr-2" />
-                        )}
-                        Enviar
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && (
+            {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador' || (userProfile.funcao === 'produtor' && ticket.status === 'transferido_para_produtor')) && (
               <Card className="mt-6">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><span className="text-2xl">🔄</span>Escalar Chamado</CardTitle>
-                  <CardDescription>Transfira este chamado para outra área quando necessário</CardDescription>
+                  <CardTitle className="flex items-center gap-2"><span className="text-2xl">🚀</span>Escalar Chamado</CardTitle>
+                  <CardDescription>Envie este chamado para outra área quando necessário</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
@@ -1183,18 +1391,12 @@ updateData.canceladoEm = new Date();
                           <SelectValue placeholder="👆 Selecione a área que deve receber o chamado" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="logistica">🚚 Logística</SelectItem>
-                          <SelectItem value="almoxarifado">📦 Almoxarifado</SelectItem>
-                          <SelectItem value="comunicacao_visual">🎨 Comunicação Visual</SelectItem>
-                          <SelectItem value="locacao">🏢 Locação</SelectItem>
                           <SelectItem value="compras">🛒 Compras</SelectItem>
+                          <SelectItem value="locacao">🏢 Locação</SelectItem>
                           <SelectItem value="producao">🏭 Produção</SelectItem>
-                          <SelectItem value="comercial">💼 Comercial</SelectItem>
                           <SelectItem value="operacional">⚙️ Operacional</SelectItem>
                           <SelectItem value="financeiro">💰 Financeiro</SelectItem>
-                          <SelectItem value="logotipia">🎨 Logotipia</SelectItem>
-                          <SelectItem value="detalhamento_tecnico">🔧 Detalhamento Técnico</SelectItem>
-                          <SelectItem value="sub_locacao">🏗️ Sub-locação</SelectItem>
+                          <SelectItem value="comercial">💼 Comercial</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1227,7 +1429,6 @@ updateData.canceladoEm = new Date();
                 </CardContent>
               </Card>
             )}
-
 
             {!isArchived && userProfile && (userProfile.funcao === 'operador' || userProfile.funcao === 'administrador') && project?.consultorId && (userProfile.funcao === 'administrador' || ticket.area === userProfile.area) && (
               <Card className="mt-6">
@@ -1418,7 +1619,7 @@ updateData.canceladoEm = new Date();
                     {resolveUserNameByProjectField(project, 'consultor') || 'Não identificado'}
                   </p>
                 </div>
-{project && (
+                {project && (
                   <div className="pt-3 mt-3 border-t">
                     <Button
                       variant="outline"
@@ -1483,106 +1684,120 @@ updateData.canceladoEm = new Date();
                     </Select>
                   </div>
                   {(newStatus === 'concluido' || newStatus === 'rejeitado' || newStatus === 'enviado_para_area') && (
-                    <div className="space-y-3">
-                      <div>
-                        <Label htmlFor="conclusion-description">
-                          {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição/Devolução'}
-                        </Label>
-                        <Textarea
-                          id="conclusion-description"
-                          placeholder={newStatus === 'concluido' ? "Descreva como o problema foi resolvido..." : "Explique o motivo..."}
-                          value={conclusionDescription}
-                          onChange={(e) => setConclusionDescription(e.target.value)}
-                          rows={3}
-                          className={(newStatus === 'rejeitado' || newStatus === 'enviado_para_area') ? "border-red-300 focus:border-red-500" : ""}
-                        />
-                        {(newStatus === 'rejeitado' || newStatus === 'enviado_para_area') && (
-                          <p className="text-xs text-red-600 mt-1">* Campo obrigatório</p>
-                        )}
-                      </div>
-                      {newStatus === 'concluido' && (
-                        <div>
-                          <Label>Evidências (Imagens)</Label>
-                          <ImageUpload
-                            onImagesUploaded={setConclusionImages}
-                            existingImages={conclusionImages}
-                            maxImages={5}
-                            buttonText="Anexar Evidências"
-                            className="mt-2"
-                          />
-                        </div>
-                      )}
+                    <div>
+                      <Label className="text-xs sm:text-sm font-medium text-gray-700">
+                        {newStatus === 'concluido' ? 'Descrição da Conclusão' : 'Motivo da Rejeição/Devolução'} *
+                      </Label>
+                      <Textarea
+                        placeholder={
+                          newStatus === 'concluido' 
+                            ? "Descreva como o chamado foi resolvido..."
+                            : "Explique o motivo da rejeição ou devolução..."
+                        }
+                        value={conclusionDescription}
+                        onChange={(e) => setConclusionDescription(e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                  )}
+                  {newStatus === 'concluido' && (
+                    <div>
+                      <Label className="text-xs sm:text-sm font-medium text-gray-700">Imagens da Conclusão (Opcional)</Label>
+                      <ImageUpload
+                        onImagesChange={setConclusionImages}
+                        maxImages={5}
+                        disabled={updating}
+                      />
                     </div>
                   )}
                   <Button
                     onClick={handleStatusUpdate}
-                    disabled={!newStatus || updating}
-                    className={`w-full ${newStatus === 'rejeitado' || newStatus === 'enviado_para_area' ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                    variant={newStatus === 'rejeitado' || newStatus === 'enviado_para_area' ? 'destructive' : 'default'}
+                    disabled={!newStatus || updating || ((newStatus === 'rejeitado' || newStatus === 'enviado_para_area') && !conclusionDescription.trim())}
+                    className="w-full"
                   >
-                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
-                    {updating ? 'Atualizando...' : 'Confirmar Ação'}
+                    {updating ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                    )}
+                    Atualizar Status
                   </Button>
                 </CardContent>
               </Card>
             )}
 
-            {!isArchived && userProfile?.funcao === 'administrador' && (ticket.status === 'concluido' || ticket.status === 'cancelado') && (
+            {historyEvents.length > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-3 sm:pb-4">
                   <CardTitle className="flex items-center text-base sm:text-lg">
-                    <Archive className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
-                    Ações de Arquivo
+                    <Clock className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Histórico do Chamado
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Button onClick={handleArchiveTicket} disabled={updating} variant="outline" className="w-full">
-                    {updating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Archive className="h-4 w-4 mr-2" />}
-                    Arquivar Chamado
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Clock className="h-5 w-5 mr-2" />
-                  Histórico do Chamado
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {historyEvents.length > 0 ? (
-                    historyEvents.map((event, index) => (
+                  <div className="space-y-3">
+                    {historyEvents.map((event, index) => (
                       <div key={index} className="flex items-start space-x-3">
-                        <div className="flex flex-col items-center">
-                          <span className={`flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 ${event.color}`}>
-                            <event.Icon className="h-5 w-5" />
-                          </span>
-                          {index < historyEvents.length - 1 && (
-                            <div className="h-6 w-px bg-gray-200" />
-                          )}
+                        <div className={`flex-shrink-0 ${event.color}`}>
+                          <event.Icon className="h-4 w-4" />
                         </div>
-                        <div className="flex-1 pt-1.5">
-                          <p className="text-sm text-gray-800">
-                            {event.description}{' '}
-                            <span className="font-semibold text-gray-900">{event.userName}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-900">
+                            <span className="font-medium">{event.description}</span>{' '}
+                            <span className="text-gray-600">{event.userName}</span>
                           </p>
-                          <p className="text-xs text-gray-500 mt-0.5">
+                          <p className="text-xs text-gray-500">
                             {formatDate(event.date)}
                           </p>
                         </div>
                       </div>
-                    ))
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {userProfile?.funcao === 'administrador' && (
+              <Card>
+                <CardHeader className="pb-3 sm:pb-4">
+                  <CardTitle className="flex items-center text-base sm:text-lg text-gray-700">
+                    <Shield className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Ações Administrativas
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {!isArchived ? (
+                    <Button
+                      onClick={handleArchiveTicket}
+                      variant="outline"
+                      className="w-full text-gray-600 border-gray-300 hover:bg-gray-50"
+                      disabled={updating}
+                    >
+                      {updating ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Archive className="h-4 w-4 mr-2" />
+                      )}
+                      Arquivar Chamado
+                    </Button>
                   ) : (
-                    <p className="text-sm text-gray-500 text-center py-4">
-                      Nenhum evento de histórico registrado.
-                    </p>
+                    <Button
+                      onClick={handleUnarchiveTicket}
+                      variant="outline"
+                      className="w-full text-blue-600 border-blue-300 hover:bg-blue-50"
+                      disabled={updating}
+                    >
+                      {updating ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <ArchiveRestore className="h-4 w-4 mr-2" />
+                      )}
+                      Desarquivar Chamado
+                    </Button>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       </div>
@@ -1591,3 +1806,4 @@ updateData.canceladoEm = new Date();
 };
 
 export default TicketDetailPage;
+
