@@ -267,7 +267,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
 
   // Campos específicos para Financeiro baseados no tipo
   const FINANCEIRO_SPECIFIC_FIELDS = {
-    'Pagamento de Frete': [
+    'Pagamento frete': [
       { key: 'motorista', label: 'Nome do Motorista', type: 'text', required: true },
       { key: 'placa', label: 'Placa do Caminhão', type: 'text', required: true },
       { key: 'dataFrete', label: 'Data do Frete', type: 'date', required: true },
@@ -994,7 +994,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                               {formData.area === 'compras' && (
                                 <span> {item.item} (Qtd: {item.quantidade})</span>
                               )}
-                              {formData.area === 'financeiro' && formData.tipo === 'Pagamento de Frete' && (
+                              {formData.area === 'financeiro' && formData.tipo === 'Pagamento frete' && (
                                 <span> {item.motorista} - {item.placa} (R$ {item.valorNegociado})</span>
                               )}
                             </div>
