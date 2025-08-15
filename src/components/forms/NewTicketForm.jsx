@@ -602,19 +602,15 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       return;
     }
 
-    // Validar campos dinâmicos - deve ter pelo menos um item na lista OU campos preenchidos
+    // Validar campos dinâmicos - campos específicos são opcionais
     const fields = getDynamicFields(formData.area, formData.tipo);
     if (fields.length > 0) {
-      if (itemsList.length === 0) {
-        // Se não há itens na lista, validar campos atuais
-        const requiredFields = fields.filter(field => field.required);
-        for (const field of requiredFields) {
-          if (!currentItem[field.key] || !currentItem[field.key].toString().trim()) {
-            setError(`Adicione pelo menos um item ou preencha todos os campos obrigatórios`);
-            return;
-          }
-        }
-        // Se chegou aqui, adicionar o item atual automaticamente
+      // Se há campos preenchidos mas não foram adicionados à lista, adicionar automaticamente
+      const hasFilledFields = fields.some(field => 
+        currentItem[field.key] && currentItem[field.key].toString().trim()
+      );
+      
+      if (hasFilledFields && itemsList.length === 0) {
         setItemsList([{ ...currentItem, id: Date.now() }]);
       }
     }
@@ -1042,7 +1038,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             value={currentItem[field.key] || ''}
                             onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
                             placeholder={`Digite ${field.label.toLowerCase()}`}
-                            required={field.required}
+                            required={false}
                           />
                         )}
                         
@@ -1054,7 +1050,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
                             placeholder={`Digite ${field.label.toLowerCase()}`}
                             min="1"
-                            required={field.required}
+                            required={false}
                           />
                         )}
                         
@@ -1064,7 +1060,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             type="date"
                             value={currentItem[field.key] || ''}
                             onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
-                            required={field.required}
+                            required={false}
                           />
                         )}
                         
@@ -1074,7 +1070,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             value={currentItem[field.key] || ''}
                             onChange={(e) => handleCurrencyChange(field.key, e.target.value)}
                             placeholder="0,00"
-                            required={field.required}
+                            required={false}
                           />
                         )}
                         
@@ -1103,7 +1099,7 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                             onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
                             placeholder={`Digite ${field.label.toLowerCase()}`}
                             rows={3}
-                            required={field.required}
+                            required={false}
                           />
                         )}
                       </div>
