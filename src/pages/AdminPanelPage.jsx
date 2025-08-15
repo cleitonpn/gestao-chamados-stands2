@@ -20,7 +20,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   BarChart3, Users, AlertTriangle, CheckCircle, TrendingUp, RefreshCw, DollarSign,
-  Eye, UserX, Edit, X as XIcon, Download, BellRing, Loader2, KeyRound, Plus, Shield, ExternalLink
+  Eye, UserX, Edit, X as XIcon, Download, BellRing, Loader2, KeyRound, Plus, Shield, ExternalLink, ArrowLeft
 } from 'lucide-react';
 
 // NOVO COMPONENTE PARA O POPUP DE VISUALIZAÇÃO RÁPIDA
@@ -91,12 +91,18 @@ const TicketDetailView = ({ ticketId, onNavigate }) => {
     );
 };
 
-// Componente para a Central de Chamados Aprimorada
+// Componente para a Central de Chamados Aprimorada com Seleção Múltipla
 const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicketIds, onViewTicket }) => {
     const [filters, setFilters] = useState({ status: '', area: '', priority: '', assigneeId: '', search: '' });
     const [updatingTicketId, setUpdatingTicketId] = useState(null);
+    
+    // Estados para seleção múltipla
+    const [selectedTickets, setSelectedTickets] = useState(new Set());
+    const [bulkAction, setBulkAction] = useState('');
+    const [bulkValue, setBulkValue] = useState('');
+    const [showBulkActions, setShowBulkActions] = useState(false);
+    const [processingBulk, setProcessingBulk] = useState(false);
 
-    // ... (demais funções do TicketCommandCenter permanecem as mesmas)
     const handleUpdateTicket = async (ticketId, updateData) => {
         setUpdatingTicketId(ticketId);
         try {
@@ -124,8 +130,76 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
         }
     };
 
+    // Funções para seleção múltipla
+    const handleSelectTicket = (ticketId) => {
+        const newSelection = new Set(selectedTickets);
+        if (newSelection.has(ticketId)) {
+            newSelection.delete(ticketId);
+        } else {
+            newSelection.add(ticketId);
+        }
+        setSelectedTickets(newSelection);
+        setShowBulkActions(newSelection.size > 0);
+    };
+
+    const handleSelectAll = () => {
+        if (selectedTickets.size === filteredTickets.length) {
+            setSelectedTickets(new Set());
+            setShowBulkActions(false);
+        } else {
+            setSelectedTickets(new Set(filteredTickets.map(t => t.id)));
+            setShowBulkActions(true);
+        }
+    };
+
+    const handleBulkAction = async () => {
+        if (!bulkAction || !bulkValue || selectedTickets.size === 0) {
+            alert('Selecione uma ação e um valor para aplicar em massa.');
+            return;
+        }
+
+        if (!window.confirm(`Tem certeza que deseja aplicar esta ação a ${selectedTickets.size} chamado(s)?`)) {
+            return;
+        }
+
+        setProcessingBulk(true);
+        try {
+            const updateData = { [bulkAction]: bulkValue, updatedAt: new Date() };
+            
+            // Processar em lotes para evitar sobrecarga
+            const ticketIds = Array.from(selectedTickets);
+            const batchSize = 10;
+            
+            for (let i = 0; i < ticketIds.length; i += batchSize) {
+                const batch = ticketIds.slice(i, i + batchSize);
+                await Promise.all(
+                    batch.map(ticketId => ticketService.updateTicket(ticketId, updateData))
+                );
+            }
+
+            alert(`${selectedTickets.size} chamado(s) atualizado(s) com sucesso!`);
+            setSelectedTickets(new Set());
+            setShowBulkActions(false);
+            setBulkAction('');
+            setBulkValue('');
+            onUpdate();
+        } catch (error) {
+            alert(`Erro ao atualizar chamados: ${error.message}`);
+        } finally {
+            setProcessingBulk(false);
+        }
+    };
+
     const getStatusText = (status) => {
-        const statusMap = { 'aberto': 'Aberto', 'em_tratativa': 'Em Tratativa', 'concluido': 'Concluído', 'cancelado': 'Cancelado', 'arquivado': 'Arquivado', 'devolvido': 'Devolvido', 'aguardando_aprovacao': 'Aguardando Aprovação'};
+        const statusMap = { 
+            'aberto': 'Aberto', 
+            'em_tratativa': 'Em Tratativa', 
+            'concluido': 'Concluído', 
+            'cancelado': 'Cancelado', 
+            'arquivado': 'Arquivado', 
+            'devolvido': 'Devolvido', 
+            'aguardando_aprovacao': 'Aguardando Aprovação'
+        };
         return statusMap[status] || status;
     };
 
@@ -159,21 +233,143 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
                 <CardDescription>Filtre, visualize e gerencie todos os chamados em um só lugar.</CardDescription>
             </CardHeader>
             <CardContent>
+                {/* Filtros */}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4 p-4 border rounded-lg">
                     <Input placeholder="Buscar por título, projeto, nº..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} />
-                    <Select value={filters.status} onValueChange={v => setFilters({...filters, status: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Status" /></SelectTrigger><SelectContent>{statusOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
-                    <Select value={filters.area} onValueChange={v => setFilters({...filters, area: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Área" /></SelectTrigger><SelectContent>{areaOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
-                    <Select value={filters.priority} onValueChange={v => setFilters({...filters, priority: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Prioridade" /></SelectTrigger><SelectContent>{priorityOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
-                    <Select value={filters.assigneeId} onValueChange={v => setFilters({...filters, assigneeId: v})}><SelectTrigger><SelectValue placeholder="Filtrar por Responsável" /></SelectTrigger><SelectContent>{userOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent></Select>
+                    <Select value={filters.status} onValueChange={v => setFilters({...filters, status: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Status" /></SelectTrigger>
+                        <SelectContent>{statusOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.area} onValueChange={v => setFilters({...filters, area: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Área" /></SelectTrigger>
+                        <SelectContent>{areaOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.priority} onValueChange={v => setFilters({...filters, priority: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Prioridade" /></SelectTrigger>
+                        <SelectContent>{priorityOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={filters.assigneeId} onValueChange={v => setFilters({...filters, assigneeId: v})}>
+                        <SelectTrigger><SelectValue placeholder="Filtrar por Responsável" /></SelectTrigger>
+                        <SelectContent>{userOptions.map(opt => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</SelectContent>
+                    </Select>
                 </div>
+
+                {/* Ações em Massa */}
+                {showBulkActions && (
+                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold text-blue-900">
+                                Ações em Massa ({selectedTickets.size} chamado{selectedTickets.size !== 1 ? 's' : ''} selecionado{selectedTickets.size !== 1 ? 's' : ''})
+                            </h3>
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => {
+                                    setSelectedTickets(new Set());
+                                    setShowBulkActions(false);
+                                }}
+                            >
+                                <XIcon className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <Select value={bulkAction} onValueChange={setBulkAction}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecionar ação..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="status">Alterar Status</SelectItem>
+                                    <SelectItem value="prioridade">Alterar Prioridade</SelectItem>
+                                    <SelectItem value="atribuidoA">Atribuir Responsável</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            
+                            {bulkAction === 'status' && (
+                                <Select value={bulkValue} onValueChange={setBulkValue}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Novo status..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {statusOptions.map(opt => (
+                                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            
+                            {bulkAction === 'prioridade' && (
+                                <Select value={bulkValue} onValueChange={setBulkValue}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Nova prioridade..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {priorityOptions.map(opt => (
+                                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            
+                            {bulkAction === 'atribuidoA' && (
+                                <Select value={bulkValue} onValueChange={setBulkValue}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Novo responsável..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {userOptions.map(opt => (
+                                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            
+                            <Button 
+                                onClick={handleBulkAction} 
+                                disabled={!bulkAction || !bulkValue || processingBulk}
+                                className="bg-blue-600 hover:bg-blue-700"
+                            >
+                                {processingBulk ? (
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                )}
+                                Aplicar
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Tabela de Chamados */}
                 <div className="max-h-[600px] overflow-auto">
                     <Table>
-                        <TableHeader><TableRow><TableHead className="w-[40%]">Chamado</TableHead><TableHead>Status</TableHead><TableHead>Responsável</TableHead><TableHead>Prioridade</TableHead><TableHead className="text-center">Ações</TableHead></TableRow></TableHeader>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-12">
+                                    <Checkbox 
+                                        checked={selectedTickets.size === filteredTickets.length && filteredTickets.length > 0}
+                                        onCheckedChange={handleSelectAll}
+                                        title="Selecionar todos"
+                                    />
+                                </TableHead>
+                                <TableHead className="w-[35%]">Chamado</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Responsável</TableHead>
+                                <TableHead>Prioridade</TableHead>
+                                <TableHead className="text-center">Ações</TableHead>
+                            </TableRow>
+                        </TableHeader>
                         <TableBody>
                             {filteredTickets.map(ticket => {
                                 const isStalled = stalledTicketIds.has(ticket.id);
+                                const isSelected = selectedTickets.has(ticket.id);
                                 return (
-                                <TableRow key={ticket.id} className={isStalled ? "bg-red-50" : ""}>
+                                <TableRow key={ticket.id} className={`${isStalled ? "bg-red-50" : ""} ${isSelected ? "bg-blue-50" : ""}`}>
+                                    <TableCell>
+                                        <Checkbox 
+                                            checked={isSelected}
+                                            onCheckedChange={() => handleSelectTicket(ticket.id)}
+                                        />
+                                    </TableCell>
                                     <TableCell>
                                         <p className="font-medium truncate" title={ticket.titulo}>{ticket.titulo}</p>
                                         <div className="flex items-center gap-2">
@@ -181,13 +377,58 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
                                             {isStalled && <AlertTriangle className="h-4 w-4 text-red-500" title="Chamado parado há mais de 24h"/>}
                                         </div>
                                     </TableCell>
-                                    <TableCell><Select value={ticket.status || ''} onValueChange={v => handleUpdateTicket(ticket.id, { status: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"/><SelectContent>{statusOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
-                                    <TableCell><Select value={ticket.atribuidoA || ''} onValueChange={v => handleUpdateTicket(ticket.id, { atribuidoA: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Atribuir..."/></SelectTrigger><SelectContent>{userOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
-                                    <TableCell><Select value={ticket.prioridade || ''} onValueChange={v => handleUpdateTicket(ticket.id, { prioridade: v })} disabled={updatingTicketId === ticket.id}><SelectTrigger className="h-8 text-xs"/><SelectContent>{priorityOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></TableCell>
+                                    <TableCell>
+                                        <Select 
+                                            value={ticket.status || ''} 
+                                            onValueChange={v => handleUpdateTicket(ticket.id, { status: v })} 
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs"/>
+                                            <SelectContent>
+                                                {statusOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Select 
+                                            value={ticket.atribuidoA || ''} 
+                                            onValueChange={v => handleUpdateTicket(ticket.id, { atribuidoA: v })} 
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs">
+                                                <SelectValue placeholder="Atribuir..."/>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {userOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Select 
+                                            value={ticket.prioridade || ''} 
+                                            onValueChange={v => handleUpdateTicket(ticket.id, { prioridade: v })} 
+                                            disabled={updatingTicketId === ticket.id}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs"/>
+                                            <SelectContent>
+                                                {priorityOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </TableCell>
                                     <TableCell className="flex items-center justify-center gap-1">
                                         {updatingTicketId === ticket.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <>
-                                            <Button variant="ghost" size="icon" onClick={() => onViewTicket(ticket.id)} title="Ver Detalhes"><Eye className="h-4 w-4"/></Button>
-                                            <Button variant="ghost" size="icon" onClick={() => handleNotifyStalled(ticket.id, ticket.atribuidoA)} disabled={!isStalled || !ticket.atribuidoA} title="Notificar Responsável"><BellRing className={`h-4 w-4 ${isStalled && "text-red-500"}`}/></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => onViewTicket(ticket.id)} title="Ver Detalhes">
+                                                <Eye className="h-4 w-4"/>
+                                            </Button>
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                onClick={() => handleNotifyStalled(ticket.id, ticket.atribuidoA)} 
+                                                disabled={!isStalled || !ticket.atribuidoA} 
+                                                title="Notificar Responsável"
+                                            >
+                                                <BellRing className={`h-4 w-4 ${isStalled && "text-red-500"}`}/>
+                                            </Button>
                                         </>}
                                     </TableCell>
                                 </TableRow>
@@ -217,7 +458,7 @@ const AdminPanelPage = () => {
   
   const [selectedExtraTickets, setSelectedExtraTickets] = useState(new Set());
   
-  const [viewingTicketId, setViewingTicketId] = useState(null); // State para controlar o popup
+  const [viewingTicketId, setViewingTicketId] = useState(null);
   
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -225,7 +466,6 @@ const AdminPanelPage = () => {
   const [userFormLoading, setUserFormLoading] = useState(false);
   const [userFormError, setUserFormError] = useState('');
 
-  // ... (demais funções do AdminPanelPage: useEffects, loadAdminData, calculateStatistics, etc. permanecem as mesmas)
   useEffect(() => {
     if (authInitialized && userProfile?.funcao !== 'administrador') navigate('/dashboard');
   }, [authInitialized, userProfile, navigate]);
@@ -390,9 +630,23 @@ const AdminPanelPage = () => {
       <Header />
       <div className="container mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <div>
-                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2"><BarChart3 className="h-8 w-8 text-blue-600" />Painel Administrativo</h1>
-                <p className="text-gray-600 mt-1">Visão geral da operação. Última atualização: {lastUpdate.toLocaleTimeString()}</p>
+            <div className="flex items-center gap-4">
+                {/* Botão de Voltar para Dashboard */}
+                <Button 
+                    variant="outline" 
+                    onClick={() => navigate('/dashboard')}
+                    className="flex items-center gap-2"
+                >
+                    <ArrowLeft className="h-4 w-4" />
+                    Dashboard
+                </Button>
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+                        <BarChart3 className="h-8 w-8 text-blue-600" />
+                        Painel Administrativo
+                    </h1>
+                    <p className="text-gray-600 mt-1">Visão geral da operação. Última atualização: {lastUpdate.toLocaleTimeString()}</p>
+                </div>
             </div>
             <div className="flex items-center gap-2">
                 <Input type="date" value={filters.dateRange.from} onChange={e => setFilters({...filters, dateRange: {...filters.dateRange, from: e.target.value}})} className="w-auto"/>
@@ -516,3 +770,4 @@ const AdminPanelPage = () => {
 };
 
 export default AdminPanelPage;
+
