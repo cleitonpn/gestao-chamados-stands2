@@ -189,6 +189,10 @@ const ReportsPage = () => {
           markdown += `### Projeto: ${projectName}\n\n`;
           ticketsByProject[projectId].forEach(ticket => {
               markdown += `- **${ticket.titulo}** ${ticket.isExtra ? '(EXTRA)' : ''} (Status: ${ticket.status})\n`;
+              if (ticket.descricao && ticket.descricao.trim()) {
+                  markdown += `  *Descrição:* ${ticket.descricao.trim()}\n`;
+              }
+              markdown += `\n`;
           });
           markdown += `\n`;
       }
