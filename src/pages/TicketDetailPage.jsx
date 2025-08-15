@@ -461,7 +461,7 @@ const TicketDetailPage = () => {
                         ${item.dataFrete ? `
                           <div class="info-item">
                             <div class="info-label">Data do Frete:</div>
-                            <div class="info-value">${new Date(item.dataFrete).toLocaleDateString('pt-BR')}</div>
+                            <div class="info-value">${item.dataFrete}</div>
                           </div>
                         ` : ''}
                         ${item.finalidadeFrete ? `
@@ -1582,7 +1582,7 @@ updateData.canceladoEm = new Date();
                                 {item.dataFrete && (
                                   <div>
                                     <Label className="text-sm font-medium text-blue-700">Data do Frete</Label>
-                                    <p className="text-blue-900">{new Date(item.dataFrete).toLocaleDateString('pt-BR')}</p>
+                                    <p className="text-blue-900">{item.dataFrete}</p>
                                   </div>
                                 )}
                                 {item.finalidadeFrete && (
