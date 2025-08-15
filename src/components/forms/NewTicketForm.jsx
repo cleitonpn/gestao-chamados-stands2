@@ -11,10 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Badge } from '../ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Upload, X, AlertCircle, Bot, Sparkles, RefreshCw, TrendingUp, Lock, Link as LinkIcon, Plus, Minus } from 'lucide-react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
@@ -247,6 +246,46 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     isConfidential: false,
     observacoes: ''
   });
+
+  // Estados para campos dinâmicos por área
+  const [dynamicFields, setDynamicFields] = useState({});
+  const [itemsList, setItemsList] = useState([]); // Lista de itens adicionados
+  const [currentItem, setCurrentItem] = useState({}); // Item atual sendo editado
+  
+  // Campos específicos por área
+  const AREA_SPECIFIC_FIELDS = {
+    'locacao': [
+      { key: 'codItem', label: 'Código do Item', type: 'text', required: true },
+      { key: 'item', label: 'Item', type: 'text', required: true },
+      { key: 'quantidade', label: 'Quantidade', type: 'number', required: true }
+    ],
+    'compras': [
+      { key: 'item', label: 'Item', type: 'text', required: true },
+      { key: 'quantidade', label: 'Quantidade', type: 'number', required: true }
+    ]
+  };
+
+  // Campos específicos para Financeiro baseados no tipo
+  const FINANCEIRO_SPECIFIC_FIELDS = {
+    'Pagamento de Frete': [
+      { key: 'motorista', label: 'Nome do Motorista', type: 'text', required: true },
+      { key: 'placa', label: 'Placa do Caminhão', type: 'text', required: true },
+      { key: 'dataFrete', label: 'Data do Frete', type: 'date', required: true },
+      { key: 'finalidadeFrete', label: 'Finalidade do Frete', type: 'select', required: true, options: ['Montagem', 'Apoio', 'Desmontagem', 'Mobiliário', 'Extra'] },
+      { key: 'valorInicial', label: 'Valor Inicial (R$)', type: 'currency', required: true },
+      { key: 'valorNegociado', label: 'Valor Negociado (R$)', type: 'currency', required: true },
+      { key: 'centroCustos', label: 'Centro de Custos', type: 'text', required: true },
+      { key: 'dadosPagamento', label: 'Dados de Pagamento', type: 'textarea', required: false }
+    ]
+  };
+
+  // Função para obter campos dinâmicos baseados em área e tipo
+  const getDynamicFields = (area, tipo) => {
+    if (area === 'financeiro') {
+      return FINANCEIRO_SPECIFIC_FIELDS[tipo] || [];
+    }
+    return AREA_SPECIFIC_FIELDS[area] || [];
+  };
   
   const [projects, setProjects] = useState([]);
   const [selectedProjects, setSelectedProjects] = useState([]); // ✅ MUDANÇA: Array para múltiplos projetos
@@ -328,13 +367,33 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
   useEffect(() => {
     if (formData.area) {
       loadTypesByArea(formData.area);
-      // ✅ MUDANÇA: Remover filtro do produtor - carregar operadores para to      loadOperatorsByArea(formData.area);
+      loadOperatorsByArea(formData.area);
+      
+      // Carregar campos dinâmicos baseados na área e tipo
+      const fields = getDynamicFields(formData.area, formData.tipo);
+      if (fields.length > 0) {
+        const initialFields = {};
+        fields.forEach(field => {
+          initialFields[field.key] = '';
+        });
+        setDynamicFields(initialFields);
+        setCurrentItem(initialFields);
+      } else {
+        setDynamicFields({});
+        setCurrentItem({});
+      }
+      
+      // Limpar lista de itens quando mudar área/tipo
+      setItemsList([]);
     } else {
       setAvailableTypes([]);
       setOperators([]);
       setSelectedOperator('');
+      setDynamicFields({});
+      setCurrentItem({});
+      setItemsList([]);
     }
-  }, [formData.area]);
+  }, [formData.area, formData.tipo]); // Adicionar formData.tipo como dependência
 
   const loadProjects = async () => {
     try {
@@ -433,6 +492,66 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
     }));
   };
 
+  const handleDynamicFieldChange = (field, value) => {
+    setCurrentItem(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const addItemToList = () => {
+    const fields = getDynamicFields(formData.area, formData.tipo);
+    const requiredFields = fields.filter(field => field.required);
+    
+    // Validar campos obrigatórios do item atual
+    for (const field of requiredFields) {
+      if (!currentItem[field.key] || !currentItem[field.key].toString().trim()) {
+        setError(`O campo "${field.label}" é obrigatório para adicionar o item`);
+        return;
+      }
+    }
+    
+    // Adicionar item à lista
+    setItemsList(prev => [...prev, { ...currentItem, id: Date.now() }]);
+    
+    // Limpar campos para novo item
+    const initialFields = {};
+    fields.forEach(field => {
+      initialFields[field.key] = '';
+    });
+    setCurrentItem(initialFields);
+    setError('');
+  };
+
+  const removeItemFromList = (itemId) => {
+    setItemsList(prev => prev.filter(item => item.id !== itemId));
+  };
+
+  const editItemFromList = (itemId) => {
+    const itemToEdit = itemsList.find(item => item.id === itemId);
+    if (itemToEdit) {
+      const { id, ...itemData } = itemToEdit;
+      setCurrentItem(itemData);
+      removeItemFromList(itemId);
+    }
+  };
+
+  const formatCurrency = (value) => {
+    // Remove tudo que não é número
+    const numbers = value.replace(/\D/g, '');
+    // Converte para formato de moeda
+    const formatted = (parseInt(numbers) / 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    return formatted === 'NaN' ? '0,00' : formatted;
+  };
+
+  const handleCurrencyChange = (field, value) => {
+    const formatted = formatCurrency(value);
+    handleDynamicFieldChange(field, formatted);
+  };
+
   const handleImageUpload = (event) => {
     const files = Array.from(event.target.files);
     const newImages = files.map(file => ({
@@ -483,6 +602,23 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       return;
     }
 
+    // Validar campos dinâmicos - deve ter pelo menos um item na lista OU campos preenchidos
+    const fields = getDynamicFields(formData.area, formData.tipo);
+    if (fields.length > 0) {
+      if (itemsList.length === 0) {
+        // Se não há itens na lista, validar campos atuais
+        const requiredFields = fields.filter(field => field.required);
+        for (const field of requiredFields) {
+          if (!currentItem[field.key] || !currentItem[field.key].toString().trim()) {
+            setError(`Adicione pelo menos um item ou preencha todos os campos obrigatórios`);
+            return;
+          }
+        }
+        // Se chegou aqui, adicionar o item atual automaticamente
+        setItemsList([{ ...currentItem, id: Date.now() }]);
+      }
+    }
+
     setLoading(true);
     setError('');
 
@@ -507,7 +643,9 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
         observacoes: formData.observacoes.trim() || null,
         projetos: selectedProjects, // ✅ MUDANÇA: Array de projetos
         linkedTicketId: linkedTicket?.id || null,
-        areaDeOrigem: formData.area
+        areaDeOrigem: formData.area,
+        // Adicionar campos dinâmicos estruturados
+        camposEspecificos: itemsList.length > 0 ? itemsList : null
       };
 
       // Para compatibilidade, usar o primeiro projeto como principal
@@ -823,6 +961,169 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
               required
             />
           </div>
+
+          {/* Campos Dinâmicos por Área - MOVIDO PARA CÁ */}
+          {(() => {
+            const fields = getDynamicFields(formData.area, formData.tipo);
+            return fields.length > 0 && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base text-blue-800">
+                    📋 Informações Específicas - {formData.area.charAt(0).toUpperCase() + formData.area.slice(1)}
+                    {formData.area === 'financeiro' && formData.tipo && (
+                      <span className="text-sm font-normal"> ({formData.tipo})</span>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="text-blue-600">
+                    Preencha os campos específicos para esta área
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Lista de itens já adicionados */}
+                  {itemsList.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-blue-700">Itens Adicionados:</Label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {itemsList.map((item, index) => (
+                          <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded border">
+                            <div className="flex-1 text-sm">
+                              <span className="font-medium">Item {index + 1}:</span>
+                              {formData.area === 'locacao' && (
+                                <span> {item.codItem} - {item.item} (Qtd: {item.quantidade})</span>
+                              )}
+                              {formData.area === 'compras' && (
+                                <span> {item.item} (Qtd: {item.quantidade})</span>
+                              )}
+                              {formData.area === 'financeiro' && formData.tipo === 'Pagamento de Frete' && (
+                                <span> {item.motorista} - {item.placa} (R$ {item.valorNegociado})</span>
+                              )}
+                            </div>
+                            <div className="flex gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => editItemFromList(item.id)}
+                                className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800"
+                              >
+                                ✏️
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeItemFromList(item.id)}
+                                className="h-6 w-6 p-0 text-red-600 hover:text-red-800"
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Formulário para novo item */}
+                  <div className="space-y-4 border-t pt-4">
+                    <Label className="text-sm font-medium text-blue-700">
+                      {itemsList.length > 0 ? 'Adicionar Novo Item:' : 'Primeiro Item:'}
+                    </Label>
+                    
+                    {fields.map((field) => (
+                      <div key={field.key} className="space-y-2">
+                        <Label htmlFor={field.key}>
+                          {field.label} {field.required && <span className="text-red-500">*</span>}
+                        </Label>
+                        
+                        {field.type === 'text' && (
+                          <Input
+                            id={field.key}
+                            value={currentItem[field.key] || ''}
+                            onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
+                            placeholder={`Digite ${field.label.toLowerCase()}`}
+                            required={field.required}
+                          />
+                        )}
+                        
+                        {field.type === 'number' && (
+                          <Input
+                            id={field.key}
+                            type="number"
+                            value={currentItem[field.key] || ''}
+                            onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
+                            placeholder={`Digite ${field.label.toLowerCase()}`}
+                            min="1"
+                            required={field.required}
+                          />
+                        )}
+                        
+                        {field.type === 'date' && (
+                          <Input
+                            id={field.key}
+                            type="date"
+                            value={currentItem[field.key] || ''}
+                            onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
+                            required={field.required}
+                          />
+                        )}
+                        
+                        {field.type === 'currency' && (
+                          <Input
+                            id={field.key}
+                            value={currentItem[field.key] || ''}
+                            onChange={(e) => handleCurrencyChange(field.key, e.target.value)}
+                            placeholder="0,00"
+                            required={field.required}
+                          />
+                        )}
+                        
+                        {field.type === 'select' && (
+                          <Select 
+                            value={currentItem[field.key] || ''} 
+                            onValueChange={(value) => handleDynamicFieldChange(field.key, value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={`Selecione ${field.label.toLowerCase()}`} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {field.options.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {option}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        
+                        {field.type === 'textarea' && (
+                          <Textarea
+                            id={field.key}
+                            value={currentItem[field.key] || ''}
+                            onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
+                            placeholder={`Digite ${field.label.toLowerCase()}`}
+                            rows={3}
+                            required={field.required}
+                          />
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Botão para adicionar item */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={addItemToList}
+                      className="w-full border-blue-300 text-blue-700 hover:bg-blue-100"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Adicionar Item
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <div className="space-y-2">
             <Label htmlFor="prioridade">Prioridade</Label>
