@@ -46,6 +46,7 @@ import {
   ArchiveRestore,
   Link as LinkIcon,
   ClipboardEdit,
+  Printer,
 } from 'lucide-react';
 
 const TicketDetailPage = () => {
@@ -132,6 +133,333 @@ const TicketDetailPage = () => {
 
   // Estado para exibir link do chamado pai
   const [parentTicketForLink, setParentTicketForLink] = useState(null);
+
+  // Função para imprimir o chamado
+  const handlePrint = () => {
+    // Criar uma nova janela para impressão
+    const printWindow = window.open('', '_blank');
+    
+    // Função auxiliar para obter texto do status
+    const getStatusText = (status) => {
+      const statusMap = {
+        'aberto': 'Aberto',
+        'em_tratativa': 'Em Tratativa',
+        'em_execucao': 'Em Execução',
+        'concluido': 'Concluído',
+        'cancelado': 'Cancelado',
+        'arquivado': 'Arquivado',
+        'devolvido': 'Devolvido',
+        'aguardando_aprovacao': 'Aguardando Aprovação',
+        'enviado_para_area': 'Enviado para Área',
+        'escalado_para_area': 'Escalado para Área',
+        'escalado_para_gerencia': 'Escalado para Gerência',
+        'escalado_para_consultor': 'Escalado para Consultor',
+        'transferido_para_produtor': 'Transferido para Produtor',
+        'executado_aguardando_validacao': 'Executado - Aguardando Validação'
+      };
+      return statusMap[status] || status;
+    };
+    
+    // Gerar o conteúdo HTML para impressão
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Chamado #${ticket.numero || ticketId.slice(-6)} - ${ticket.titulo}</title>
+          <style>
+            @media print {
+              * {
+                -webkit-print-color-adjust: exact !important;
+                color-adjust: exact !important;
+              }
+            }
+            
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 800px;
+              margin: 0 auto;
+              padding: 20px;
+            }
+            
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #333;
+              padding-bottom: 20px;
+              margin-bottom: 30px;
+            }
+            
+            .header h1 {
+              margin: 0;
+              color: #2563eb;
+              font-size: 24px;
+            }
+            
+            .header p {
+              margin: 5px 0;
+              color: #666;
+            }
+            
+            .section {
+              margin-bottom: 25px;
+              page-break-inside: avoid;
+            }
+            
+            .section-title {
+              font-size: 18px;
+              font-weight: bold;
+              color: #1f2937;
+              border-bottom: 1px solid #e5e7eb;
+              padding-bottom: 5px;
+              margin-bottom: 15px;
+            }
+            
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 15px;
+              margin-bottom: 15px;
+            }
+            
+            .info-item {
+              margin-bottom: 10px;
+            }
+            
+            .info-label {
+              font-weight: bold;
+              color: #374151;
+              margin-bottom: 3px;
+            }
+            
+            .info-value {
+              color: #6b7280;
+            }
+            
+            .description {
+              background-color: #f9fafb;
+              padding: 15px;
+              border-radius: 8px;
+              border-left: 4px solid #2563eb;
+              white-space: pre-wrap;
+              word-wrap: break-word;
+            }
+            
+            .status-badge {
+              display: inline-block;
+              padding: 4px 12px;
+              border-radius: 20px;
+              font-size: 12px;
+              font-weight: bold;
+              text-transform: uppercase;
+            }
+            
+            .status-aberto { background-color: #dbeafe; color: #1e40af; }
+            .status-em_tratativa { background-color: #fef3c7; color: #92400e; }
+            .status-concluido { background-color: #d1fae5; color: #065f46; }
+            .status-cancelado { background-color: #fee2e2; color: #991b1b; }
+            
+            .history-item {
+              display: flex;
+              align-items: flex-start;
+              margin-bottom: 12px;
+              padding: 10px;
+              background-color: #f8fafc;
+              border-radius: 6px;
+            }
+            
+            .history-content {
+              flex: 1;
+            }
+            
+            .history-description {
+              font-weight: 500;
+              margin-bottom: 2px;
+            }
+            
+            .history-date {
+              font-size: 12px;
+              color: #6b7280;
+            }
+            
+            .message-item {
+              margin-bottom: 15px;
+              padding: 12px;
+              border-radius: 8px;
+              border-left: 3px solid #e5e7eb;
+            }
+            
+            .message-header {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 8px;
+            }
+            
+            .message-sender {
+              font-weight: bold;
+              color: #374151;
+            }
+            
+            .message-date {
+              font-size: 12px;
+              color: #6b7280;
+            }
+            
+            .message-content {
+              white-space: pre-wrap;
+              word-wrap: break-word;
+              line-height: 1.5;
+            }
+            
+            .extra-item {
+              background-color: #fef3c7;
+              border: 1px solid #f59e0b;
+              padding: 15px;
+              border-radius: 8px;
+              margin-bottom: 15px;
+            }
+            
+            .extra-title {
+              font-weight: bold;
+              color: #92400e;
+              margin-bottom: 8px;
+            }
+            
+            .print-date {
+              text-align: center;
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #e5e7eb;
+              font-size: 12px;
+              color: #6b7280;
+            }
+            
+            @page {
+              margin: 1in;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Chamado #${ticket.numero || ticketId.slice(-6)}</h1>
+            <p><strong>${ticket.titulo}</strong></p>
+            <p>Impresso em: ${new Date().toLocaleString('pt-BR')}</p>
+          </div>
+          
+          <div class="section">
+            <div class="section-title">📋 Informações Básicas</div>
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">Status:</div>
+                <div class="info-value">
+                  <span class="status-badge status-${ticket.status}">${getStatusText(ticket.status)}</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Prioridade:</div>
+                <div class="info-value">${ticket.prioridade || 'Não definida'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Área:</div>
+                <div class="info-value">${ticket.area || 'Não especificada'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Tipo:</div>
+                <div class="info-value">${ticket.tipo || 'Não especificado'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Criado por:</div>
+                <div class="info-value">${ticket.criadoPorNome || 'Não disponível'}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Criado em:</div>
+                <div class="info-value">${formatDate(ticket.createdAt || ticket.criadoEm)}</div>
+              </div>
+            </div>
+            ${project ? `
+              <div class="info-item">
+                <div class="info-label">Projeto:</div>
+                <div class="info-value">${project.nome}</div>
+              </div>
+            ` : ''}
+          </div>
+          
+          <div class="section">
+            <div class="section-title">📝 Descrição</div>
+            <div class="description">${ticket.descricao || 'Descrição não disponível'}</div>
+          </div>
+          
+          ${(ticket.isExtra || ticket.itemExtra) ? `
+            <div class="section">
+              <div class="extra-item">
+                <div class="extra-title">🔥 ITEM EXTRA</div>
+                ${(ticket.motivoExtra || ticket.motivoItemExtra) ? `
+                  <div><strong>Motivo:</strong> ${ticket.motivoExtra || ticket.motivoItemExtra}</div>
+                ` : ''}
+              </div>
+            </div>
+          ` : ''}
+          
+          ${historyEvents.length > 0 ? `
+            <div class="section">
+              <div class="section-title">📅 Histórico de Alterações</div>
+              ${historyEvents.map(event => `
+                <div class="history-item">
+                  <div class="history-content">
+                    <div class="history-description">${event.description} ${event.userName}</div>
+                    <div class="history-date">${formatDate(event.date)}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          
+          ${messages.length > 0 ? `
+            <div class="section">
+              <div class="section-title">💬 Histórico de Mensagens</div>
+              ${messages.map(message => `
+                <div class="message-item">
+                  <div class="message-header">
+                    <span class="message-sender">${message.remetenteNome || 'Sistema'}</span>
+                    <span class="message-date">${formatDate(message.criadoEm)}</span>
+                  </div>
+                  <div class="message-content">${message.conteudo}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          
+          ${(ticket.attachedLinks && ticket.attachedLinks.length > 0) ? `
+            <div class="section">
+              <div class="section-title">🔗 Links Anexados</div>
+              ${ticket.attachedLinks.map(link => `
+                <div class="info-item">
+                  <div class="info-label">${link.description}:</div>
+                  <div class="info-value">${link.url}</div>
+                  <div class="history-date">Anexado por ${link.addedByName} em ${formatDate(link.addedAt)}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          
+          <div class="print-date">
+            Documento gerado automaticamente pelo Sistema de Gestão de Chamados
+          </div>
+        </body>
+      </html>
+    `;
+    
+    // Escrever o conteúdo na nova janela
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    
+    // Aguardar o carregamento e imprimir
+    printWindow.onload = () => {
+      printWindow.print();
+      printWindow.close();
+    };
+  };
 
   // Função para adicionar link
   const handleAddLink = async () => {
@@ -948,7 +1276,7 @@ updateData.canceladoEm = new Date();
                 Criado em {formatDate(ticket.criadoEm)} por {ticket.criadoPorNome || 'Usuário desconhecido'}
               </p>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
               {(ticket.isConfidential || ticket.confidencial) && (
                 <Badge variant="outline" className="mr-2 border-orange-400 bg-orange-50 text-orange-700">
                   <Lock className="h-3 w-3 mr-1.5" />
@@ -958,6 +1286,15 @@ updateData.canceladoEm = new Date();
               <Badge className={getStatusColor(ticket.status)}>
                 {getStatusText(ticket.status)}
               </Badge>
+              <Button
+                onClick={handlePrint}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir
+              </Button>
             </div>
           </div>
         </div>
