@@ -275,7 +275,12 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
       { key: 'valorInicial', label: 'Valor Inicial (R$)', type: 'currency', required: true },
       { key: 'valorNegociado', label: 'Valor Negociado (R$)', type: 'currency', required: true },
       { key: 'centroCustos', label: 'Centro de Custos', type: 'text', required: true },
-      { key: 'dadosPagamento', label: 'Dados de Pagamento', type: 'textarea', required: false }
+      { key: 'dadosPagamento', label: 'Dados de Pagamento', type: 'textarea', required: false },
+      // Campos de tipos de caminhões
+      { key: 'qtdHR', label: 'HR', type: 'number', required: false, isVehicleType: true },
+      { key: 'qtdBau', label: 'Baú', type: 'number', required: false, isVehicleType: true },
+      { key: 'qtdCarreta', label: 'Carreta', type: 'number', required: false, isVehicleType: true },
+      { key: 'qtdGuincho', label: 'Guincho', type: 'number', required: false, isVehicleType: true }
     ]
   };
 
@@ -1026,7 +1031,8 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                       {itemsList.length > 0 ? 'Adicionar Novo Item:' : 'Primeiro Item:'}
                     </Label>
                     
-                    {fields.map((field) => (
+                    {/* Campos regulares */}
+                    {fields.filter(field => !field.isVehicleType).map((field) => (
                       <div key={field.key} className="space-y-2">
                         <Label htmlFor={field.key}>
                           {field.label} {field.required && <span className="text-red-500">*</span>}
@@ -1104,6 +1110,33 @@ const NewTicketForm = ({ projectId, onClose, onSuccess }) => {
                         )}
                       </div>
                     ))}
+
+                    {/* Seção de Tipos de Caminhões - apenas para Financeiro */}
+                    {formData.area === 'financeiro' && formData.tipo === 'Pagamento frete' && (
+                      <div className="space-y-3 p-4 bg-gray-50 rounded-lg border">
+                        <Label className="text-sm font-medium text-blue-700">
+                          🚛 Tipos de Caminhão (Quantidade)
+                        </Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {fields.filter(field => field.isVehicleType).map((field) => (
+                            <div key={field.key} className="space-y-1">
+                              <Label htmlFor={field.key} className="text-xs font-medium text-gray-600">
+                                {field.label}
+                              </Label>
+                              <Input
+                                id={field.key}
+                                type="number"
+                                value={currentItem[field.key] || ''}
+                                onChange={(e) => handleDynamicFieldChange(field.key, e.target.value)}
+                                placeholder="0"
+                                min="0"
+                                className="h-8 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Botão para adicionar item */}
                     <Button
