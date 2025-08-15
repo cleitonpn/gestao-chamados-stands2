@@ -401,6 +401,107 @@ const TicketDetailPage = () => {
             </div>
           ` : ''}
           
+          ${(ticket.camposEspecificos && ticket.camposEspecificos.length > 0) ? `
+            <div class="section">
+              <div class="section-title">📋 Informações Específicas</div>
+              <div class="info-grid">
+                ${ticket.camposEspecificos.map((item, index) => `
+                  <div style="grid-column: 1 / -1; margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                    <h4 style="margin: 0 0 10px 0; color: #1e40af;">Item ${index + 1}</h4>
+                    <div class="info-grid">
+                      ${ticket.area === 'locacao' ? `
+                        ${item.codItem ? `
+                          <div class="info-item">
+                            <div class="info-label">Código do Item:</div>
+                            <div class="info-value">${item.codItem}</div>
+                          </div>
+                        ` : ''}
+                        ${item.item ? `
+                          <div class="info-item">
+                            <div class="info-label">Item:</div>
+                            <div class="info-value">${item.item}</div>
+                          </div>
+                        ` : ''}
+                        ${item.quantidade ? `
+                          <div class="info-item">
+                            <div class="info-label">Quantidade:</div>
+                            <div class="info-value">${item.quantidade}</div>
+                          </div>
+                        ` : ''}
+                      ` : ''}
+                      
+                      ${ticket.area === 'compras' ? `
+                        ${item.item ? `
+                          <div class="info-item">
+                            <div class="info-label">Item:</div>
+                            <div class="info-value">${item.item}</div>
+                          </div>
+                        ` : ''}
+                        ${item.quantidade ? `
+                          <div class="info-item">
+                            <div class="info-label">Quantidade:</div>
+                            <div class="info-value">${item.quantidade}</div>
+                          </div>
+                        ` : ''}
+                      ` : ''}
+                      
+                      ${ticket.area === 'financeiro' && ticket.tipo === 'Pagamento de Frete' ? `
+                        ${item.motorista ? `
+                          <div class="info-item">
+                            <div class="info-label">Motorista:</div>
+                            <div class="info-value">${item.motorista}</div>
+                          </div>
+                        ` : ''}
+                        ${item.placa ? `
+                          <div class="info-item">
+                            <div class="info-label">Placa:</div>
+                            <div class="info-value">${item.placa}</div>
+                          </div>
+                        ` : ''}
+                        ${item.dataFrete ? `
+                          <div class="info-item">
+                            <div class="info-label">Data do Frete:</div>
+                            <div class="info-value">${new Date(item.dataFrete).toLocaleDateString('pt-BR')}</div>
+                          </div>
+                        ` : ''}
+                        ${item.finalidadeFrete ? `
+                          <div class="info-item">
+                            <div class="info-label">Finalidade:</div>
+                            <div class="info-value">${item.finalidadeFrete}</div>
+                          </div>
+                        ` : ''}
+                        ${item.valorInicial ? `
+                          <div class="info-item">
+                            <div class="info-label">Valor Inicial:</div>
+                            <div class="info-value">R$ ${item.valorInicial}</div>
+                          </div>
+                        ` : ''}
+                        ${item.valorNegociado ? `
+                          <div class="info-item">
+                            <div class="info-label">Valor Negociado:</div>
+                            <div class="info-value">R$ ${item.valorNegociado}</div>
+                          </div>
+                        ` : ''}
+                        ${item.centroCustos ? `
+                          <div class="info-item">
+                            <div class="info-label">Centro de Custos:</div>
+                            <div class="info-value">${item.centroCustos}</div>
+                          </div>
+                        ` : ''}
+                        ${item.dadosPagamento ? `
+                          <div class="info-item" style="grid-column: 1 / -1;">
+                            <div class="info-label">Dados de Pagamento:</div>
+                            <div class="info-value" style="white-space: pre-wrap;">${item.dadosPagamento}</div>
+                          </div>
+                        ` : ''}
+                      ` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          
           ${historyEvents.length > 0 ? `
             <div class="section">
               <div class="section-title">📅 Histórico de Alterações</div>
@@ -1397,6 +1498,127 @@ updateData.canceladoEm = new Date();
                     <p className="text-gray-900">{ticket.tipo || 'Não especificado'}</p>
                   </div>
                 </div>
+
+                {/* Exibir Campos Específicos por Área */}
+                {ticket.camposEspecificos && ticket.camposEspecificos.length > 0 && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-blue-600 font-semibold text-base">📋 Informações Específicas</span>
+                      {ticket.area === 'financeiro' && ticket.tipo && (
+                        <span className="text-sm text-blue-500">({ticket.tipo})</span>
+                      )}
+                    </div>
+                    
+                    {/* Exibir múltiplos itens */}
+                    <div className="space-y-4">
+                      {ticket.camposEspecificos.map((item, index) => (
+                        <div key={item.id || index} className="p-3 bg-white rounded border border-blue-100">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-blue-700 font-medium">Item {index + 1}</span>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* Campos para Locação */}
+                            {ticket.area === 'locacao' && (
+                              <>
+                                {item.codItem && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Código do Item</Label>
+                                    <p className="text-blue-900">{item.codItem}</p>
+                                  </div>
+                                )}
+                                {item.item && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Item</Label>
+                                    <p className="text-blue-900">{item.item}</p>
+                                  </div>
+                                )}
+                                {item.quantidade && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Quantidade</Label>
+                                    <p className="text-blue-900">{item.quantidade}</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {/* Campos para Compras */}
+                            {ticket.area === 'compras' && (
+                              <>
+                                {item.item && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Item</Label>
+                                    <p className="text-blue-900">{item.item}</p>
+                                  </div>
+                                )}
+                                {item.quantidade && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Quantidade</Label>
+                                    <p className="text-blue-900">{item.quantidade}</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {/* Campos para Financeiro - apenas para tipos específicos */}
+                            {ticket.area === 'financeiro' && ticket.tipo === 'Pagamento de Frete' && (
+                              <>
+                                {item.motorista && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Motorista</Label>
+                                    <p className="text-blue-900">{item.motorista}</p>
+                                  </div>
+                                )}
+                                {item.placa && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Placa</Label>
+                                    <p className="text-blue-900">{item.placa}</p>
+                                  </div>
+                                )}
+                                {item.dataFrete && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Data do Frete</Label>
+                                    <p className="text-blue-900">{new Date(item.dataFrete).toLocaleDateString('pt-BR')}</p>
+                                  </div>
+                                )}
+                                {item.finalidadeFrete && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Finalidade</Label>
+                                    <p className="text-blue-900">{item.finalidadeFrete}</p>
+                                  </div>
+                                )}
+                                {item.valorInicial && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Valor Inicial</Label>
+                                    <p className="text-blue-900">R$ {item.valorInicial}</p>
+                                  </div>
+                                )}
+                                {item.valorNegociado && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Valor Negociado</Label>
+                                    <p className="text-blue-900">R$ {item.valorNegociado}</p>
+                                  </div>
+                                )}
+                                {item.centroCustos && (
+                                  <div>
+                                    <Label className="text-sm font-medium text-blue-700">Centro de Custos</Label>
+                                    <p className="text-blue-900">{item.centroCustos}</p>
+                                  </div>
+                                )}
+                                {item.dadosPagamento && (
+                                  <div className="sm:col-span-2">
+                                    <Label className="text-sm font-medium text-blue-700">Dados de Pagamento</Label>
+                                    <p className="text-blue-900 whitespace-pre-wrap">{item.dadosPagamento}</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Criado em</Label>
