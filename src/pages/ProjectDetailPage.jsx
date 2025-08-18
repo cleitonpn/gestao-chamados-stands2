@@ -5,7 +5,7 @@ import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   ArrowLeft, 
   Calendar,
@@ -22,41 +22,60 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-// --- Helpers de Data ---
-// Converte diferentes formatos (Timestamp do Firestore, string ISO, string YYYY-MM-DD, Date)
-// em um objeto Date válido. NÃO ajusta timezone ainda; isso é feito só na apresentação.
+// =====================
+// Helpers de Data / Fuso
+// =====================
+// Detecta se o valor representa uma data SEM hora (date-only)
+const isDateOnly = (value) => {
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
+    if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
+  }
+  if (value && typeof value === 'object' && value.seconds) {
+    const d = new Date(value.seconds * 1000);
+    return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+  }
+  return false;
+};
+
+// Normaliza entradas de data em um Date válido
 const normalizeDateInput = (value) => {
   if (!value) return null;
-
-  // Firestore Timestamp-like
   if (typeof value === 'object' && value.seconds) {
     return new Date(value.seconds * 1000);
   }
-
-  // String YYYY-MM-DD (interprete como UTC para preservar o dia)
+  if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
+    const [dd, mm, yyyy] = value.split('-');
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
+  }
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    // Força como meia-noite UTC para não "voltar um dia" quando renderizado em BRT
     return new Date(`${value}T00:00:00.000Z`);
   }
-
-  // Outros formatos aceitos pelo Date
   const d = new Date(value);
   if (isNaN(d.getTime())) return null;
   return d;
 };
 
-// Formata SEM deslocar o dia, sempre exibindo em America/Sao_Paulo
-const formatDate = (timestamp) => {
-  if (!timestamp) return 'Não definido';
-  const date = normalizeDateInput(timestamp);
+// Formata SEM deslocar o dia:
+// - para "date-only": usa componentes UTC (evita cair pro dia anterior no BRT)
+// - caso contrário: usa America/Sao_Paulo
+const formatDate = (value) => {
+  if (!value) return 'Não definido';
+  const date = normalizeDateInput(value);
   if (!date) return 'Data inválida';
 
   try {
+    if (isDateOnly(value)) {
+      const dd = String(date.getUTCDate()).padStart(2, '0');
+      const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const yy = String(date.getUTCFullYear()).slice(-2);
+      return `${dd}/${mm}/${yy}`;
+    }
     return date.toLocaleDateString('pt-BR', {
       day: '2-digit',
       month: '2-digit',
       year: '2-digit',
-      timeZone: 'America/Sao_Paulo', // força o fuso na apresentação
+      timeZone: 'America/Sao_Paulo',
     });
   } catch (e) {
     console.error('Erro ao formatar data:', e);
@@ -64,12 +83,10 @@ const formatDate = (timestamp) => {
   }
 };
 
-// Constrói um Date (limites do dia) usando base normalizada
+// Limites do dia para comparações (usando o horário local do cliente)
 const startOfDaySP = (value) => {
   const d = normalizeDateInput(value);
   if (!d) return null;
-  // Como não podemos "setar" timeZone diretamente no Date, trabalhamos no local
-  // Supondo client em qualquer fuso, criamos um dia sem hora e comparamos por faixa larga
   const copy = new Date(d.getTime());
   copy.setHours(0, 0, 0, 0);
   return copy;
@@ -94,12 +111,9 @@ const ProjectDetailPage = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    console.log('🔍 ProjectDetailPage carregando:', { projectId, user: !!user, userProfile: !!userProfile, authInitialized });
-    
     if (authInitialized && user && userProfile) {
       loadProjectData();
     } else if (authInitialized && !user) {
-      console.log('❌ Usuário não autenticado, redirecionando para login');
       navigate('/login');
     }
   }, [projectId, user, userProfile, authInitialized, navigate]);
@@ -108,62 +122,40 @@ const ProjectDetailPage = () => {
     try {
       setLoading(true);
       setError('');
-      
-      console.log('📊 Carregando dados do projeto:', projectId);
 
-      // Carregar projeto e usuários em paralelo
       const [projectData, usersData] = await Promise.all([
         projectService.getProjectById(projectId),
         userService.getAllUsers().catch(() => [])
       ]);
 
       if (!projectData) {
-        console.log('❌ Projeto não encontrado:', projectId);
         setError('Projeto não encontrado');
         return;
       }
 
-      console.log('✅ Projeto carregado:', projectData.nome);
-      
-      // Verificar permissões
+      // Permissões
       const userRole = userProfile.funcao;
       const userId = userProfile.id || user.uid;
-      
-      console.log('🔐 Verificando permissões:', { userRole, userId });
 
-      // Administradores, gerentes e operadores podem ver todos os projetos
-      if (userRole === 'administrador' || userRole === 'gerente' || userRole === 'operador') {
-        console.log('✅ Usuário tem permissão total');
-      }
-      // Consultores e produtores só podem ver projetos vinculados a eles
-      else if (userRole === 'consultor') {
+      if (userRole === 'consultor') {
         const hasAccess = projectData.consultorId === userId || 
                          projectData.consultorUid === userId ||
                          projectData.consultorEmail === userProfile.email ||
                          projectData.consultorNome === userProfile.nome;
-        
         if (!hasAccess) {
-          console.log('❌ Consultor sem acesso ao projeto');
           setError('Você não tem permissão para visualizar este projeto');
           return;
         }
-        console.log('✅ Consultor tem acesso ao projeto');
-      }
-      else if (userRole === 'produtor') {
+      } else if (userRole === 'produtor') {
         const hasAccess = projectData.produtorId === userId || 
                          projectData.produtorUid === userId ||
                          projectData.produtorEmail === userProfile.email ||
                          projectData.produtorNome === userProfile.nome;
-        
         if (!hasAccess) {
-          console.log('❌ Produtor sem acesso ao projeto');
           setError('Você não tem permissão para visualizar este projeto');
           return;
         }
-        console.log('✅ Produtor tem acesso ao projeto');
-      }
-      else {
-        console.log('❌ Papel sem permissão:', userRole);
+      } else if (!['administrador','gerente','operador'].includes(userRole)) {
         setError('Você não tem permissão para visualizar projetos');
         return;
       }
@@ -172,7 +164,7 @@ const ProjectDetailPage = () => {
       setUsers(usersData || []);
 
     } catch (err) {
-      console.error('❌ Erro ao carregar projeto:', err);
+      console.error('Erro ao carregar projeto:', err);
       setError('Erro ao carregar dados do projeto');
     } finally {
       setLoading(false);
@@ -185,40 +177,28 @@ const ProjectDetailPage = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Verificar se está em montagem
     if (project.montagem?.dataInicio && project.montagem?.dataFim) {
       const inicio = startOfDaySP(project.montagem.dataInicio);
       const fim = endOfDaySP(project.montagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) {
-        return { label: 'Em Montagem', color: 'blue' };
-      }
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Montagem', color: 'blue' };
     }
 
-    // Verificar se está em evento
     if (project.evento?.dataInicio && project.evento?.dataFim) {
       const inicio = startOfDaySP(project.evento.dataInicio);
       const fim = endOfDaySP(project.evento.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) {
-        return { label: 'Em Andamento', color: 'green' };
-      }
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
     }
 
-    // Verificar se está em desmontagem
     if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
       const inicio = startOfDaySP(project.desmontagem.dataInicio);
       const fim = endOfDaySP(project.desmontagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) {
-        return { label: 'Desmontagem', color: 'orange' };
-      }
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
     }
 
-    // Verificar se é futuro
     const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
     if (dataInicio) {
       const inicio = startOfDaySP(dataInicio);
-      if (inicio && today < inicio) {
-        return { label: 'Futuro', color: 'yellow' };
-      }
+      if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
     }
 
     return { label: 'Finalizado', color: 'gray' };
