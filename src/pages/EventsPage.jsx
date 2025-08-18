@@ -283,8 +283,30 @@ const EventsPage = () => {
 
   const formatDate = (date) => {
     if (!date) return '-';
-    const dateObj = date.seconds ? new Date(date.seconds * 1000) : new Date(date);
-    return format(dateObj, 'dd/MM/yyyy', { locale: ptBR });
+    
+    // Se é um timestamp do Firestore
+    if (date.seconds) {
+      const dateObj = new Date(date.seconds * 1000);
+      return dateObj.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit', 
+        year: '2-digit'
+      });
+    }
+    
+    // Se é uma string de data (YYYY-MM-DD), formatar diretamente
+    if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = date.split('-');
+      return `${day}/${month}/${year.slice(-2)}`;
+    }
+    
+    // Para outros casos
+    const dateObj = new Date(date);
+    return dateObj.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit'
+    });
   };
 
   const getEventStatus = (event) => {
