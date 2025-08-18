@@ -1526,10 +1526,6 @@ updateData.canceladoEm = new Date();
                         <div key={item.id || index} className="p-3 bg-white rounded border border-blue-100">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-blue-700 font-medium">Item {index + 1}</span>
-                            {/* Debug: mostrar dados do item */}
-                            <span className="text-xs text-gray-500">
-                              {JSON.stringify(item)}
-                            </span>
                           </div>
                           
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
