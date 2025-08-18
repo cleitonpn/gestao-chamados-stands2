@@ -22,6 +22,67 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+// --- Helpers de Data ---
+// Converte diferentes formatos (Timestamp do Firestore, string ISO, string YYYY-MM-DD, Date)
+// em um objeto Date válido. NÃO ajusta timezone ainda; isso é feito só na apresentação.
+const normalizeDateInput = (value) => {
+  if (!value) return null;
+
+  // Firestore Timestamp-like
+  if (typeof value === 'object' && value.seconds) {
+    return new Date(value.seconds * 1000);
+  }
+
+  // String YYYY-MM-DD (interprete como UTC para preservar o dia)
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    // Força como meia-noite UTC para não "voltar um dia" quando renderizado em BRT
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  // Outros formatos aceitos pelo Date
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d;
+};
+
+// Formata SEM deslocar o dia, sempre exibindo em America/Sao_Paulo
+const formatDate = (timestamp) => {
+  if (!timestamp) return 'Não definido';
+  const date = normalizeDateInput(timestamp);
+  if (!date) return 'Data inválida';
+
+  try {
+    return date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+      timeZone: 'America/Sao_Paulo', // força o fuso na apresentação
+    });
+  } catch (e) {
+    console.error('Erro ao formatar data:', e);
+    return 'Data inválida';
+  }
+};
+
+// Constrói um Date (limites do dia) usando base normalizada
+const startOfDaySP = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  // Como não podemos "setar" timeZone diretamente no Date, trabalhamos no local
+  // Supondo client em qualquer fuso, criamos um dia sem hora e comparamos por faixa larga
+  const copy = new Date(d.getTime());
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+};
+
+const endOfDaySP = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  const copy = new Date(d.getTime());
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+};
+
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -118,43 +179,6 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'Não definido';
-    
-    try {
-      // Se é um timestamp do Firestore
-      if (timestamp.seconds) {
-        const date = new Date(timestamp.seconds * 1000);
-        return date.toLocaleDateString('pt-BR', {
-          day: '2-digit',
-          month: '2-digit',
-          year: '2-digit'
-        });
-      }
-      
-      // Se é uma string de data (YYYY-MM-DD), formatar diretamente
-      if (typeof timestamp === 'string' && timestamp.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [year, month, day] = timestamp.split('-');
-        return `${day}/${month}/${year.slice(-2)}`;
-      }
-      
-      // Para outros casos
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) {
-        return 'Data inválida';
-      }
-      
-      return date.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: '2-digit'
-      });
-    } catch (error) {
-      console.error('Erro ao formatar data:', error);
-      return 'Data inválida';
-    }
-  };
-
   const getStatusInfo = () => {
     if (!project) return { label: 'Carregando...', color: 'gray' };
     
@@ -163,51 +187,27 @@ const ProjectDetailPage = () => {
 
     // Verificar se está em montagem
     if (project.montagem?.dataInicio && project.montagem?.dataFim) {
-      const inicio = project.montagem.dataInicio.seconds ? 
-        new Date(project.montagem.dataInicio.seconds * 1000) : 
-        new Date(project.montagem.dataInicio);
-      const fim = project.montagem.dataFim.seconds ? 
-        new Date(project.montagem.dataFim.seconds * 1000) : 
-        new Date(project.montagem.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.montagem.dataInicio);
+      const fim = endOfDaySP(project.montagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Em Montagem', color: 'blue' };
       }
     }
 
     // Verificar se está em evento
     if (project.evento?.dataInicio && project.evento?.dataFim) {
-      const inicio = project.evento.dataInicio.seconds ? 
-        new Date(project.evento.dataInicio.seconds * 1000) : 
-        new Date(project.evento.dataInicio);
-      const fim = project.evento.dataFim.seconds ? 
-        new Date(project.evento.dataFim.seconds * 1000) : 
-        new Date(project.evento.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.evento.dataInicio);
+      const fim = endOfDaySP(project.evento.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Em Andamento', color: 'green' };
       }
     }
 
     // Verificar se está em desmontagem
     if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
-      const inicio = project.desmontagem.dataInicio.seconds ? 
-        new Date(project.desmontagem.dataInicio.seconds * 1000) : 
-        new Date(project.desmontagem.dataInicio);
-      const fim = project.desmontagem.dataFim.seconds ? 
-        new Date(project.desmontagem.dataFim.seconds * 1000) : 
-        new Date(project.desmontagem.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.desmontagem.dataInicio);
+      const fim = endOfDaySP(project.desmontagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Desmontagem', color: 'orange' };
       }
     }
@@ -215,12 +215,8 @@ const ProjectDetailPage = () => {
     // Verificar se é futuro
     const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
     if (dataInicio) {
-      const inicio = dataInicio.seconds ? 
-        new Date(dataInicio.seconds * 1000) : 
-        new Date(dataInicio);
-      inicio.setHours(0, 0, 0, 0);
-      
-      if (today < inicio) {
+      const inicio = startOfDaySP(dataInicio);
+      if (inicio && today < inicio) {
         return { label: 'Futuro', color: 'yellow' };
       }
     }
@@ -588,4 +584,3 @@ const ProjectDetailPage = () => {
 };
 
 export default ProjectDetailPage;
-
