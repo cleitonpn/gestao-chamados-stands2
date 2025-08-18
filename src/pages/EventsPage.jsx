@@ -30,16 +30,13 @@ import {
   Archive,
   ArchiveRestore,
   RefreshCw,
-  Bug,
   CheckCircle,
-  XCircle
+  XCircle,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-
-// 🔧 IMPORTAÇÃO DIRETA DO FIREBASE PARA VERIFICAÇÃO
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
 
 const EventsPage = () => {
   const { userProfile, user } = useAuth();
@@ -51,9 +48,10 @@ const EventsPage = () => {
   const [stats, setStats] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   
-  // 🔧 ADIÇÃO: Estados para verificação
-  const [verificationResult, setVerificationResult] = useState(null);
-  const [showVerification, setShowVerification] = useState(false);
+  // 🔧 ADIÇÃO: Estados para controle de cache
+  const [cacheStatus, setCacheStatus] = useState('unknown');
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [forceRefresh, setForceRefresh] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -74,21 +72,38 @@ const EventsPage = () => {
   useEffect(() => {
     // 🔧 CORREÇÃO: Verificar tanto 'funcao' quanto 'papel' para administrador
     if (userProfile?.funcao === 'administrador' || userProfile?.papel === 'administrador') {
-      loadEvents();
+      loadEvents(true); // Forçar refresh inicial
       loadStats();
     }
   }, [userProfile]);
 
-  const loadEvents = async () => {
+  // 🔧 CORREÇÃO: loadEvents com controle de cache
+  const loadEvents = async (forceServerFetch = false) => {
     try {
       setLoading(true);
-      console.log('🔄 Carregando eventos...');
-      const eventsData = await eventService.getAllEvents();
+      console.log('🔄 Carregando eventos...', { forceServerFetch });
+      
+      // 🚀 FORÇAR BUSCA NO SERVIDOR
+      const eventsData = await eventService.getAllEvents(forceServerFetch);
       console.log('✅ Eventos carregados:', eventsData.length);
+      
       setEvents(eventsData);
+      setCacheStatus(forceServerFetch ? 'server' : 'cache');
+      setLastRefresh(new Date().toLocaleTimeString());
+      
+      // 🔧 DEBUG: Log específico do FENABRAVE 2025
+      const fenabrave = eventsData.find(e => e.nome === 'FENABRAVE 2025');
+      if (fenabrave) {
+        console.log('🔍 FENABRAVE 2025 carregado na interface:');
+        console.log('  dataInicioEvento:', fenabrave.dataInicioEvento);
+        console.log('  dataFimEvento:', fenabrave.dataFimEvento);
+        console.log('  updatedAt:', fenabrave.updatedAt);
+      }
+      
     } catch (error) {
       console.error('❌ Erro ao carregar eventos:', error);
       setError('Erro ao carregar eventos');
+      setCacheStatus('error');
     } finally {
       setLoading(false);
     }
@@ -103,98 +118,22 @@ const EventsPage = () => {
     }
   };
 
-  // 🔧 FUNÇÃO PARA VERIFICAR DIRETAMENTE NO FIREBASE
-  const verifyFirebaseData = async (eventId, expectedData) => {
+  // 🔧 ADIÇÃO: Função para recarregar manualmente
+  const handleManualRefresh = async () => {
+    console.log('🔄 Recarregamento manual solicitado');
+    await loadEvents(true); // Forçar servidor
+    await loadStats();
+  };
+
+  // 🔧 ADIÇÃO: Função para verificar conectividade
+  const checkConnection = async () => {
     try {
-      console.log('🔍 VERIFICANDO DADOS DIRETAMENTE NO FIREBASE...');
-      console.log('🔍 Event ID:', eventId);
-      console.log('🔍 Dados esperados:', expectedData);
-      
-      // Buscar dados diretamente do Firebase
-      const docRef = doc(db, 'eventos', eventId);
-      const docSnap = await getDoc(docRef);
-      
-      if (!docSnap.exists()) {
-        throw new Error(`Documento ${eventId} não encontrado`);
-      }
-      
-      const firebaseData = docSnap.data();
-      console.log('🔍 Dados no Firebase:', firebaseData);
-      
-      // Comparar cada campo de data
-      const comparison = {};
-      const dateFields = [
-        'dataInicioMontagem',
-        'dataFimMontagem', 
-        'dataInicioEvento',
-        'dataFimEvento',
-        'dataInicioDesmontagem',
-        'dataFimDesmontagem'
-      ];
-      
-      dateFields.forEach(field => {
-        const expected = expectedData[field];
-        const actual = firebaseData[field];
-        
-        // Converter para timestamps para comparação
-        const expectedTimestamp = expected ? expected.getTime() : null;
-        const actualTimestamp = actual ? (actual.seconds * 1000) : null;
-        
-        comparison[field] = {
-          expected: expected,
-          expectedTimestamp,
-          expectedFormatted: expected ? expected.toLocaleDateString('pt-BR') : 'N/A',
-          actual: actual,
-          actualTimestamp,
-          actualFormatted: actual ? new Date(actual.seconds * 1000).toLocaleDateString('pt-BR') : 'N/A',
-          matches: expectedTimestamp === actualTimestamp
-        };
-        
-        console.log(`🔍 ${field}:`, comparison[field]);
-      });
-      
-      // Verificar outros campos
-      const otherFields = ['nome', 'pavilhao', 'linkManual', 'observacoes'];
-      otherFields.forEach(field => {
-        comparison[field] = {
-          expected: expectedData[field],
-          actual: firebaseData[field],
-          matches: expectedData[field] === firebaseData[field]
-        };
-        console.log(`🔍 ${field}:`, comparison[field]);
-      });
-      
-      // Calcular estatísticas
-      const totalFields = Object.keys(comparison).length;
-      const matchingFields = Object.values(comparison).filter(comp => comp.matches).length;
-      const matchPercentage = Math.round((matchingFields / totalFields) * 100);
-      
-      const result = {
-        eventId,
-        timestamp: new Date().toLocaleTimeString(),
-        firebaseData,
-        expectedData,
-        comparison,
-        totalFields,
-        matchingFields,
-        matchPercentage,
-        success: matchPercentage === 100
-      };
-      
-      console.log('🔍 RESULTADO DA VERIFICAÇÃO:', result);
-      setVerificationResult(result);
-      setShowVerification(true);
-      
+      const result = await eventService.checkConnection();
+      console.log('🔧 Status de conectividade:', result);
       return result;
-      
     } catch (error) {
-      console.error('🔍 ERRO NA VERIFICAÇÃO:', error);
-      setVerificationResult({
-        error: error.message,
-        timestamp: new Date().toLocaleTimeString()
-      });
-      setShowVerification(true);
-      throw error;
+      console.error('❌ Erro ao verificar conectividade:', error);
+      return { connected: false, error: error.message };
     }
   };
 
@@ -219,8 +158,6 @@ const EventsPage = () => {
       observacoes: ''
     });
     setError('');
-    setVerificationResult(null);
-    setShowVerification(false);
   };
 
   // 🔧 CORREÇÃO: Função de edição melhorada para lidar com diferentes formatos de data
@@ -352,7 +289,7 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 CORREÇÃO: Nova abordagem com verificação direta no Firebase
+  // 🔧 CORREÇÃO: handleSubmit com recarregamento forçado
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -363,7 +300,6 @@ const EventsPage = () => {
     try {
       setFormLoading(true);
       setError('');
-      setVerificationResult(null);
 
       const eventData = {
         nome: formData.nome.trim(),
@@ -378,7 +314,7 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM VERIFICAÇÃO');
+      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO');
       console.log('📊 Dados para salvar:', eventData);
 
       if (editingEvent) {
@@ -389,15 +325,7 @@ const EventsPage = () => {
         const result = await eventService.updateEvent(editingEvent.id, eventData);
         console.log('✅ EventService retornou:', result);
         
-        // Aguardar um pouco para garantir propagação
-        console.log('⏳ Aguardando propagação (2s)...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Verificar diretamente no Firebase
-        console.log('🔍 Verificando dados no Firebase...');
-        await verifyFirebaseData(editingEvent.id, eventData);
-        
-        console.log('✅ EVENTO ATUALIZADO E VERIFICADO');
+        console.log('✅ EVENTO ATUALIZADO COM SUCESSO');
         
       } else {
         console.log('➕ MODO CRIAÇÃO - Novo evento');
@@ -424,9 +352,26 @@ const EventsPage = () => {
         }
       }
 
-      // Recarregar dados
-      await loadEvents();
+      // 🚀 RECARREGAMENTO FORÇADO MÚLTIPLO
+      console.log('🔄 Iniciando recarregamento forçado...');
+      
+      // Aguardar propagação
+      console.log('⏳ Aguardando propagação (3s)...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Recarregar múltiplas vezes forçando servidor
+      for (let i = 1; i <= 3; i++) {
+        console.log(`🔄 Recarregamento ${i}/3 (forçando servidor)...`);
+        await loadEvents(true); // Sempre forçar servidor
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
       await loadStats();
+      
+      // Fechar modal
+      setShowForm(false);
+      setEditingEvent(null);
+      resetForm();
       
       console.log('🎉 PROCESSO CONCLUÍDO COM SUCESSO!');
       
@@ -446,7 +391,9 @@ const EventsPage = () => {
       } else {
         await eventService.reactivateEvent(event.id);
       }
-      await loadEvents();
+      
+      // 🚀 RECARREGAMENTO FORÇADO
+      await loadEvents(true);
       await loadStats();
     } catch (error) {
       console.error('Erro ao alterar status do evento:', error);
@@ -458,7 +405,9 @@ const EventsPage = () => {
     if (window.confirm('Tem certeza que deseja deletar este evento permanentemente?')) {
       try {
         await eventService.deleteEvent(eventId);
-        await loadEvents();
+        
+        // 🚀 RECARREGAMENTO FORÇADO
+        await loadEvents(true);
         await loadStats();
       } catch (error) {
         console.error('Erro ao deletar evento:', error);
@@ -481,7 +430,9 @@ const EventsPage = () => {
         });
         
         console.log(`✅ Evento ${action}do com sucesso`);
-        await loadEvents();
+        
+        // 🚀 RECARREGAMENTO FORÇADO
+        await loadEvents(true);
         await loadStats();
       } catch (error) {
         console.error(`❌ Erro ao ${action} evento:`, error);
@@ -589,6 +540,31 @@ const EventsPage = () => {
           <p className="text-gray-600 mt-2">
             Gerencie eventos para automatizar preenchimento de datas em projetos
           </p>
+          
+          {/* 🔧 ADIÇÃO: Indicadores de status */}
+          <div className="flex items-center gap-4 mt-2 text-sm">
+            <div className="flex items-center gap-1">
+              {cacheStatus === 'server' ? (
+                <Wifi className="h-4 w-4 text-green-500" />
+              ) : cacheStatus === 'cache' ? (
+                <WifiOff className="h-4 w-4 text-yellow-500" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-500" />
+              )}
+              <span className={`${
+                cacheStatus === 'server' ? 'text-green-600' : 
+                cacheStatus === 'cache' ? 'text-yellow-600' : 'text-red-600'
+              }`}>
+                {cacheStatus === 'server' ? 'Dados do Servidor' : 
+                 cacheStatus === 'cache' ? 'Dados em Cache' : 'Erro de Conexão'}
+              </span>
+            </div>
+            {lastRefresh && (
+              <span className="text-gray-500">
+                Última atualização: {lastRefresh}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center space-x-2">
@@ -603,6 +579,17 @@ const EventsPage = () => {
               Mostrar Arquivados
             </label>
           </div>
+          
+          {/* 🔧 ADIÇÃO: Botão de recarregamento manual */}
+          <Button 
+            variant="outline" 
+            onClick={handleManualRefresh}
+            disabled={loading}
+            title="Recarregar dados do servidor"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+          
           <Button onClick={() => setShowForm(true)} className="flex items-center">
             <Plus className="h-4 w-4 mr-2" />
             Novo Evento
@@ -614,60 +601,6 @@ const EventsPage = () => {
         <Alert variant="destructive" className="mb-6">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {/* 🔧 ADIÇÃO: Painel de Verificação */}
-      {showVerification && verificationResult && (
-        <Alert className={`mb-6 ${verificationResult.success ? 'border-green-500' : 'border-red-500'}`}>
-          <div className="flex items-center">
-            {verificationResult.success ? (
-              <CheckCircle className="h-4 w-4 text-green-500" />
-            ) : (
-              <XCircle className="h-4 w-4 text-red-500" />
-            )}
-            <AlertDescription className="ml-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <strong>🔍 Verificação Firebase ({verificationResult.timestamp})</strong><br />
-                  {verificationResult.error ? (
-                    <span className="text-red-600">Erro: {verificationResult.error}</span>
-                  ) : (
-                    <>
-                      <span className={verificationResult.success ? 'text-green-600' : 'text-red-600'}>
-                        {verificationResult.matchingFields}/{verificationResult.totalFields} campos corretos ({verificationResult.matchPercentage}%)
-                      </span>
-                      {!verificationResult.success && (
-                        <details className="mt-2">
-                          <summary className="cursor-pointer text-sm">Ver diferenças</summary>
-                          <div className="mt-2 text-xs">
-                            {Object.entries(verificationResult.comparison).map(([field, comp]) => (
-                              <div key={field} className={`p-1 ${comp.matches ? 'text-green-600' : 'text-red-600'}`}>
-                                <strong>{field}:</strong> {comp.matches ? '✅' : '❌'}<br />
-                                {!comp.matches && (
-                                  <>
-                                    Esperado: {comp.expectedFormatted || comp.expected}<br />
-                                    Atual: {comp.actualFormatted || comp.actual}<br />
-                                  </>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                    </>
-                  )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowVerification(false)}
-                >
-                  Fechar
-                </Button>
-              </div>
-            </AlertDescription>
-          </div>
         </Alert>
       )}
 
@@ -862,11 +795,11 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingEvent ? `🔍 VERIFICAR: Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
+              {editingEvent ? `Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
             </DialogTitle>
             <DialogDescription>
               {editingEvent 
-                ? `MODO VERIFICAÇÃO: Editando evento ID: ${editingEvent.id}. Dados serão verificados diretamente no Firebase.`
+                ? 'Modifique as informações do evento. As alterações serão salvas e recarregadas automaticamente.'
                 : 'Preencha as informações do evento para automatizar o preenchimento de datas em projetos'
               }
             </DialogDescription>
@@ -1042,10 +975,10 @@ const EventsPage = () => {
                 {formLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {editingEvent ? '🔍 SALVANDO E VERIFICANDO...' : 'Criando...'}
+                    {editingEvent ? 'Salvando...' : 'Criando...'}
                   </>
                 ) : (
-                  editingEvent ? '🔍 SALVAR E VERIFICAR' : 'Criar Evento'
+                  editingEvent ? 'Salvar Alterações' : 'Criar Evento'
                 )}
               </Button>
             </div>
