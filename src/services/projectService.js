@@ -14,18 +14,95 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
+// =====================
+// Helpers de Data / Fuso
+// =====================
+// Normaliza entradas de data: Firestore Timestamp, string ISO, 'YYYY-MM-DD', 'DD-MM-YYYY', Date
+// Retorna sempre um Date válido (UTC) preservando o DIA humano quando exibido em America/Sao_Paulo.
+const normalizeDateInput = (value) => {
+  if (!value) return null;
+
+  // Firestore Timestamp-like
+  if (typeof value === 'object' && value.seconds) {
+    return new Date(value.seconds * 1000);
+  }
+
+  // DD-MM-YYYY
+  if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
+    const [dd, mm, yyyy] = value.split('-');
+    // Força como meia-noite UTC para preservar o dia quando renderizado no fuso de SP
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
+  }
+
+  // YYYY-MM-DD
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  // Outros formatos aceitos pelo Date
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d;
+};
+
+// Limites do dia (em UTC) com base na data normalizada
+const startOfDayUTC = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  const copy = new Date(d.getTime());
+  copy.setUTCHours(0, 0, 0, 0);
+  return copy;
+};
+
+const endOfDayUTC = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  const copy = new Date(d.getTime());
+  copy.setUTCHours(23, 59, 59, 999);
+  return copy;
+};
+
+// Normaliza todos os campos de data conhecidos no payload do projeto
+const normalizeProjectDates = (projectData = {}) => {
+  const out = { ...projectData };
+
+  const normalizePair = (obj, keyStart = 'dataInicio', keyEnd = 'dataFim') => {
+    if (!obj) return obj;
+    const outInner = { ...obj };
+    if (outInner[keyStart] !== undefined) outInner[keyStart] = normalizeDateInput(outInner[keyStart]);
+    if (outInner[keyEnd] !== undefined) outInner[keyEnd] = normalizeDateInput(outInner[keyEnd]);
+    return outInner;
+  };
+
+  // Top-level datas
+  if (out.dataInicio !== undefined) out.dataInicio = normalizeDateInput(out.dataInicio);
+  if (out.dataFim !== undefined) out.dataFim = normalizeDateInput(out.dataFim);
+  if (out.dataEncerramento !== undefined) out.dataEncerramento = normalizeDateInput(out.dataEncerramento);
+  if (out.criadoEm !== undefined) out.criadoEm = normalizeDateInput(out.criadoEm);
+  if (out.atualizadoEm !== undefined) out.atualizadoEm = normalizeDateInput(out.atualizadoEm);
+
+  // Subdocumentos usuais
+  if (out.montagem) out.montagem = normalizePair(out.montagem);
+  if (out.evento) out.evento = normalizePair(out.evento);
+  if (out.desmontagem) out.desmontagem = normalizePair(out.desmontagem);
+
+  return out;
+};
+
 export const projectService = {
   // Criar projeto
   async createProject(projectData) {
     try {
       console.log('💾 Criando projeto:', projectData);
-      
-      const docRef = await addDoc(collection(db, 'projetos'), {
-        ...projectData,
+
+      const payload = {
+        ...normalizeProjectDates(projectData),
         status: 'ativo',
         createdAt: new Date(),
         updatedAt: new Date()
-      });
+      };
+      
+      const docRef = await addDoc(collection(db, 'projetos'), payload);
       
       console.log('✅ Projeto criado com ID:', docRef.id);
       return docRef.id;
@@ -39,12 +116,14 @@ export const projectService = {
   async updateProject(projectId, projectData) {
     try {
       console.log('🔄 Atualizando projeto:', projectId, projectData);
+
+      const payload = {
+        ...normalizeProjectDates(projectData),
+        updatedAt: new Date()
+      };
       
       const projectRef = doc(db, 'projetos', projectId);
-      await updateDoc(projectRef, {
-        ...projectData,
-        updatedAt: new Date()
-      });
+      await updateDoc(projectRef, payload);
       
       console.log('✅ Projeto atualizado:', projectId);
     } catch (error) {
@@ -273,13 +352,20 @@ export const projectService = {
     }
   },
 
-  // Buscar projetos por data
+  // Buscar projetos por data (aceita Date/string 'YYYY-MM-DD'/'DD-MM-YYYY')
   async getProjectsByDateRange(startDate, endDate) {
     try {
+      const start = startOfDayUTC(startDate);
+      const end = endOfDayUTC(endDate);
+
+      if (!start || !end) {
+        throw new Error('Datas inválidas para filtro. Use DD-MM-YYYY, YYYY-MM-DD, ISO ou Date.');
+      }
+
       const q = query(
         collection(db, 'projetos'),
-        where('dataInicio', '>=', startDate),
-        where('dataInicio', '<=', endDate),
+        where('dataInicio', '>=', start),
+        where('dataInicio', '<=', end),
         orderBy('dataInicio', 'asc')
       );
       const snapshot = await getDocs(q);
@@ -375,4 +461,3 @@ export const projectService = {
     }
   }
 };
-
