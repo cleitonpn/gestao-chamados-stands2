@@ -33,7 +33,8 @@ import {
   CheckCircle,
   XCircle,
   Wifi,
-  WifiOff
+  WifiOff,
+  Clock
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -51,7 +52,6 @@ const EventsPage = () => {
   // 🔧 ADIÇÃO: Estados para controle de cache
   const [cacheStatus, setCacheStatus] = useState('unknown');
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [forceRefresh, setForceRefresh] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -68,6 +68,61 @@ const EventsPage = () => {
   });
 
   const [formLoading, setFormLoading] = useState(false);
+
+  // 🔧 CORREÇÃO: Função para converter data string para Date sem problema de fuso horário
+  const createDateFromString = (dateString) => {
+    if (!dateString) return null;
+    
+    console.log('🕐 Convertendo data:', dateString);
+    
+    // Criar data no fuso horário local (não UTC)
+    const [year, month, day] = dateString.split('-').map(Number);
+    const date = new Date(year, month - 1, day, 12, 0, 0); // Meio-dia para evitar problemas de fuso
+    
+    console.log('🕐 Data criada:', date);
+    console.log('🕐 Timestamp:', date.getTime());
+    console.log('🕐 Data formatada:', date.toLocaleDateString('pt-BR'));
+    
+    return date;
+  };
+
+  // 🔧 CORREÇÃO: Função para converter Date para string sem problema de fuso horário
+  const formatDateForInput = (date) => {
+    if (!date) return '';
+    
+    try {
+      let dateObj;
+      
+      // Se é um timestamp do Firestore
+      if (date.seconds) {
+        dateObj = new Date(date.seconds * 1000);
+      }
+      // Se é uma string de data
+      else if (typeof date === 'string') {
+        dateObj = new Date(date);
+      }
+      // Se já é um objeto Date
+      else if (date instanceof Date) {
+        dateObj = date;
+      }
+      else {
+        console.warn('Formato de data não reconhecido:', date);
+        return '';
+      }
+      
+      // 🔧 CORREÇÃO: Usar getFullYear, getMonth, getDate para evitar problemas de fuso
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      
+      const formatted = `${year}-${month}-${day}`;
+      console.log('📅 Data formatada para input:', date, '→', formatted);
+      return formatted;
+    } catch (error) {
+      console.error('Erro ao formatar data para edição:', error, date);
+      return '';
+    }
+  };
 
   useEffect(() => {
     // 🔧 CORREÇÃO: Verificar tanto 'funcao' quanto 'papel' para administrador
@@ -125,18 +180,6 @@ const EventsPage = () => {
     await loadStats();
   };
 
-  // 🔧 ADIÇÃO: Função para verificar conectividade
-  const checkConnection = async () => {
-    try {
-      const result = await eventService.checkConnection();
-      console.log('🔧 Status de conectividade:', result);
-      return result;
-    } catch (error) {
-      console.error('❌ Erro ao verificar conectividade:', error);
-      return { connected: false, error: error.message };
-    }
-  };
-
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
       ...prev,
@@ -160,47 +203,9 @@ const EventsPage = () => {
     setError('');
   };
 
-  // 🔧 CORREÇÃO: Função de edição melhorada para lidar com diferentes formatos de data
+  // 🔧 CORREÇÃO: Função de edição com formatação corrigida
   const handleEdit = (event) => {
     console.log('🔧 Editando evento:', event);
-    
-    // Função auxiliar para converter data para formato YYYY-MM-DD
-    const formatDateForInput = (date) => {
-      if (!date) return '';
-      
-      try {
-        let dateObj;
-        
-        // Se é um timestamp do Firestore
-        if (date.seconds) {
-          dateObj = new Date(date.seconds * 1000);
-        }
-        // Se é uma string de data
-        else if (typeof date === 'string') {
-          dateObj = new Date(date);
-        }
-        // Se já é um objeto Date
-        else if (date instanceof Date) {
-          dateObj = date;
-        }
-        else {
-          console.warn('Formato de data não reconhecido:', date);
-          return '';
-        }
-        
-        // Formatar para YYYY-MM-DD
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        
-        const formatted = `${year}-${month}-${day}`;
-        console.log('📅 Data formatada:', date, '→', formatted);
-        return formatted;
-      } catch (error) {
-        console.error('Erro ao formatar data para edição:', error, date);
-        return '';
-      }
-    };
 
     const formattedData = {
       nome: event.nome || '',
@@ -255,14 +260,14 @@ const EventsPage = () => {
       return false;
     }
 
-    // Validar sequência de datas
+    // 🔧 CORREÇÃO: Validar sequência de datas usando createDateFromString
     const dates = {
-      inicioMontagem: new Date(formData.dataInicioMontagem),
-      fimMontagem: new Date(formData.dataFimMontagem),
-      inicioEvento: new Date(formData.dataInicioEvento),
-      fimEvento: new Date(formData.dataFimEvento),
-      inicioDesmontagem: new Date(formData.dataInicioDesmontagem),
-      fimDesmontagem: new Date(formData.dataFimDesmontagem)
+      inicioMontagem: createDateFromString(formData.dataInicioMontagem),
+      fimMontagem: createDateFromString(formData.dataFimMontagem),
+      inicioEvento: createDateFromString(formData.dataInicioEvento),
+      fimEvento: createDateFromString(formData.dataFimEvento),
+      inicioDesmontagem: createDateFromString(formData.dataInicioDesmontagem),
+      fimDesmontagem: createDateFromString(formData.dataFimDesmontagem)
     };
 
     if (dates.inicioMontagem >= dates.fimMontagem) {
@@ -289,7 +294,7 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 CORREÇÃO: handleSubmit com recarregamento forçado
+  // 🔧 CORREÇÃO: handleSubmit com conversão de datas corrigida
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -301,21 +306,35 @@ const EventsPage = () => {
       setFormLoading(true);
       setError('');
 
+      // 🔧 CORREÇÃO: Usar createDateFromString para evitar problemas de fuso horário
       const eventData = {
         nome: formData.nome.trim(),
         pavilhao: formData.pavilhao.trim(),
-        dataInicioMontagem: new Date(formData.dataInicioMontagem),
-        dataFimMontagem: new Date(formData.dataFimMontagem),
-        dataInicioEvento: new Date(formData.dataInicioEvento),
-        dataFimEvento: new Date(formData.dataFimEvento),
-        dataInicioDesmontagem: new Date(formData.dataInicioDesmontagem),
-        dataFimDesmontagem: new Date(formData.dataFimDesmontagem),
+        dataInicioMontagem: createDateFromString(formData.dataInicioMontagem),
+        dataFimMontagem: createDateFromString(formData.dataFimMontagem),
+        dataInicioEvento: createDateFromString(formData.dataInicioEvento),
+        dataFimEvento: createDateFromString(formData.dataFimEvento),
+        dataInicioDesmontagem: createDateFromString(formData.dataInicioDesmontagem),
+        dataFimDesmontagem: createDateFromString(formData.dataFimDesmontagem),
         linkManual: formData.linkManual.trim(),
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO');
-      console.log('📊 Dados para salvar:', eventData);
+      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM FUSO HORÁRIO CORRIGIDO');
+      console.log('📊 Dados do formulário (strings):', formData);
+      console.log('📊 Dados convertidos (objetos Date):', eventData);
+      
+      // 🔧 DEBUG: Mostrar timestamps das datas convertidas
+      Object.keys(eventData).forEach(key => {
+        if (key.includes('data') && eventData[key]) {
+          console.log(`🕐 ${key}:`, {
+            date: eventData[key],
+            timestamp: eventData[key].getTime(),
+            formatted: eventData[key].toLocaleDateString('pt-BR'),
+            iso: eventData[key].toISOString()
+          });
+        }
+      });
 
       if (editingEvent) {
         console.log('✏️ MODO EDIÇÃO - Evento ID:', editingEvent.id);
@@ -536,7 +555,7 @@ const EventsPage = () => {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Gerenciamento de Eventos</h1>
+          <h1 className="text-3xl font-bold">🕐 Gerenciamento de Eventos (Fuso Corrigido)</h1>
           <p className="text-gray-600 mt-2">
             Gerencie eventos para automatizar preenchimento de datas em projetos
           </p>
@@ -564,6 +583,10 @@ const EventsPage = () => {
                 Última atualização: {lastRefresh}
               </span>
             )}
+            <div className="flex items-center gap-1">
+              <Clock className="h-4 w-4 text-blue-500" />
+              <span className="text-blue-600">Fuso Horário: UTC-3</span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -795,12 +818,12 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingEvent ? `Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
+              {editingEvent ? `🕐 Editar Evento: ${editingEvent.nome}` : '🕐 Novo Evento'}
             </DialogTitle>
             <DialogDescription>
               {editingEvent 
-                ? 'Modifique as informações do evento. As alterações serão salvas e recarregadas automaticamente.'
-                : 'Preencha as informações do evento para automatizar o preenchimento de datas em projetos'
+                ? 'Modifique as informações do evento. As datas serão salvas considerando o fuso horário local (UTC-3).'
+                : 'Preencha as informações do evento. As datas serão salvas considerando o fuso horário local (UTC-3).'
               }
             </DialogDescription>
           </DialogHeader>
@@ -844,7 +867,7 @@ const EventsPage = () => {
 
             {/* Cronograma */}
             <div className="space-y-4">
-              <h4 className="font-medium">Cronograma</h4>
+              <h4 className="font-medium">Cronograma (Fuso Horário: UTC-3)</h4>
               
               {/* Montagem */}
               <div className="bg-blue-50 p-4 rounded-lg">
@@ -978,7 +1001,7 @@ const EventsPage = () => {
                     {editingEvent ? 'Salvando...' : 'Criando...'}
                   </>
                 ) : (
-                  editingEvent ? 'Salvar Alterações' : 'Criar Evento'
+                  editingEvent ? '🕐 Salvar com Fuso Corrigido' : '🕐 Criar Evento'
                 )}
               </Button>
             </div>
