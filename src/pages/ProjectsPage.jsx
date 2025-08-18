@@ -12,8 +12,29 @@ const ProjectCard = ({ project, onArchive, userRole }) => {
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
     try {
-      const date = timestamp.seconds ? new Date(timestamp.seconds * 1000) : new Date(timestamp);
-      return date.toLocaleDateString('pt-BR');
+      // Se é um timestamp do Firestore
+      if (timestamp.seconds) {
+        const date = new Date(timestamp.seconds * 1000);
+        return date.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: '2-digit'
+        });
+      }
+      
+      // Se é uma string de data (YYYY-MM-DD), formatar diretamente
+      if (typeof timestamp === 'string' && timestamp.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = timestamp.split('-');
+        return `${day}/${month}/${year.slice(-2)}`;
+      }
+      
+      // Para outros casos
+      const date = new Date(timestamp);
+      return date.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+      });
     } catch (error) {
       return 'N/A';
     }
