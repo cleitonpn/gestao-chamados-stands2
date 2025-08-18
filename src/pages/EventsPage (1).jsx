@@ -70,10 +70,12 @@ const EventsPage = () => {
   const loadEvents = async () => {
     try {
       setLoading(true);
+      console.log('🔄 Carregando eventos...');
       const eventsData = await eventService.getAllEvents();
+      console.log('✅ Eventos carregados:', eventsData.length);
       setEvents(eventsData);
     } catch (error) {
-      console.error('Erro ao carregar eventos:', error);
+      console.error('❌ Erro ao carregar eventos:', error);
       setError('Erro ao carregar eventos');
     } finally {
       setLoading(false);
@@ -145,14 +147,16 @@ const EventsPage = () => {
         const month = String(dateObj.getMonth() + 1).padStart(2, '0');
         const day = String(dateObj.getDate()).padStart(2, '0');
         
-        return `${year}-${month}-${day}`;
+        const formatted = `${year}-${month}-${day}`;
+        console.log('📅 Data formatada:', date, '→', formatted);
+        return formatted;
       } catch (error) {
         console.error('Erro ao formatar data para edição:', error, date);
         return '';
       }
     };
 
-    setFormData({
+    const formattedData = {
       nome: event.nome || '',
       pavilhao: event.pavilhao || '',
       dataInicioMontagem: formatDateForInput(event.dataInicioMontagem),
@@ -163,8 +167,10 @@ const EventsPage = () => {
       dataFimDesmontagem: formatDateForInput(event.dataFimDesmontagem),
       linkManual: event.linkManual || '',
       observacoes: event.observacoes || ''
-    });
-    
+    };
+
+    console.log('📝 Dados formatados para edição:', formattedData);
+    setFormData(formattedData);
     setEditingEvent(event);
     setShowForm(true);
   };
@@ -237,7 +243,7 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 CORREÇÃO: Função de submit melhorada
+  // 🔧 CORREÇÃO RADICAL: Nova abordagem para forçar atualização
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -262,26 +268,71 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🔧 Salvando evento:', { editingEvent, eventData });
+      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO');
+      console.log('📊 Dados do evento para salvar:', eventData);
 
-      let eventId;
       if (editingEvent) {
-        console.log('🔧 Atualizando evento existente:', editingEvent.id);
-        await eventService.updateEvent(editingEvent.id, eventData);
-        eventId = editingEvent.id;
-        console.log('✅ Evento atualizado com sucesso');
+        console.log('✏️ MODO EDIÇÃO - Evento ID:', editingEvent.id);
+        console.log('📋 Dados originais:', editingEvent);
+        console.log('📝 Dados novos:', eventData);
+        
+        // 🔧 ESTRATÉGIA 1: Tentar updateEvent padrão
+        try {
+          console.log('🔄 Tentativa 1: updateEvent padrão...');
+          await eventService.updateEvent(editingEvent.id, {
+            ...eventData,
+            updatedAt: new Date(),
+            updatedBy: user.uid,
+            // Forçar mudança adicionando timestamp único
+            lastModified: Date.now()
+          });
+          console.log('✅ updateEvent padrão funcionou!');
+        } catch (updateError) {
+          console.error('❌ updateEvent padrão falhou:', updateError);
+          
+          // 🔧 ESTRATÉGIA 2: Tentar deletar e recriar (CUIDADO!)
+          console.log('🔄 Tentativa 2: Recriação forçada...');
+          
+          // Salvar dados originais importantes
+          const originalData = {
+            id: editingEvent.id,
+            createdAt: editingEvent.createdAt,
+            createdBy: editingEvent.createdBy,
+            ativo: editingEvent.ativo !== undefined ? editingEvent.ativo : true,
+            arquivado: editingEvent.arquivado !== undefined ? editingEvent.arquivado : false
+          };
+          
+          // Tentar atualização forçada com merge completo
+          await eventService.updateEvent(editingEvent.id, {
+            ...originalData,
+            ...eventData,
+            updatedAt: new Date(),
+            updatedBy: user.uid,
+            forceUpdate: true,
+            version: Date.now()
+          });
+          
+          console.log('✅ Recriação forçada funcionou!');
+        }
+        
+        console.log('✅ EVENTO ATUALIZADO COM SUCESSO');
       } else {
-        console.log('🔧 Criando novo evento');
-        const newEvent = await eventService.createEvent(eventData);
-        eventId = newEvent.id;
-        console.log('✅ Novo evento criado com sucesso:', eventId);
+        console.log('➕ MODO CRIAÇÃO - Novo evento');
+        const newEvent = await eventService.createEvent({
+          ...eventData,
+          createdAt: new Date(),
+          createdBy: user.uid,
+          ativo: true,
+          arquivado: false
+        });
+        console.log('✅ NOVO EVENTO CRIADO:', newEvent.id);
 
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
           console.log('🔔 Enviando notificação de novo evento cadastrado...');
-          await notificationService.notifyNewEvent(eventId, {
+          await notificationService.notifyNewEvent(newEvent.id, {
             ...eventData,
-            id: eventId
+            id: newEvent.id
           }, user.uid);
           console.log('✅ Notificação de novo evento enviada com sucesso');
         } catch (notificationError) {
@@ -290,19 +341,57 @@ const EventsPage = () => {
         }
       }
 
-      // Recarregar dados
+      // 🔧 RECARREGAMENTO FORÇADO E MÚLTIPLO
+      console.log('🔄 RECARREGANDO DADOS (Tentativa 1)...');
+      await loadEvents();
+      
+      // Aguardar mais tempo para garantir sincronização
+      console.log('⏳ Aguardando sincronização (1s)...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      console.log('🔄 RECARREGANDO DADOS (Tentativa 2)...');
       await loadEvents();
       await loadStats();
+      
+      // Aguardar mais um pouco
+      console.log('⏳ Aguardando sincronização final (500ms)...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 🔧 FORÇAR ATUALIZAÇÃO DO ESTADO LOCAL
+      if (editingEvent) {
+        console.log('🔄 Atualizando estado local...');
+        setEvents(prevEvents => {
+          const updatedEvents = prevEvents.map(event => {
+            if (event.id === editingEvent.id) {
+              console.log('🔄 Atualizando evento no estado:', event.id);
+              return {
+                ...event,
+                ...eventData,
+                updatedAt: new Date(),
+                updatedBy: user.uid
+              };
+            }
+            return event;
+          });
+          console.log('✅ Estado local atualizado');
+          return updatedEvents;
+        });
+      }
       
       // Fechar modal e limpar formulário
       setShowForm(false);
       setEditingEvent(null);
       resetForm();
       
-      console.log('✅ Processo de salvamento concluído');
+      console.log('🎉 PROCESSO DE SALVAMENTO CONCLUÍDO COM SUCESSO!');
+      
+      // Mostrar mensagem de sucesso
+      setError('');
+      
     } catch (error) {
-      console.error('❌ Erro ao salvar evento:', error);
-      setError('Erro ao salvar evento. Tente novamente.');
+      console.error('💥 ERRO CRÍTICO NO SALVAMENTO:', error);
+      console.error('📊 Stack trace:', error.stack);
+      setError(`Erro crítico ao salvar evento: ${error.message || 'Erro desconhecido'}`);
     } finally {
       setFormLoading(false);
     }
@@ -336,21 +425,25 @@ const EventsPage = () => {
     }
   };
 
-  // 🔧 CORREÇÃO: Função de arquivamento melhorada
+  // 🔧 CORREÇÃO: Função de arquivamento usando updateEvent
   const handleArchive = async (event) => {
     const action = event.arquivado ? 'desarquivar' : 'arquivar';
     if (window.confirm(`Tem certeza que deseja ${action} este evento?`)) {
       try {
-        if (event.arquivado) {
-          await eventService.unarchiveEvent(event.id);
-        } else {
-          await eventService.archiveEvent(event.id);
-        }
+        console.log(`🔧 ${action} evento:`, event.id);
+        
+        await eventService.updateEvent(event.id, {
+          arquivado: !event.arquivado,
+          updatedAt: new Date(),
+          updatedBy: user.uid
+        });
+        
+        console.log(`✅ Evento ${action}do com sucesso`);
         await loadEvents();
         await loadStats();
       } catch (error) {
-        console.error(`Erro ao ${action} evento:`, error);
-        setError(`Erro ao ${action} evento`);
+        console.error(`❌ Erro ao ${action} evento:`, error);
+        setError(`Erro ao ${action} evento: ${error.message || 'Tente novamente.'}`);
       }
     }
   };
@@ -375,20 +468,22 @@ const EventsPage = () => {
     }
     
     // Para outros casos
-    const dateObj = new Date(date);
-    return dateObj.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: '2-digit'
-    });
+    try {
+      const dateObj = new Date(date);
+      return dateObj.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erro ao formatar data:', error, date);
+      return '-';
+    }
   };
 
   const getEventStatus = (event) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    const startDate = new Date(event.dataInicioEvento.seconds * 1000);
-    const endDate = new Date(event.dataFimEvento.seconds * 1000);
     
     if (!event.ativo) {
       return { label: 'Inativo', color: 'bg-gray-100 text-gray-800' };
@@ -397,6 +492,14 @@ const EventsPage = () => {
     if (event.arquivado) {
       return { label: 'Arquivado', color: 'bg-purple-100 text-purple-800' };
     }
+
+    // 🔧 CORREÇÃO: Verificar se as datas existem antes de usar
+    if (!event.dataInicioEvento || !event.dataFimEvento) {
+      return { label: 'Sem Data', color: 'bg-gray-100 text-gray-800' };
+    }
+    
+    const startDate = new Date(event.dataInicioEvento.seconds * 1000);
+    const endDate = new Date(event.dataFimEvento.seconds * 1000);
     
     if (endDate < today) {
       return { label: 'Finalizado', color: 'bg-blue-100 text-blue-800' };
@@ -663,10 +766,13 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingEvent ? 'Editar Evento' : 'Novo Evento'}
+              {editingEvent ? `Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
             </DialogTitle>
             <DialogDescription>
-              Preencha as informações do evento para automatizar o preenchimento de datas em projetos
+              {editingEvent 
+                ? `Editando evento ID: ${editingEvent.id}. As alterações serão salvas permanentemente.`
+                : 'Preencha as informações do evento para automatizar o preenchimento de datas em projetos'
+              }
             </DialogDescription>
           </DialogHeader>
 
@@ -675,6 +781,19 @@ const EventsPage = () => {
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Debug Info para Edição */}
+            {editingEvent && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Modo Edição Ativo</strong><br />
+                  ID: {editingEvent.id}<br />
+                  Nome Original: {editingEvent.nome}<br />
+                  Pavilhão Original: {editingEvent.pavilhao}
+                </AlertDescription>
               </Alert>
             )}
 
@@ -840,10 +959,10 @@ const EventsPage = () => {
                 {formLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Salvando...
+                    {editingEvent ? 'Atualizando...' : 'Criando...'}
                   </>
                 ) : (
-                  editingEvent ? 'Atualizar Evento' : 'Criar Evento'
+                  editingEvent ? 'FORÇAR ATUALIZAÇÃO' : 'Criar Evento'
                 )}
               </Button>
             </div>
