@@ -26,7 +26,9 @@ import {
   CalendarDays,
   Building,
   Users,
-  BarChart3
+  BarChart3,
+  Archive,
+  ArchiveRestore
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -39,6 +41,7 @@ const EventsPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [stats, setStats] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -106,23 +109,62 @@ const EventsPage = () => {
       linkManual: '',
       observacoes: ''
     });
-    setEditingEvent(null);
     setError('');
   };
 
+  // 🔧 CORREÇÃO: Função de edição melhorada para lidar com diferentes formatos de data
   const handleEdit = (event) => {
+    console.log('🔧 Editando evento:', event);
+    
+    // Função auxiliar para converter data para formato YYYY-MM-DD
+    const formatDateForInput = (date) => {
+      if (!date) return '';
+      
+      try {
+        let dateObj;
+        
+        // Se é um timestamp do Firestore
+        if (date.seconds) {
+          dateObj = new Date(date.seconds * 1000);
+        }
+        // Se é uma string de data
+        else if (typeof date === 'string') {
+          dateObj = new Date(date);
+        }
+        // Se já é um objeto Date
+        else if (date instanceof Date) {
+          dateObj = date;
+        }
+        else {
+          console.warn('Formato de data não reconhecido:', date);
+          return '';
+        }
+        
+        // Formatar para YYYY-MM-DD
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        
+        return `${year}-${month}-${day}`;
+      } catch (error) {
+        console.error('Erro ao formatar data para edição:', error, date);
+        return '';
+      }
+    };
+
     setFormData({
       nome: event.nome || '',
       pavilhao: event.pavilhao || '',
-      dataInicioMontagem: event.dataInicioMontagem ? format(new Date(event.dataInicioMontagem.seconds * 1000), 'yyyy-MM-dd') : '',
-      dataFimMontagem: event.dataFimMontagem ? format(new Date(event.dataFimMontagem.seconds * 1000), 'yyyy-MM-dd') : '',
-      dataInicioEvento: event.dataInicioEvento ? format(new Date(event.dataInicioEvento.seconds * 1000), 'yyyy-MM-dd') : '',
-      dataFimEvento: event.dataFimEvento ? format(new Date(event.dataFimEvento.seconds * 1000), 'yyyy-MM-dd') : '',
-      dataInicioDesmontagem: event.dataInicioDesmontagem ? format(new Date(event.dataInicioDesmontagem.seconds * 1000), 'yyyy-MM-dd') : '',
-      dataFimDesmontagem: event.dataFimDesmontagem ? format(new Date(event.dataFimDesmontagem.seconds * 1000), 'yyyy-MM-dd') : '',
+      dataInicioMontagem: formatDateForInput(event.dataInicioMontagem),
+      dataFimMontagem: formatDateForInput(event.dataFimMontagem),
+      dataInicioEvento: formatDateForInput(event.dataInicioEvento),
+      dataFimEvento: formatDateForInput(event.dataFimEvento),
+      dataInicioDesmontagem: formatDateForInput(event.dataInicioDesmontagem),
+      dataFimDesmontagem: formatDateForInput(event.dataFimDesmontagem),
       linkManual: event.linkManual || '',
       observacoes: event.observacoes || ''
     });
+    
     setEditingEvent(event);
     setShowForm(true);
   };
@@ -195,6 +237,7 @@ const EventsPage = () => {
     return true;
   };
 
+  // 🔧 CORREÇÃO: Função de submit melhorada
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -219,13 +262,19 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
+      console.log('🔧 Salvando evento:', { editingEvent, eventData });
+
       let eventId;
       if (editingEvent) {
+        console.log('🔧 Atualizando evento existente:', editingEvent.id);
         await eventService.updateEvent(editingEvent.id, eventData);
         eventId = editingEvent.id;
+        console.log('✅ Evento atualizado com sucesso');
       } else {
+        console.log('🔧 Criando novo evento');
         const newEvent = await eventService.createEvent(eventData);
         eventId = newEvent.id;
+        console.log('✅ Novo evento criado com sucesso:', eventId);
 
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
@@ -241,12 +290,18 @@ const EventsPage = () => {
         }
       }
 
+      // Recarregar dados
       await loadEvents();
       await loadStats();
+      
+      // Fechar modal e limpar formulário
       setShowForm(false);
+      setEditingEvent(null);
       resetForm();
+      
+      console.log('✅ Processo de salvamento concluído');
     } catch (error) {
-      console.error('Erro ao salvar evento:', error);
+      console.error('❌ Erro ao salvar evento:', error);
       setError('Erro ao salvar evento. Tente novamente.');
     } finally {
       setFormLoading(false);
@@ -277,6 +332,25 @@ const EventsPage = () => {
       } catch (error) {
         console.error('Erro ao deletar evento:', error);
         setError('Erro ao deletar evento');
+      }
+    }
+  };
+
+  // 🔧 CORREÇÃO: Função de arquivamento melhorada
+  const handleArchive = async (event) => {
+    const action = event.arquivado ? 'desarquivar' : 'arquivar';
+    if (window.confirm(`Tem certeza que deseja ${action} este evento?`)) {
+      try {
+        if (event.arquivado) {
+          await eventService.unarchiveEvent(event.id);
+        } else {
+          await eventService.archiveEvent(event.id);
+        }
+        await loadEvents();
+        await loadStats();
+      } catch (error) {
+        console.error(`Erro ao ${action} evento:`, error);
+        setError(`Erro ao ${action} evento`);
       }
     }
   };
@@ -320,6 +394,10 @@ const EventsPage = () => {
       return { label: 'Inativo', color: 'bg-gray-100 text-gray-800' };
     }
     
+    if (event.arquivado) {
+      return { label: 'Arquivado', color: 'bg-purple-100 text-purple-800' };
+    }
+    
     if (endDate < today) {
       return { label: 'Finalizado', color: 'bg-blue-100 text-blue-800' };
     }
@@ -330,6 +408,15 @@ const EventsPage = () => {
     
     return { label: 'Futuro', color: 'bg-yellow-100 text-yellow-800' };
   };
+
+  // 🔧 FILTRO: Aplicar filtro de arquivados
+  const filteredEvents = events.filter(event => {
+    if (showArchived) {
+      return true; // Mostrar todos
+    } else {
+      return !event.arquivado; // Mostrar apenas não arquivados
+    }
+  });
 
   // 🔧 CORREÇÃO: Verificar se usuário é administrador (funcao OU papel)
   if (userProfile?.funcao !== 'administrador' && userProfile?.papel !== 'administrador') {
@@ -355,13 +442,27 @@ const EventsPage = () => {
         <div>
           <h1 className="text-3xl font-bold">Gerenciamento de Eventos</h1>
           <p className="text-gray-600 mt-2">
-            Cadastre e gerencie eventos para automatizar o preenchimento de datas em projetos
+            Gerencie eventos para automatizar preenchimento de datas em projetos
           </p>
         </div>
-        <Button onClick={() => setShowForm(true)} className="flex items-center">
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Evento
-        </Button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="showArchived"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="rounded"
+            />
+            <label htmlFor="showArchived" className="text-sm font-medium">
+              Mostrar Arquivados
+            </label>
+          </div>
+          <Button onClick={() => setShowForm(true)} className="flex items-center">
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Evento
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -431,27 +532,32 @@ const EventsPage = () => {
         </div>
       ) : (
         <div className="grid gap-4">
-          {events.length === 0 ? (
+          {filteredEvents.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center">
                 <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  Nenhum evento cadastrado
+                  {showArchived ? 'Nenhum evento arquivado' : 'Nenhum evento cadastrado'}
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Comece criando seu primeiro evento para automatizar o preenchimento de datas em projetos.
+                  {showArchived 
+                    ? 'Não há eventos arquivados no momento.'
+                    : 'Comece criando seu primeiro evento para automatizar o preenchimento de datas em projetos.'
+                  }
                 </p>
-                <Button onClick={() => setShowForm(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Criar Primeiro Evento
-                </Button>
+                {!showArchived && (
+                  <Button onClick={() => setShowForm(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Criar Primeiro Evento
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ) : (
-            events.map((event) => {
+            filteredEvents.map((event) => {
               const status = getEventStatus(event);
               return (
-                <Card key={event.id} className="hover:shadow-md transition-shadow">
+                <Card key={event.id} className={`hover:shadow-md transition-shadow ${event.arquivado ? 'opacity-75 border-purple-200' : ''}`}>
                   <CardContent className="p-6">
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex-1">
@@ -460,6 +566,12 @@ const EventsPage = () => {
                           <Badge className={status.color}>
                             {status.label}
                           </Badge>
+                          {event.arquivado && (
+                            <Badge variant="outline" className="text-purple-600 border-purple-300">
+                              <Archive className="h-3 w-3 mr-1" />
+                              Arquivado
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center text-gray-600 mb-2">
                           <Building className="h-4 w-4 mr-2" />
@@ -499,6 +611,7 @@ const EventsPage = () => {
                           variant="outline"
                           size="sm"
                           onClick={() => handleEdit(event)}
+                          title="Editar evento"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -507,14 +620,25 @@ const EventsPage = () => {
                           size="sm"
                           onClick={() => handleToggleActive(event)}
                           className={event.ativo ? 'text-orange-600' : 'text-green-600'}
+                          title={event.ativo ? 'Desativar evento' : 'Ativar evento'}
                         >
                           {event.ativo ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => handleArchive(event)}
+                          className={event.arquivado ? 'text-blue-600' : 'text-gray-600'}
+                          title={event.arquivado ? 'Desarquivar evento' : 'Arquivar evento'}
+                        >
+                          {event.arquivado ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleDelete(event.id)}
                           className="text-red-600 hover:text-red-800"
+                          title="Deletar evento permanentemente"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -529,7 +653,13 @@ const EventsPage = () => {
       )}
 
       {/* Modal de Formulário */}
-      <Dialog open={showForm} onOpenChange={setShowForm}>
+      <Dialog open={showForm} onOpenChange={(open) => {
+        setShowForm(open);
+        if (!open) {
+          setEditingEvent(null);
+          resetForm();
+        }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -700,6 +830,7 @@ const EventsPage = () => {
                 variant="outline" 
                 onClick={() => {
                   setShowForm(false);
+                  setEditingEvent(null);
                   resetForm();
                 }}
               >
@@ -724,3 +855,4 @@ const EventsPage = () => {
 };
 
 export default EventsPage;
+
