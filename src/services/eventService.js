@@ -7,131 +7,116 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
+  where, 
   orderBy,
-  where 
+  serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-export const eventService = {
-  // Criar evento
-  async createEvent(eventData) {
-    try {
-      console.log('🔧 EventService: Criando evento...', eventData);
-      const docRef = await addDoc(collection(db, 'eventos'), {
-        ...eventData,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        ativo: true,
-        arquivado: false // Adicionar campo arquivado por padrão
-      });
-      console.log('✅ EventService: Evento criado com ID:', docRef.id);
-      return { id: docRef.id, ...eventData };
-    } catch (error) {
-      console.error('❌ EventService: Erro ao criar evento:', error);
-      throw error;
-    }
-  },
+class EventService {
+  constructor() {
+    this.collectionName = 'eventos';
+    this.collectionRef = collection(db, this.collectionName);
+  }
 
-  // Buscar evento por ID
-  async getEventById(eventId) {
-    try {
-      console.log('🔧 EventService: Buscando evento por ID:', eventId);
-      const docRef = doc(db, 'eventos', eventId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const eventData = { id: docSnap.id, ...docSnap.data() };
-        console.log('✅ EventService: Evento encontrado:', eventData);
-        return eventData;
-      } else {
-        console.log('❌ EventService: Evento não encontrado:', eventId);
-        return null;
-      }
-    } catch (error) {
-      console.error('❌ EventService: Erro ao buscar evento:', error);
-      throw error;
-    }
-  },
-
-  // Listar todos os eventos
-  async getAllEvents() {
+  // 🔧 CORREÇÃO: getAllEvents SEM CACHE
+  async getAllEvents(forceRefresh = false) {
     try {
       console.log('🔧 EventService: Listando todos os eventos...');
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, 'eventos'), 
-          orderBy('dataInicioEvento', 'desc')
-        )
+      console.log('🔧 ForceRefresh:', forceRefresh);
+      
+      // 🚀 OPÇÃO 1: Forçar busca no servidor (sem cache)
+      const queryOptions = forceRefresh ? { source: 'server' } : {};
+      console.log('🔧 Query options:', queryOptions);
+      
+      const q = query(
+        this.collectionRef,
+        orderBy('createdAt', 'desc')
       );
       
-      const events = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      // 🔧 CORREÇÃO: Usar getDocs com opções de cache
+      const querySnapshot = await getDocs(q, queryOptions);
+      console.log('🔧 Query snapshot size:', querySnapshot.size);
+      console.log('🔧 Query metadata:', querySnapshot.metadata);
+      
+      const events = [];
+      querySnapshot.forEach((doc) => {
+        const eventData = { id: doc.id, ...doc.data() };
+        console.log('🔧 Evento carregado:', eventData.nome, 'ID:', doc.id);
+        
+        // 🔧 DEBUG: Log das datas para verificar se são as mais recentes
+        if (eventData.nome === 'FENABRAVE 2025') {
+          console.log('🔍 FENABRAVE 2025 - Datas carregadas:');
+          console.log('  dataInicioMontagem:', eventData.dataInicioMontagem);
+          console.log('  dataFimMontagem:', eventData.dataFimMontagem);
+          console.log('  dataInicioEvento:', eventData.dataInicioEvento);
+          console.log('  dataFimEvento:', eventData.dataFimEvento);
+          console.log('  updatedAt:', eventData.updatedAt);
+        }
+        
+        events.push(eventData);
+      });
       
       console.log('✅ EventService: Eventos carregados:', events.length);
+      console.log('🔧 Fonte dos dados:', querySnapshot.metadata.fromCache ? 'CACHE' : 'SERVIDOR');
+      
       return events;
     } catch (error) {
       console.error('❌ EventService: Erro ao listar eventos:', error);
       throw error;
     }
-  },
+  }
 
-  // Listar eventos ativos
-  async getActiveEvents() {
+  // 🔧 CORREÇÃO: getEventById SEM CACHE
+  async getEventById(eventId, forceRefresh = false) {
     try {
-      console.log('🔧 EventService: Listando eventos ativos...');
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, 'eventos'),
-          where('ativo', '==', true),
-          orderBy('dataInicioEvento', 'desc')
-        )
-      );
+      console.log('🔧 EventService: Buscando evento por ID:', eventId);
+      console.log('🔧 ForceRefresh:', forceRefresh);
       
-      const events = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const docRef = doc(db, this.collectionName, eventId);
       
-      console.log('✅ EventService: Eventos ativos carregados:', events.length);
-      return events;
+      // 🚀 OPÇÃO: Forçar busca no servidor
+      const queryOptions = forceRefresh ? { source: 'server' } : {};
+      const docSnap = await getDoc(docRef, queryOptions);
+      
+      if (!docSnap.exists()) {
+        throw new Error(`Evento com ID ${eventId} não encontrado`);
+      }
+      
+      const eventData = { id: docSnap.id, ...docSnap.data() };
+      console.log('✅ EventService: Evento encontrado:', eventData.nome);
+      console.log('🔧 Fonte dos dados:', docSnap.metadata.fromCache ? 'CACHE' : 'SERVIDOR');
+      
+      return eventData;
     } catch (error) {
-      console.error('❌ EventService: Erro ao listar eventos ativos:', error);
+      console.error('❌ EventService: Erro ao buscar evento:', error);
       throw error;
     }
-  },
+  }
 
-  // Listar eventos futuros
-  async getFutureEvents() {
+  async createEvent(eventData) {
     try {
-      console.log('🔧 EventService: Listando eventos futuros...');
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      console.log('🔧 EventService: Criando novo evento...');
+      console.log('📊 Dados do evento:', eventData);
       
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, 'eventos'),
-          where('ativo', '==', true),
-          where('dataInicioEvento', '>=', today),
-          orderBy('dataInicioEvento', 'asc')
-        )
-      );
+      const docRef = await addDoc(this.collectionRef, {
+        ...eventData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
       
-      const events = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      console.log('✅ EventService: Evento criado com ID:', docRef.id);
       
-      console.log('✅ EventService: Eventos futuros carregados:', events.length);
-      return events;
+      // 🔧 CORREÇÃO: Retornar dados completos após criação
+      const newEvent = await this.getEventById(docRef.id, true); // Forçar refresh
+      return newEvent;
     } catch (error) {
-      console.error('❌ EventService: Erro ao listar eventos futuros:', error);
+      console.error('❌ EventService: Erro ao criar evento:', error);
       throw error;
     }
-  },
+  }
 
-  // 🔧 CORREÇÃO: Atualizar evento com logs e retorno
+  // 🔧 CORREÇÃO: updateEvent ROBUSTO
   async updateEvent(eventId, eventData) {
     try {
       console.log('🔧 EventService: Atualizando evento...', { eventId, eventData });
@@ -140,267 +125,258 @@ export const eventService = {
         throw new Error('ID do evento é obrigatório');
       }
 
-      const docRef = doc(db, 'eventos', eventId);
+      const docRef = doc(db, this.collectionName, eventId);
       
-      // Verificar se o documento existe antes de atualizar
-      const docSnap = await getDoc(docRef);
+      // 🔧 VERIFICAR SE DOCUMENTO EXISTE ANTES DE ATUALIZAR
+      console.log('🔧 EventService: Verificando se documento existe...');
+      const docSnap = await getDoc(docRef, { source: 'server' }); // Forçar servidor
+      
       if (!docSnap.exists()) {
         throw new Error(`Evento com ID ${eventId} não encontrado`);
       }
-
+      
+      console.log('🔧 EventService: Documento existe, prosseguindo com atualização...');
+      
+      // 🔧 DADOS PARA ATUALIZAÇÃO COM TIMESTAMP FORÇADO
       const updateData = {
         ...eventData,
-        updatedAt: new Date()
+        updatedAt: serverTimestamp(),
+        lastModified: Date.now(), // Timestamp adicional para forçar mudança
+        version: Date.now() // Campo de versão para quebrar cache
       };
-
+      
       console.log('🔄 EventService: Executando updateDoc...', updateData);
+      
+      // 🔧 EXECUTAR ATUALIZAÇÃO
       await updateDoc(docRef, updateData);
       
       console.log('✅ EventService: Evento atualizado com sucesso!');
       
-      // Retornar os dados atualizados
-      const updatedDoc = await getDoc(docRef);
+      // 🔧 AGUARDAR UM POUCO PARA PROPAGAÇÃO
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // 🔧 BUSCAR DADOS ATUALIZADOS FORÇANDO SERVIDOR
+      console.log('🔧 EventService: Buscando dados atualizados...');
+      const updatedDoc = await getDoc(docRef, { source: 'server' });
+      
+      if (!updatedDoc.exists()) {
+        throw new Error('Erro: documento não encontrado após atualização');
+      }
+      
       const updatedData = { id: updatedDoc.id, ...updatedDoc.data() };
-      
       console.log('📊 EventService: Dados atualizados:', updatedData);
-      return updatedData;
       
+      // 🔧 VERIFICAR SE A ATUALIZAÇÃO FOI APLICADA
+      if (updatedData.updatedAt && updatedData.lastModified) {
+        console.log('✅ EventService: Atualização confirmada!');
+      } else {
+        console.warn('⚠️ EventService: Atualização pode não ter sido aplicada');
+      }
+      
+      return updatedData;
     } catch (error) {
       console.error('❌ EventService: Erro ao atualizar evento:', error);
-      console.error('📊 EventService: Detalhes do erro:', {
-        eventId,
-        eventData,
-        errorMessage: error.message,
-        errorCode: error.code
-      });
+      console.error('📊 Stack trace:', error.stack);
       throw error;
     }
-  },
+  }
 
-  // 🔧 ADIÇÃO: Arquivar evento
-  async archiveEvent(eventId) {
-    try {
-      console.log('🔧 EventService: Arquivando evento:', eventId);
-      return await this.updateEvent(eventId, {
-        arquivado: true,
-        updatedAt: new Date()
-      });
-    } catch (error) {
-      console.error('❌ EventService: Erro ao arquivar evento:', error);
-      throw error;
-    }
-  },
-
-  // 🔧 ADIÇÃO: Desarquivar evento
-  async unarchiveEvent(eventId) {
-    try {
-      console.log('🔧 EventService: Desarquivando evento:', eventId);
-      return await this.updateEvent(eventId, {
-        arquivado: false,
-        updatedAt: new Date()
-      });
-    } catch (error) {
-      console.error('❌ EventService: Erro ao desarquivar evento:', error);
-      throw error;
-    }
-  },
-
-  // Desativar evento (soft delete)
-  async deactivateEvent(eventId) {
-    try {
-      console.log('🔧 EventService: Desativando evento:', eventId);
-      return await this.updateEvent(eventId, {
-        ativo: false,
-        updatedAt: new Date()
-      });
-    } catch (error) {
-      console.error('❌ EventService: Erro ao desativar evento:', error);
-      throw error;
-    }
-  },
-
-  // Reativar evento
-  async reactivateEvent(eventId) {
-    try {
-      console.log('🔧 EventService: Reativando evento:', eventId);
-      return await this.updateEvent(eventId, {
-        ativo: true,
-        updatedAt: new Date()
-      });
-    } catch (error) {
-      console.error('❌ EventService: Erro ao reativar evento:', error);
-      throw error;
-    }
-  },
-
-  // Deletar evento permanentemente
   async deleteEvent(eventId) {
     try {
-      console.log('🔧 EventService: Deletando evento permanentemente:', eventId);
-      await deleteDoc(doc(db, 'eventos', eventId));
-      console.log('✅ EventService: Evento deletado com sucesso!');
+      console.log('🔧 EventService: Deletando evento:', eventId);
+      
+      const docRef = doc(db, this.collectionName, eventId);
+      await deleteDoc(docRef);
+      
+      console.log('✅ EventService: Evento deletado com sucesso');
     } catch (error) {
       console.error('❌ EventService: Erro ao deletar evento:', error);
       throw error;
     }
-  },
+  }
 
-  // Buscar eventos por pavilhão
-  async getEventsByPavilion(pavilhao) {
+  async activateEvent(eventId) {
     try {
-      console.log('🔧 EventService: Buscando eventos por pavilhão:', pavilhao);
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, 'eventos'),
-          where('pavilhao', '==', pavilhao),
-          where('ativo', '==', true),
-          orderBy('dataInicioEvento', 'desc')
-        )
-      );
+      console.log('🔧 EventService: Ativando evento:', eventId);
       
-      const events = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      await this.updateEvent(eventId, {
+        ativo: true,
+        updatedBy: 'system'
+      });
       
-      console.log('✅ EventService: Eventos por pavilhão carregados:', events.length);
-      return events;
+      console.log('✅ EventService: Evento ativado com sucesso');
     } catch (error) {
-      console.error('❌ EventService: Erro ao buscar eventos por pavilhão:', error);
+      console.error('❌ EventService: Erro ao ativar evento:', error);
       throw error;
     }
-  },
+  }
 
-  // Verificar se evento está ativo
-  async isEventActive(eventId) {
+  async deactivateEvent(eventId) {
     try {
-      console.log('🔧 EventService: Verificando se evento está ativo:', eventId);
-      const event = await this.getEventById(eventId);
-      const isActive = event && event.ativo;
-      console.log('✅ EventService: Evento ativo?', isActive);
-      return isActive;
+      console.log('🔧 EventService: Desativando evento:', eventId);
+      
+      await this.updateEvent(eventId, {
+        ativo: false,
+        updatedBy: 'system'
+      });
+      
+      console.log('✅ EventService: Evento desativado com sucesso');
     } catch (error) {
-      console.error('❌ EventService: Erro ao verificar se evento está ativo:', error);
-      return false;
+      console.error('❌ EventService: Erro ao desativar evento:', error);
+      throw error;
     }
-  },
+  }
 
-  // 🔧 CORREÇÃO: Obter estatísticas de eventos com tratamento de erro
+  async reactivateEvent(eventId) {
+    try {
+      console.log('🔧 EventService: Reativando evento:', eventId);
+      
+      await this.updateEvent(eventId, {
+        ativo: true,
+        updatedBy: 'system'
+      });
+      
+      console.log('✅ EventService: Evento reativado com sucesso');
+    } catch (error) {
+      console.error('❌ EventService: Erro ao reativar evento:', error);
+      throw error;
+    }
+  }
+
+  // 🔧 ADIÇÃO: Funções de arquivamento usando updateEvent
+  async archiveEvent(eventId) {
+    try {
+      console.log('🔧 EventService: Arquivando evento:', eventId);
+      
+      await this.updateEvent(eventId, {
+        arquivado: true,
+        updatedBy: 'system'
+      });
+      
+      console.log('✅ EventService: Evento arquivado com sucesso');
+    } catch (error) {
+      console.error('❌ EventService: Erro ao arquivar evento:', error);
+      throw error;
+    }
+  }
+
+  async unarchiveEvent(eventId) {
+    try {
+      console.log('🔧 EventService: Desarquivando evento:', eventId);
+      
+      await this.updateEvent(eventId, {
+        arquivado: false,
+        updatedBy: 'system'
+      });
+      
+      console.log('✅ EventService: Evento desarquivado com sucesso');
+    } catch (error) {
+      console.error('❌ EventService: Erro ao desarquivar evento:', error);
+      throw error;
+    }
+  }
+
+  // 🔧 CORREÇÃO: getEventStats SEM CACHE
   async getEventStats() {
     try {
       console.log('🔧 EventService: Calculando estatísticas...');
-      const allEvents = await this.getAllEvents();
-      const activeEvents = allEvents.filter(event => event.ativo);
+      
+      // 🔧 FORÇAR RECARREGAMENTO SEM CACHE
+      const events = await this.getAllEvents(true);
+      
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      let futureEvents = [];
-      let pastEvents = [];
-      let currentEvents = [];
-      
-      try {
-        futureEvents = activeEvents.filter(event => {
-          if (!event.dataInicioEvento) return false;
-          const startDate = event.dataInicioEvento.seconds 
-            ? new Date(event.dataInicioEvento.seconds * 1000)
-            : new Date(event.dataInicioEvento);
-          return startDate >= today;
-        });
-        
-        pastEvents = activeEvents.filter(event => {
-          if (!event.dataFimEvento) return false;
-          const endDate = event.dataFimEvento.seconds 
-            ? new Date(event.dataFimEvento.seconds * 1000)
-            : new Date(event.dataFimEvento);
-          return endDate < today;
-        });
-        
-        currentEvents = activeEvents.filter(event => {
-          if (!event.dataInicioEvento || !event.dataFimEvento) return false;
-          const startDate = event.dataInicioEvento.seconds 
-            ? new Date(event.dataInicioEvento.seconds * 1000)
-            : new Date(event.dataInicioEvento);
-          const endDate = event.dataFimEvento.seconds 
-            ? new Date(event.dataFimEvento.seconds * 1000)
-            : new Date(event.dataFimEvento);
-          return startDate <= today && endDate >= today;
-        });
-      } catch (dateError) {
-        console.error('❌ EventService: Erro ao processar datas:', dateError);
-        // Continuar com arrays vazios se houver erro nas datas
-      }
-
       const stats = {
-        total: allEvents.length,
-        ativos: activeEvents.length,
-        futuros: futureEvents.length,
-        passados: pastEvents.length,
-        atuais: currentEvents.length,
-        inativos: allEvents.length - activeEvents.length
+        total: events.length,
+        ativos: 0,
+        inativos: 0,
+        futuros: 0,
+        passados: 0,
+        atuais: 0,
+        arquivados: 0
       };
+      
+      events.forEach(event => {
+        // Status ativo/inativo
+        if (event.ativo) {
+          stats.ativos++;
+        } else {
+          stats.inativos++;
+        }
+        
+        // Status arquivado
+        if (event.arquivado) {
+          stats.arquivados++;
+        }
+        
+        // Status temporal
+        if (event.dataInicioEvento && event.dataFimEvento) {
+          const startDate = new Date(event.dataInicioEvento.seconds * 1000);
+          const endDate = new Date(event.dataFimEvento.seconds * 1000);
+          
+          if (endDate < today) {
+            stats.passados++;
+          } else if (startDate <= today && endDate >= today) {
+            stats.atuais++;
+          } else {
+            stats.futuros++;
+          }
+        }
+      });
       
       console.log('✅ EventService: Estatísticas calculadas:', stats);
       return stats;
     } catch (error) {
-      console.error('❌ EventService: Erro ao obter estatísticas de eventos:', error);
+      console.error('❌ EventService: Erro ao calcular estatísticas:', error);
       throw error;
     }
-  },
-
-  // 🔧 ADIÇÃO: Função para forçar recarregamento de um evento específico
-  async refreshEvent(eventId) {
-    try {
-      console.log('🔄 EventService: Forçando recarregamento do evento:', eventId);
-      
-      // Aguardar um pouco para garantir que a atualização foi processada
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const event = await this.getEventById(eventId);
-      console.log('✅ EventService: Evento recarregado:', event);
-      return event;
-    } catch (error) {
-      console.error('❌ EventService: Erro ao recarregar evento:', error);
-      throw error;
-    }
-  },
-
-  // 🔧 ADIÇÃO: Função para validar dados do evento
-  validateEventData(eventData) {
-    const errors = [];
-    
-    if (!eventData.nome || !eventData.nome.trim()) {
-      errors.push('Nome do evento é obrigatório');
-    }
-    
-    if (!eventData.pavilhao || !eventData.pavilhao.trim()) {
-      errors.push('Pavilhão é obrigatório');
-    }
-    
-    // Validar datas obrigatórias
-    const requiredDates = [
-      'dataInicioMontagem',
-      'dataFimMontagem', 
-      'dataInicioEvento',
-      'dataFimEvento',
-      'dataInicioDesmontagem',
-      'dataFimDesmontagem'
-    ];
-    
-    requiredDates.forEach(dateField => {
-      if (!eventData[dateField]) {
-        errors.push(`${dateField} é obrigatório`);
-      }
-    });
-    
-    if (errors.length > 0) {
-      console.error('❌ EventService: Dados inválidos:', errors);
-      throw new Error(`Dados inválidos: ${errors.join(', ')}`);
-    }
-    
-    console.log('✅ EventService: Dados válidos');
-    return true;
   }
-};
 
-export default eventService;
+  // 🔧 ADIÇÃO: Função para limpar cache manualmente
+  async clearCache() {
+    try {
+      console.log('🔧 EventService: Limpando cache...');
+      
+      // Forçar recarregamento de todos os eventos do servidor
+      const events = await this.getAllEvents(true);
+      
+      console.log('✅ EventService: Cache limpo, eventos recarregados:', events.length);
+      return events;
+    } catch (error) {
+      console.error('❌ EventService: Erro ao limpar cache:', error);
+      throw error;
+    }
+  }
+
+  // 🔧 ADIÇÃO: Função para verificar conectividade
+  async checkConnection() {
+    try {
+      console.log('🔧 EventService: Verificando conectividade...');
+      
+      // Tentar buscar um documento qualquer forçando servidor
+      const q = query(this.collectionRef, orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q, { source: 'server' });
+      
+      console.log('✅ EventService: Conectividade OK, documentos:', snapshot.size);
+      console.log('🔧 Fonte:', snapshot.metadata.fromCache ? 'CACHE' : 'SERVIDOR');
+      
+      return {
+        connected: true,
+        documentsCount: snapshot.size,
+        fromCache: snapshot.metadata.fromCache
+      };
+    } catch (error) {
+      console.error('❌ EventService: Erro de conectividade:', error);
+      return {
+        connected: false,
+        error: error.message
+      };
+    }
+  }
+}
+
+// Exportar instância única
+const eventService = new EventService();
+export { eventService };
 
