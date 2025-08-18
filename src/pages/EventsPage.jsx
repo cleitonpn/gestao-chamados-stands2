@@ -28,10 +28,16 @@ import {
   Users,
   BarChart3,
   Archive,
-  ArchiveRestore
+  ArchiveRestore,
+  RefreshCw,
+  Bug
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+// 🔧 IMPORTAÇÃO DIRETA DO FIREBASE PARA DEBUG
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 const EventsPage = () => {
   const { userProfile, user } = useAuth();
@@ -42,6 +48,10 @@ const EventsPage = () => {
   const [editingEvent, setEditingEvent] = useState(null);
   const [stats, setStats] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  
+  // 🔧 ADIÇÃO: Estados para debug
+  const [debugInfo, setDebugInfo] = useState('');
+  const [lastSaveAttempt, setLastSaveAttempt] = useState(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -112,6 +122,7 @@ const EventsPage = () => {
       observacoes: ''
     });
     setError('');
+    setDebugInfo('');
   };
 
   // 🔧 CORREÇÃO: Função de edição melhorada para lidar com diferentes formatos de data
@@ -243,7 +254,67 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 CORREÇÃO RADICAL: Nova abordagem para forçar atualização
+  // 🔧 FUNÇÃO DE DEBUG DIRETO NO FIREBASE
+  const debugFirebaseUpdate = async (eventId, eventData) => {
+    try {
+      console.log('🐛 DEBUG: Iniciando atualização direta no Firebase...');
+      console.log('🐛 DEBUG: Event ID:', eventId);
+      console.log('🐛 DEBUG: Event Data:', eventData);
+      
+      // Verificar se o documento existe
+      const docRef = doc(db, 'eventos', eventId);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        throw new Error(`Documento ${eventId} não existe`);
+      }
+      
+      console.log('🐛 DEBUG: Documento existe, dados atuais:', docSnap.data());
+      
+      // Preparar dados para atualização com logs detalhados
+      const updateData = {};
+      
+      // Adicionar cada campo individualmente com log
+      Object.keys(eventData).forEach(key => {
+        const value = eventData[key];
+        console.log(`🐛 DEBUG: Adicionando campo ${key}:`, value, typeof value);
+        updateData[key] = value;
+      });
+      
+      // Adicionar updatedAt
+      updateData.updatedAt = new Date();
+      updateData.updatedBy = user.uid;
+      updateData.debugTimestamp = Date.now();
+      
+      console.log('🐛 DEBUG: Dados finais para updateDoc:', updateData);
+      
+      // Executar updateDoc
+      console.log('🐛 DEBUG: Executando updateDoc...');
+      await updateDoc(docRef, updateData);
+      console.log('🐛 DEBUG: updateDoc executado com sucesso!');
+      
+      // Verificar se foi salvo
+      console.log('🐛 DEBUG: Verificando se foi salvo...');
+      const updatedDocSnap = await getDoc(docRef);
+      const updatedData = updatedDocSnap.data();
+      console.log('🐛 DEBUG: Dados após atualização:', updatedData);
+      
+      // Comparar dados específicos
+      console.log('🐛 DEBUG: Comparação de datas:');
+      console.log('  - dataInicioMontagem enviada:', eventData.dataInicioMontagem);
+      console.log('  - dataInicioMontagem salva:', updatedData.dataInicioMontagem);
+      console.log('  - dataInicioEvento enviada:', eventData.dataInicioEvento);
+      console.log('  - dataInicioEvento salva:', updatedData.dataInicioEvento);
+      
+      return updatedData;
+      
+    } catch (error) {
+      console.error('🐛 DEBUG: Erro na atualização direta:', error);
+      throw error;
+    }
+  };
+
+  // 🔧 CORREÇÃO RADICAL: Nova abordagem com debug completo
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -254,7 +325,9 @@ const EventsPage = () => {
     try {
       setFormLoading(true);
       setError('');
+      setDebugInfo('Iniciando salvamento...');
 
+      // 🔧 PREPARAR DADOS COM DEBUG DETALHADO
       const eventData = {
         nome: formData.nome.trim(),
         pavilhao: formData.pavilhao.trim(),
@@ -268,56 +341,61 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO');
-      console.log('📊 Dados do evento para salvar:', eventData);
+      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM DEBUG');
+      console.log('📊 Dados do formulário (strings):', formData);
+      console.log('📊 Dados convertidos (objetos Date):', eventData);
+      
+      // Validar se as datas foram convertidas corretamente
+      Object.keys(eventData).forEach(key => {
+        if (key.includes('data')) {
+          const dateValue = eventData[key];
+          console.log(`📅 ${key}:`, {
+            original: formData[key],
+            converted: dateValue,
+            isValid: dateValue instanceof Date && !isNaN(dateValue),
+            timestamp: dateValue.getTime()
+          });
+        }
+      });
+
+      setLastSaveAttempt({
+        timestamp: new Date().toLocaleTimeString(),
+        data: { ...eventData }
+      });
 
       if (editingEvent) {
         console.log('✏️ MODO EDIÇÃO - Evento ID:', editingEvent.id);
-        console.log('📋 Dados originais:', editingEvent);
-        console.log('📝 Dados novos:', eventData);
+        setDebugInfo(`Editando evento ${editingEvent.id}...`);
         
-        // 🔧 ESTRATÉGIA 1: Tentar updateEvent padrão
         try {
-          console.log('🔄 Tentativa 1: updateEvent padrão...');
-          await eventService.updateEvent(editingEvent.id, {
-            ...eventData,
-            updatedAt: new Date(),
-            updatedBy: user.uid,
-            // Forçar mudança adicionando timestamp único
-            lastModified: Date.now()
-          });
-          console.log('✅ updateEvent padrão funcionou!');
-        } catch (updateError) {
-          console.error('❌ updateEvent padrão falhou:', updateError);
+          // 🔧 ESTRATÉGIA 1: Usar eventService padrão
+          console.log('🔄 Tentativa 1: eventService.updateEvent...');
+          setDebugInfo('Tentativa 1: eventService.updateEvent...');
           
-          // 🔧 ESTRATÉGIA 2: Tentar deletar e recriar (CUIDADO!)
-          console.log('🔄 Tentativa 2: Recriação forçada...');
+          const result = await eventService.updateEvent(editingEvent.id, eventData);
+          console.log('✅ eventService.updateEvent funcionou:', result);
+          setDebugInfo('eventService.updateEvent funcionou!');
           
-          // Salvar dados originais importantes
-          const originalData = {
-            id: editingEvent.id,
-            createdAt: editingEvent.createdAt,
-            createdBy: editingEvent.createdBy,
-            ativo: editingEvent.ativo !== undefined ? editingEvent.ativo : true,
-            arquivado: editingEvent.arquivado !== undefined ? editingEvent.arquivado : false
-          };
+        } catch (serviceError) {
+          console.error('❌ eventService.updateEvent falhou:', serviceError);
+          setDebugInfo(`eventService falhou: ${serviceError.message}`);
           
-          // Tentar atualização forçada com merge completo
-          await eventService.updateEvent(editingEvent.id, {
-            ...originalData,
-            ...eventData,
-            updatedAt: new Date(),
-            updatedBy: user.uid,
-            forceUpdate: true,
-            version: Date.now()
-          });
+          // 🔧 ESTRATÉGIA 2: Debug direto no Firebase
+          console.log('🔄 Tentativa 2: Debug direto no Firebase...');
+          setDebugInfo('Tentativa 2: Debug direto no Firebase...');
           
-          console.log('✅ Recriação forçada funcionou!');
+          const debugResult = await debugFirebaseUpdate(editingEvent.id, eventData);
+          console.log('✅ Debug direto funcionou:', debugResult);
+          setDebugInfo('Debug direto funcionou!');
         }
         
         console.log('✅ EVENTO ATUALIZADO COM SUCESSO');
+        setDebugInfo('Evento atualizado com sucesso!');
+        
       } else {
         console.log('➕ MODO CRIAÇÃO - Novo evento');
+        setDebugInfo('Criando novo evento...');
+        
         const newEvent = await eventService.createEvent({
           ...eventData,
           createdAt: new Date(),
@@ -326,6 +404,7 @@ const EventsPage = () => {
           arquivado: false
         });
         console.log('✅ NOVO EVENTO CRIADO:', newEvent.id);
+        setDebugInfo(`Novo evento criado: ${newEvent.id}`);
 
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
@@ -341,42 +420,10 @@ const EventsPage = () => {
         }
       }
 
-      // 🔧 RECARREGAMENTO FORÇADO E MÚLTIPLO
-      console.log('🔄 RECARREGANDO DADOS (Tentativa 1)...');
-      await loadEvents();
-      
-      // Aguardar mais tempo para garantir sincronização
-      console.log('⏳ Aguardando sincronização (1s)...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      console.log('🔄 RECARREGANDO DADOS (Tentativa 2)...');
+      // Recarregar dados
+      setDebugInfo('Recarregando dados...');
       await loadEvents();
       await loadStats();
-      
-      // Aguardar mais um pouco
-      console.log('⏳ Aguardando sincronização final (500ms)...');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 🔧 FORÇAR ATUALIZAÇÃO DO ESTADO LOCAL
-      if (editingEvent) {
-        console.log('🔄 Atualizando estado local...');
-        setEvents(prevEvents => {
-          const updatedEvents = prevEvents.map(event => {
-            if (event.id === editingEvent.id) {
-              console.log('🔄 Atualizando evento no estado:', event.id);
-              return {
-                ...event,
-                ...eventData,
-                updatedAt: new Date(),
-                updatedBy: user.uid
-              };
-            }
-            return event;
-          });
-          console.log('✅ Estado local atualizado');
-          return updatedEvents;
-        });
-      }
       
       // Fechar modal e limpar formulário
       setShowForm(false);
@@ -384,14 +431,14 @@ const EventsPage = () => {
       resetForm();
       
       console.log('🎉 PROCESSO DE SALVAMENTO CONCLUÍDO COM SUCESSO!');
-      
-      // Mostrar mensagem de sucesso
-      setError('');
+      setDebugInfo('Processo concluído com sucesso!');
       
     } catch (error) {
       console.error('💥 ERRO CRÍTICO NO SALVAMENTO:', error);
       console.error('📊 Stack trace:', error.stack);
-      setError(`Erro crítico ao salvar evento: ${error.message || 'Erro desconhecido'}`);
+      const errorMsg = `Erro crítico: ${error.message || 'Erro desconhecido'}`;
+      setError(errorMsg);
+      setDebugInfo(errorMsg);
     } finally {
       setFormLoading(false);
     }
@@ -572,6 +619,28 @@ const EventsPage = () => {
         <Alert variant="destructive" className="mb-6">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* 🔧 ADIÇÃO: Painel de Debug */}
+      {(debugInfo || lastSaveAttempt) && (
+        <Alert className="mb-6">
+          <Bug className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Debug Info:</strong><br />
+            {debugInfo && <div>Status: {debugInfo}</div>}
+            {lastSaveAttempt && (
+              <div className="mt-2">
+                <strong>Última tentativa de salvamento:</strong> {lastSaveAttempt.timestamp}<br />
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-sm">Ver dados enviados</summary>
+                  <pre className="text-xs mt-1 bg-gray-100 p-2 rounded overflow-auto">
+                    {JSON.stringify(lastSaveAttempt.data, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            )}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -766,11 +835,11 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingEvent ? `Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
+              {editingEvent ? `🐛 DEBUG: Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
             </DialogTitle>
             <DialogDescription>
               {editingEvent 
-                ? `Editando evento ID: ${editingEvent.id}. As alterações serão salvas permanentemente.`
+                ? `DEBUG MODE: Editando evento ID: ${editingEvent.id}. Logs detalhados no console.`
                 : 'Preencha as informações do evento para automatizar o preenchimento de datas em projetos'
               }
             </DialogDescription>
@@ -787,12 +856,18 @@ const EventsPage = () => {
             {/* Debug Info para Edição */}
             {editingEvent && (
               <Alert>
-                <AlertCircle className="h-4 w-4" />
+                <Bug className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>Modo Edição Ativo</strong><br />
+                  <strong>🐛 DEBUG MODE ATIVO</strong><br />
                   ID: {editingEvent.id}<br />
                   Nome Original: {editingEvent.nome}<br />
-                  Pavilhão Original: {editingEvent.pavilhao}
+                  Pavilhão Original: {editingEvent.pavilhao}<br />
+                  <details className="mt-2">
+                    <summary className="cursor-pointer">Ver dados originais completos</summary>
+                    <pre className="text-xs mt-1 bg-gray-100 p-2 rounded overflow-auto">
+                      {JSON.stringify(editingEvent, null, 2)}
+                    </pre>
+                  </details>
                 </AlertDescription>
               </Alert>
             )}
@@ -959,10 +1034,10 @@ const EventsPage = () => {
                 {formLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {editingEvent ? 'Atualizando...' : 'Criando...'}
+                    {editingEvent ? '🐛 DEBUGANDO SALVAMENTO...' : 'Criando...'}
                   </>
                 ) : (
-                  editingEvent ? 'FORÇAR ATUALIZAÇÃO' : 'Criar Evento'
+                  editingEvent ? '🐛 DEBUG SALVAR' : 'Criar Evento'
                 )}
               </Button>
             </div>
