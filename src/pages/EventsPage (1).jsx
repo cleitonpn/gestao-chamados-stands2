@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { eventService } from '../services/eventService';
+// 🔔 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
+import notificationService from '../services/notificationService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +32,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 const EventsPage = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, user } = useAuth();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,7 +57,8 @@ const EventsPage = () => {
   const [formLoading, setFormLoading] = useState(false);
 
   useEffect(() => {
-    if (userProfile?.papel === 'administrador') {
+    // 🔧 CORREÇÃO: Verificar tanto 'funcao' quanto 'papel' para administrador
+    if (userProfile?.funcao === 'administrador' || userProfile?.papel === 'administrador') {
       loadEvents();
       loadStats();
     }
@@ -216,10 +219,26 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
+      let eventId;
       if (editingEvent) {
         await eventService.updateEvent(editingEvent.id, eventData);
+        eventId = editingEvent.id;
       } else {
-        await eventService.createEvent(eventData);
+        const newEvent = await eventService.createEvent(eventData);
+        eventId = newEvent.id;
+
+        // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
+        try {
+          console.log('🔔 Enviando notificação de novo evento cadastrado...');
+          await notificationService.notifyNewEvent(eventId, {
+            ...eventData,
+            id: eventId
+          }, user.uid);
+          console.log('✅ Notificação de novo evento enviada com sucesso');
+        } catch (notificationError) {
+          console.error('❌ Erro ao enviar notificação de novo evento:', notificationError);
+          // Não bloquear o fluxo se a notificação falhar
+        }
       }
 
       await loadEvents();
@@ -264,8 +283,30 @@ const EventsPage = () => {
 
   const formatDate = (date) => {
     if (!date) return '-';
-    const dateObj = date.seconds ? new Date(date.seconds * 1000) : new Date(date);
-    return format(dateObj, 'dd/MM/yyyy', { locale: ptBR });
+    
+    // Se é um timestamp do Firestore
+    if (date.seconds) {
+      const dateObj = new Date(date.seconds * 1000);
+      return dateObj.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit', 
+        year: '2-digit'
+      });
+    }
+    
+    // Se é uma string de data (YYYY-MM-DD), formatar diretamente
+    if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = date.split('-');
+      return `${day}/${month}/${year.slice(-2)}`;
+    }
+    
+    // Para outros casos
+    const dateObj = new Date(date);
+    return dateObj.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit'
+    });
   };
 
   const getEventStatus = (event) => {
@@ -290,14 +331,18 @@ const EventsPage = () => {
     return { label: 'Futuro', color: 'bg-yellow-100 text-yellow-800' };
   };
 
-  // Verificar se usuário é administrador
-  if (userProfile?.papel !== 'administrador') {
+  // 🔧 CORREÇÃO: Verificar se usuário é administrador (funcao OU papel)
+  if (userProfile?.funcao !== 'administrador' && userProfile?.papel !== 'administrador') {
     return (
       <div className="container mx-auto px-4 py-8">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             Acesso negado. Esta página é restrita a administradores.
+            <br />
+            <small className="text-gray-500 mt-2 block">
+              Debug: funcao="{userProfile?.funcao}", papel="{userProfile?.papel}"
+            </small>
           </AlertDescription>
         </Alert>
       </div>
@@ -679,4 +724,3 @@ const EventsPage = () => {
 };
 
 export default EventsPage;
-
