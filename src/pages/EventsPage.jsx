@@ -237,7 +237,7 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 CORREÇÃO: Função de submit melhorada
+  // 🔧 CORREÇÃO: Função de submit melhorada com logs detalhados
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -262,19 +262,32 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🔧 Salvando evento:', { editingEvent, eventData });
+      console.log('🔧 Dados do evento para salvar:', eventData);
 
       let eventId;
       if (editingEvent) {
         console.log('🔧 Atualizando evento existente:', editingEvent.id);
-        await eventService.updateEvent(editingEvent.id, eventData);
+        
+        // 🔧 CORREÇÃO: Forçar atualização completa
+        const updateResult = await eventService.updateEvent(editingEvent.id, {
+          ...eventData,
+          updatedAt: new Date(), // Adicionar timestamp de atualização
+          updatedBy: user.uid
+        });
+        
         eventId = editingEvent.id;
-        console.log('✅ Evento atualizado com sucesso');
+        console.log('✅ Evento atualizado:', updateResult);
       } else {
         console.log('🔧 Criando novo evento');
-        const newEvent = await eventService.createEvent(eventData);
+        const newEvent = await eventService.createEvent({
+          ...eventData,
+          createdAt: new Date(),
+          createdBy: user.uid,
+          ativo: true,
+          arquivado: false
+        });
         eventId = newEvent.id;
-        console.log('✅ Novo evento criado com sucesso:', eventId);
+        console.log('✅ Novo evento criado:', eventId);
 
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
@@ -290,7 +303,11 @@ const EventsPage = () => {
         }
       }
 
+      // 🔧 CORREÇÃO: Aguardar um pouco antes de recarregar para garantir que a atualização foi processada
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       // Recarregar dados
+      console.log('🔧 Recarregando eventos...');
       await loadEvents();
       await loadStats();
       
@@ -302,7 +319,7 @@ const EventsPage = () => {
       console.log('✅ Processo de salvamento concluído');
     } catch (error) {
       console.error('❌ Erro ao salvar evento:', error);
-      setError('Erro ao salvar evento. Tente novamente.');
+      setError(`Erro ao salvar evento: ${error.message || 'Tente novamente.'}`);
     } finally {
       setFormLoading(false);
     }
@@ -336,21 +353,26 @@ const EventsPage = () => {
     }
   };
 
-  // 🔧 CORREÇÃO: Função de arquivamento melhorada
+  // 🔧 CORREÇÃO: Função de arquivamento simplificada usando updateEvent
   const handleArchive = async (event) => {
     const action = event.arquivado ? 'desarquivar' : 'arquivar';
     if (window.confirm(`Tem certeza que deseja ${action} este evento?`)) {
       try {
-        if (event.arquivado) {
-          await eventService.unarchiveEvent(event.id);
-        } else {
-          await eventService.archiveEvent(event.id);
-        }
+        console.log(`🔧 ${action} evento:`, event.id);
+        
+        // 🔧 CORREÇÃO: Usar updateEvent em vez de funções específicas que podem não existir
+        await eventService.updateEvent(event.id, {
+          arquivado: !event.arquivado,
+          updatedAt: new Date(),
+          updatedBy: user.uid
+        });
+        
+        console.log(`✅ Evento ${action}do com sucesso`);
         await loadEvents();
         await loadStats();
       } catch (error) {
-        console.error(`Erro ao ${action} evento:`, error);
-        setError(`Erro ao ${action} evento`);
+        console.error(`❌ Erro ao ${action} evento:`, error);
+        setError(`Erro ao ${action} evento: ${error.message || 'Tente novamente.'}`);
       }
     }
   };
@@ -375,20 +397,22 @@ const EventsPage = () => {
     }
     
     // Para outros casos
-    const dateObj = new Date(date);
-    return dateObj.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: '2-digit'
-    });
+    try {
+      const dateObj = new Date(date);
+      return dateObj.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erro ao formatar data:', error, date);
+      return '-';
+    }
   };
 
   const getEventStatus = (event) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    const startDate = new Date(event.dataInicioEvento.seconds * 1000);
-    const endDate = new Date(event.dataFimEvento.seconds * 1000);
     
     if (!event.ativo) {
       return { label: 'Inativo', color: 'bg-gray-100 text-gray-800' };
@@ -397,6 +421,14 @@ const EventsPage = () => {
     if (event.arquivado) {
       return { label: 'Arquivado', color: 'bg-purple-100 text-purple-800' };
     }
+
+    // 🔧 CORREÇÃO: Verificar se as datas existem antes de usar
+    if (!event.dataInicioEvento || !event.dataFimEvento) {
+      return { label: 'Sem Data', color: 'bg-gray-100 text-gray-800' };
+    }
+    
+    const startDate = new Date(event.dataInicioEvento.seconds * 1000);
+    const endDate = new Date(event.dataFimEvento.seconds * 1000);
     
     if (endDate < today) {
       return { label: 'Finalizado', color: 'bg-blue-100 text-blue-800' };
