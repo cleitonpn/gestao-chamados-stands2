@@ -30,13 +30,15 @@ import {
   Archive,
   ArchiveRestore,
   RefreshCw,
-  Bug
+  Bug,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-// 🔧 IMPORTAÇÃO DIRETA DO FIREBASE PARA DEBUG
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+// 🔧 IMPORTAÇÃO DIRETA DO FIREBASE PARA VERIFICAÇÃO
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 const EventsPage = () => {
@@ -49,9 +51,9 @@ const EventsPage = () => {
   const [stats, setStats] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   
-  // 🔧 ADIÇÃO: Estados para debug
-  const [debugInfo, setDebugInfo] = useState('');
-  const [lastSaveAttempt, setLastSaveAttempt] = useState(null);
+  // 🔧 ADIÇÃO: Estados para verificação
+  const [verificationResult, setVerificationResult] = useState(null);
+  const [showVerification, setShowVerification] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -101,6 +103,101 @@ const EventsPage = () => {
     }
   };
 
+  // 🔧 FUNÇÃO PARA VERIFICAR DIRETAMENTE NO FIREBASE
+  const verifyFirebaseData = async (eventId, expectedData) => {
+    try {
+      console.log('🔍 VERIFICANDO DADOS DIRETAMENTE NO FIREBASE...');
+      console.log('🔍 Event ID:', eventId);
+      console.log('🔍 Dados esperados:', expectedData);
+      
+      // Buscar dados diretamente do Firebase
+      const docRef = doc(db, 'eventos', eventId);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        throw new Error(`Documento ${eventId} não encontrado`);
+      }
+      
+      const firebaseData = docSnap.data();
+      console.log('🔍 Dados no Firebase:', firebaseData);
+      
+      // Comparar cada campo de data
+      const comparison = {};
+      const dateFields = [
+        'dataInicioMontagem',
+        'dataFimMontagem', 
+        'dataInicioEvento',
+        'dataFimEvento',
+        'dataInicioDesmontagem',
+        'dataFimDesmontagem'
+      ];
+      
+      dateFields.forEach(field => {
+        const expected = expectedData[field];
+        const actual = firebaseData[field];
+        
+        // Converter para timestamps para comparação
+        const expectedTimestamp = expected ? expected.getTime() : null;
+        const actualTimestamp = actual ? (actual.seconds * 1000) : null;
+        
+        comparison[field] = {
+          expected: expected,
+          expectedTimestamp,
+          expectedFormatted: expected ? expected.toLocaleDateString('pt-BR') : 'N/A',
+          actual: actual,
+          actualTimestamp,
+          actualFormatted: actual ? new Date(actual.seconds * 1000).toLocaleDateString('pt-BR') : 'N/A',
+          matches: expectedTimestamp === actualTimestamp
+        };
+        
+        console.log(`🔍 ${field}:`, comparison[field]);
+      });
+      
+      // Verificar outros campos
+      const otherFields = ['nome', 'pavilhao', 'linkManual', 'observacoes'];
+      otherFields.forEach(field => {
+        comparison[field] = {
+          expected: expectedData[field],
+          actual: firebaseData[field],
+          matches: expectedData[field] === firebaseData[field]
+        };
+        console.log(`🔍 ${field}:`, comparison[field]);
+      });
+      
+      // Calcular estatísticas
+      const totalFields = Object.keys(comparison).length;
+      const matchingFields = Object.values(comparison).filter(comp => comp.matches).length;
+      const matchPercentage = Math.round((matchingFields / totalFields) * 100);
+      
+      const result = {
+        eventId,
+        timestamp: new Date().toLocaleTimeString(),
+        firebaseData,
+        expectedData,
+        comparison,
+        totalFields,
+        matchingFields,
+        matchPercentage,
+        success: matchPercentage === 100
+      };
+      
+      console.log('🔍 RESULTADO DA VERIFICAÇÃO:', result);
+      setVerificationResult(result);
+      setShowVerification(true);
+      
+      return result;
+      
+    } catch (error) {
+      console.error('🔍 ERRO NA VERIFICAÇÃO:', error);
+      setVerificationResult({
+        error: error.message,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      setShowVerification(true);
+      throw error;
+    }
+  };
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
       ...prev,
@@ -122,7 +219,8 @@ const EventsPage = () => {
       observacoes: ''
     });
     setError('');
-    setDebugInfo('');
+    setVerificationResult(null);
+    setShowVerification(false);
   };
 
   // 🔧 CORREÇÃO: Função de edição melhorada para lidar com diferentes formatos de data
@@ -254,67 +352,7 @@ const EventsPage = () => {
     return true;
   };
 
-  // 🔧 FUNÇÃO DE DEBUG DIRETO NO FIREBASE
-  const debugFirebaseUpdate = async (eventId, eventData) => {
-    try {
-      console.log('🐛 DEBUG: Iniciando atualização direta no Firebase...');
-      console.log('🐛 DEBUG: Event ID:', eventId);
-      console.log('🐛 DEBUG: Event Data:', eventData);
-      
-      // Verificar se o documento existe
-      const docRef = doc(db, 'eventos', eventId);
-      const docSnap = await getDoc(docRef);
-      
-      if (!docSnap.exists()) {
-        throw new Error(`Documento ${eventId} não existe`);
-      }
-      
-      console.log('🐛 DEBUG: Documento existe, dados atuais:', docSnap.data());
-      
-      // Preparar dados para atualização com logs detalhados
-      const updateData = {};
-      
-      // Adicionar cada campo individualmente com log
-      Object.keys(eventData).forEach(key => {
-        const value = eventData[key];
-        console.log(`🐛 DEBUG: Adicionando campo ${key}:`, value, typeof value);
-        updateData[key] = value;
-      });
-      
-      // Adicionar updatedAt
-      updateData.updatedAt = new Date();
-      updateData.updatedBy = user.uid;
-      updateData.debugTimestamp = Date.now();
-      
-      console.log('🐛 DEBUG: Dados finais para updateDoc:', updateData);
-      
-      // Executar updateDoc
-      console.log('🐛 DEBUG: Executando updateDoc...');
-      await updateDoc(docRef, updateData);
-      console.log('🐛 DEBUG: updateDoc executado com sucesso!');
-      
-      // Verificar se foi salvo
-      console.log('🐛 DEBUG: Verificando se foi salvo...');
-      const updatedDocSnap = await getDoc(docRef);
-      const updatedData = updatedDocSnap.data();
-      console.log('🐛 DEBUG: Dados após atualização:', updatedData);
-      
-      // Comparar dados específicos
-      console.log('🐛 DEBUG: Comparação de datas:');
-      console.log('  - dataInicioMontagem enviada:', eventData.dataInicioMontagem);
-      console.log('  - dataInicioMontagem salva:', updatedData.dataInicioMontagem);
-      console.log('  - dataInicioEvento enviada:', eventData.dataInicioEvento);
-      console.log('  - dataInicioEvento salva:', updatedData.dataInicioEvento);
-      
-      return updatedData;
-      
-    } catch (error) {
-      console.error('🐛 DEBUG: Erro na atualização direta:', error);
-      throw error;
-    }
-  };
-
-  // 🔧 CORREÇÃO RADICAL: Nova abordagem com debug completo
+  // 🔧 CORREÇÃO: Nova abordagem com verificação direta no Firebase
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -325,9 +363,8 @@ const EventsPage = () => {
     try {
       setFormLoading(true);
       setError('');
-      setDebugInfo('Iniciando salvamento...');
+      setVerificationResult(null);
 
-      // 🔧 PREPARAR DADOS COM DEBUG DETALHADO
       const eventData = {
         nome: formData.nome.trim(),
         pavilhao: formData.pavilhao.trim(),
@@ -341,61 +378,29 @@ const EventsPage = () => {
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM DEBUG');
-      console.log('📊 Dados do formulário (strings):', formData);
-      console.log('📊 Dados convertidos (objetos Date):', eventData);
-      
-      // Validar se as datas foram convertidas corretamente
-      Object.keys(eventData).forEach(key => {
-        if (key.includes('data')) {
-          const dateValue = eventData[key];
-          console.log(`📅 ${key}:`, {
-            original: formData[key],
-            converted: dateValue,
-            isValid: dateValue instanceof Date && !isNaN(dateValue),
-            timestamp: dateValue.getTime()
-          });
-        }
-      });
-
-      setLastSaveAttempt({
-        timestamp: new Date().toLocaleTimeString(),
-        data: { ...eventData }
-      });
+      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM VERIFICAÇÃO');
+      console.log('📊 Dados para salvar:', eventData);
 
       if (editingEvent) {
         console.log('✏️ MODO EDIÇÃO - Evento ID:', editingEvent.id);
-        setDebugInfo(`Editando evento ${editingEvent.id}...`);
         
-        try {
-          // 🔧 ESTRATÉGIA 1: Usar eventService padrão
-          console.log('🔄 Tentativa 1: eventService.updateEvent...');
-          setDebugInfo('Tentativa 1: eventService.updateEvent...');
-          
-          const result = await eventService.updateEvent(editingEvent.id, eventData);
-          console.log('✅ eventService.updateEvent funcionou:', result);
-          setDebugInfo('eventService.updateEvent funcionou!');
-          
-        } catch (serviceError) {
-          console.error('❌ eventService.updateEvent falhou:', serviceError);
-          setDebugInfo(`eventService falhou: ${serviceError.message}`);
-          
-          // 🔧 ESTRATÉGIA 2: Debug direto no Firebase
-          console.log('🔄 Tentativa 2: Debug direto no Firebase...');
-          setDebugInfo('Tentativa 2: Debug direto no Firebase...');
-          
-          const debugResult = await debugFirebaseUpdate(editingEvent.id, eventData);
-          console.log('✅ Debug direto funcionou:', debugResult);
-          setDebugInfo('Debug direto funcionou!');
-        }
+        // Salvar usando eventService
+        console.log('💾 Salvando via eventService...');
+        const result = await eventService.updateEvent(editingEvent.id, eventData);
+        console.log('✅ EventService retornou:', result);
         
-        console.log('✅ EVENTO ATUALIZADO COM SUCESSO');
-        setDebugInfo('Evento atualizado com sucesso!');
+        // Aguardar um pouco para garantir propagação
+        console.log('⏳ Aguardando propagação (2s)...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Verificar diretamente no Firebase
+        console.log('🔍 Verificando dados no Firebase...');
+        await verifyFirebaseData(editingEvent.id, eventData);
+        
+        console.log('✅ EVENTO ATUALIZADO E VERIFICADO');
         
       } else {
         console.log('➕ MODO CRIAÇÃO - Novo evento');
-        setDebugInfo('Criando novo evento...');
-        
         const newEvent = await eventService.createEvent({
           ...eventData,
           createdAt: new Date(),
@@ -404,7 +409,6 @@ const EventsPage = () => {
           arquivado: false
         });
         console.log('✅ NOVO EVENTO CRIADO:', newEvent.id);
-        setDebugInfo(`Novo evento criado: ${newEvent.id}`);
 
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
@@ -421,24 +425,15 @@ const EventsPage = () => {
       }
 
       // Recarregar dados
-      setDebugInfo('Recarregando dados...');
       await loadEvents();
       await loadStats();
       
-      // Fechar modal e limpar formulário
-      setShowForm(false);
-      setEditingEvent(null);
-      resetForm();
-      
-      console.log('🎉 PROCESSO DE SALVAMENTO CONCLUÍDO COM SUCESSO!');
-      setDebugInfo('Processo concluído com sucesso!');
+      console.log('🎉 PROCESSO CONCLUÍDO COM SUCESSO!');
       
     } catch (error) {
       console.error('💥 ERRO CRÍTICO NO SALVAMENTO:', error);
       console.error('📊 Stack trace:', error.stack);
-      const errorMsg = `Erro crítico: ${error.message || 'Erro desconhecido'}`;
-      setError(errorMsg);
-      setDebugInfo(errorMsg);
+      setError(`Erro crítico ao salvar evento: ${error.message || 'Erro desconhecido'}`);
     } finally {
       setFormLoading(false);
     }
@@ -622,25 +617,57 @@ const EventsPage = () => {
         </Alert>
       )}
 
-      {/* 🔧 ADIÇÃO: Painel de Debug */}
-      {(debugInfo || lastSaveAttempt) && (
-        <Alert className="mb-6">
-          <Bug className="h-4 w-4" />
-          <AlertDescription>
-            <strong>Debug Info:</strong><br />
-            {debugInfo && <div>Status: {debugInfo}</div>}
-            {lastSaveAttempt && (
-              <div className="mt-2">
-                <strong>Última tentativa de salvamento:</strong> {lastSaveAttempt.timestamp}<br />
-                <details className="mt-1">
-                  <summary className="cursor-pointer text-sm">Ver dados enviados</summary>
-                  <pre className="text-xs mt-1 bg-gray-100 p-2 rounded overflow-auto">
-                    {JSON.stringify(lastSaveAttempt.data, null, 2)}
-                  </pre>
-                </details>
-              </div>
+      {/* 🔧 ADIÇÃO: Painel de Verificação */}
+      {showVerification && verificationResult && (
+        <Alert className={`mb-6 ${verificationResult.success ? 'border-green-500' : 'border-red-500'}`}>
+          <div className="flex items-center">
+            {verificationResult.success ? (
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            ) : (
+              <XCircle className="h-4 w-4 text-red-500" />
             )}
-          </AlertDescription>
+            <AlertDescription className="ml-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <strong>🔍 Verificação Firebase ({verificationResult.timestamp})</strong><br />
+                  {verificationResult.error ? (
+                    <span className="text-red-600">Erro: {verificationResult.error}</span>
+                  ) : (
+                    <>
+                      <span className={verificationResult.success ? 'text-green-600' : 'text-red-600'}>
+                        {verificationResult.matchingFields}/{verificationResult.totalFields} campos corretos ({verificationResult.matchPercentage}%)
+                      </span>
+                      {!verificationResult.success && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-sm">Ver diferenças</summary>
+                          <div className="mt-2 text-xs">
+                            {Object.entries(verificationResult.comparison).map(([field, comp]) => (
+                              <div key={field} className={`p-1 ${comp.matches ? 'text-green-600' : 'text-red-600'}`}>
+                                <strong>{field}:</strong> {comp.matches ? '✅' : '❌'}<br />
+                                {!comp.matches && (
+                                  <>
+                                    Esperado: {comp.expectedFormatted || comp.expected}<br />
+                                    Atual: {comp.actualFormatted || comp.actual}<br />
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowVerification(false)}
+                >
+                  Fechar
+                </Button>
+              </div>
+            </AlertDescription>
+          </div>
         </Alert>
       )}
 
@@ -835,11 +862,11 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingEvent ? `🐛 DEBUG: Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
+              {editingEvent ? `🔍 VERIFICAR: Editar Evento: ${editingEvent.nome}` : 'Novo Evento'}
             </DialogTitle>
             <DialogDescription>
               {editingEvent 
-                ? `DEBUG MODE: Editando evento ID: ${editingEvent.id}. Logs detalhados no console.`
+                ? `MODO VERIFICAÇÃO: Editando evento ID: ${editingEvent.id}. Dados serão verificados diretamente no Firebase.`
                 : 'Preencha as informações do evento para automatizar o preenchimento de datas em projetos'
               }
             </DialogDescription>
@@ -850,25 +877,6 @@ const EventsPage = () => {
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {/* Debug Info para Edição */}
-            {editingEvent && (
-              <Alert>
-                <Bug className="h-4 w-4" />
-                <AlertDescription>
-                  <strong>🐛 DEBUG MODE ATIVO</strong><br />
-                  ID: {editingEvent.id}<br />
-                  Nome Original: {editingEvent.nome}<br />
-                  Pavilhão Original: {editingEvent.pavilhao}<br />
-                  <details className="mt-2">
-                    <summary className="cursor-pointer">Ver dados originais completos</summary>
-                    <pre className="text-xs mt-1 bg-gray-100 p-2 rounded overflow-auto">
-                      {JSON.stringify(editingEvent, null, 2)}
-                    </pre>
-                  </details>
-                </AlertDescription>
               </Alert>
             )}
 
@@ -1034,10 +1042,10 @@ const EventsPage = () => {
                 {formLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {editingEvent ? '🐛 DEBUGANDO SALVAMENTO...' : 'Criando...'}
+                    {editingEvent ? '🔍 SALVANDO E VERIFICANDO...' : 'Criando...'}
                   </>
                 ) : (
-                  editingEvent ? '🐛 DEBUG SALVAR' : 'Criar Evento'
+                  editingEvent ? '🔍 SALVAR E VERIFICAR' : 'Criar Evento'
                 )}
               </Button>
             </div>
