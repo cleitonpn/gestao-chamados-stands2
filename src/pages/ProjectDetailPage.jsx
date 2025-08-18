@@ -122,15 +122,33 @@ const ProjectDetailPage = () => {
     if (!timestamp) return 'Não definido';
     
     try {
-      const date = timestamp.seconds ? 
-        new Date(timestamp.seconds * 1000) : 
-        new Date(timestamp);
+      // Se é um timestamp do Firestore
+      if (timestamp.seconds) {
+        const date = new Date(timestamp.seconds * 1000);
+        return date.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: '2-digit'
+        });
+      }
       
+      // Se é uma string de data (YYYY-MM-DD), formatar diretamente
+      if (typeof timestamp === 'string' && timestamp.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = timestamp.split('-');
+        return `${day}/${month}/${year.slice(-2)}`;
+      }
+      
+      // Para outros casos
+      const date = new Date(timestamp);
       if (isNaN(date.getTime())) {
         return 'Data inválida';
       }
       
-      return date.toLocaleDateString('pt-BR');
+      return date.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+      });
     } catch (error) {
       console.error('Erro ao formatar data:', error);
       return 'Data inválida';
