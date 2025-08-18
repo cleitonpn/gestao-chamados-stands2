@@ -2,108 +2,115 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-// ✅ ÍCONE ADICIONADO PARA O BOTÃO
 import { ArrowLeft } from 'lucide-react';
 
-// Componente Card Simplificado
+// =====================
+// Helpers de Data / Fuso
+// =====================
+// Normaliza entradas de data: Firestore Timestamp, string ISO, 'YYYY-MM-DD', 'DD-MM-YYYY', Date
+const normalizeDateInput = (value) => {
+  if (!value) return null;
+
+  // Firestore Timestamp-like
+  if (typeof value === 'object' && value.seconds) {
+    return new Date(value.seconds * 1000);
+  }
+
+  // DD-MM-YYYY
+  if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
+    const [dd, mm, yyyy] = value.split('-');
+    // Força como UTC meia-noite para preservar o DIA exibido no BRT
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
+  }
+
+  // YYYY-MM-DD
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  // Outros formatos aceitos pelo Date (ISO etc.)
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d;
+};
+
+// Formata SEM mudar o dia, sempre considerando fuso America/Sao_Paulo e saída DD-MM-YYYY
+const formatDate = (timestamp) => {
+  if (!timestamp) return 'N/A';
+  const date = normalizeDateInput(timestamp);
+  if (!date) return 'N/A';
+
+  try {
+    // Pegamos os componentes no fuso de São Paulo via toLocaleString com opções
+    const day = date.toLocaleString('pt-BR', { day: '2-digit', timeZone: 'America/Sao_Paulo' });
+    const month = date.toLocaleString('pt-BR', { month: '2-digit', timeZone: 'America/Sao_Paulo' });
+    const year = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
+    return `${day}-${month}-${year}`; // DD-MM-YYYY
+  } catch (e) {
+    console.error('Erro ao formatar data:', e);
+    return 'N/A';
+  }
+};
+
+// Limites do dia para comparações de status
+const startOfDaySP = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  const copy = new Date(d.getTime());
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+};
+
+const endOfDaySP = (value) => {
+  const d = normalizeDateInput(value);
+  if (!d) return null;
+  const copy = new Date(d.getTime());
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+};
+
+// =====================
+// Componentes
+// =====================
 const ProjectCard = ({ project, onArchive, userRole }) => {
   const navigate = useNavigate();
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'N/A';
-    try {
-      // Se é um timestamp do Firestore
-      if (timestamp.seconds) {
-        const date = new Date(timestamp.seconds * 1000);
-        return date.toLocaleDateString('pt-BR', {
-          day: '2-digit',
-          month: '2-digit',
-          year: '2-digit'
-        });
-      }
-      
-      // Se é uma string de data (YYYY-MM-DD), formatar diretamente
-      if (typeof timestamp === 'string' && timestamp.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [year, month, day] = timestamp.split('-');
-        return `${day}/${month}/${year.slice(-2)}`;
-      }
-      
-      // Para outros casos
-      const date = new Date(timestamp);
-      return date.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: '2-digit'
-      });
-    } catch (error) {
-      return 'N/A';
-    }
-  };
 
   const getStatusInfo = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Verificar se está em montagem
+    // Montagem
     if (project.montagem?.dataInicio && project.montagem?.dataFim) {
-      const inicio = project.montagem.dataInicio.seconds ? 
-        new Date(project.montagem.dataInicio.seconds * 1000) : 
-        new Date(project.montagem.dataInicio);
-      const fim = project.montagem.dataFim.seconds ? 
-        new Date(project.montagem.dataFim.seconds * 1000) : 
-        new Date(project.montagem.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.montagem.dataInicio);
+      const fim = endOfDaySP(project.montagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Em Montagem', color: 'blue' };
       }
     }
 
-    // Verificar se está em evento
+    // Evento
     if (project.evento?.dataInicio && project.evento?.dataFim) {
-      const inicio = project.evento.dataInicio.seconds ? 
-        new Date(project.evento.dataInicio.seconds * 1000) : 
-        new Date(project.evento.dataInicio);
-      const fim = project.evento.dataFim.seconds ? 
-        new Date(project.evento.dataFim.seconds * 1000) : 
-        new Date(project.evento.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.evento.dataInicio);
+      const fim = endOfDaySP(project.evento.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Em Andamento', color: 'green' };
       }
     }
 
-    // Verificar se está em desmontagem
+    // Desmontagem
     if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
-      const inicio = project.desmontagem.dataInicio.seconds ? 
-        new Date(project.desmontagem.dataInicio.seconds * 1000) : 
-        new Date(project.desmontagem.dataInicio);
-      const fim = project.desmontagem.dataFim.seconds ? 
-        new Date(project.desmontagem.dataFim.seconds * 1000) : 
-        new Date(project.desmontagem.dataFim);
-      
-      inicio.setHours(0, 0, 0, 0);
-      fim.setHours(23, 59, 59, 999);
-      
-      if (today >= inicio && today <= fim) {
+      const inicio = startOfDaySP(project.desmontagem.dataInicio);
+      const fim = endOfDaySP(project.desmontagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) {
         return { label: 'Desmontagem', color: 'orange' };
       }
     }
 
-    // Verificar se é futuro
+    // Futuro
     const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
     if (dataInicio) {
-      const inicio = dataInicio.seconds ? 
-        new Date(dataInicio.seconds * 1000) : 
-        new Date(dataInicio);
-      inicio.setHours(0, 0, 0, 0);
-      
-      if (today < inicio) {
+      const inicio = startOfDaySP(dataInicio);
+      if (inicio && today < inicio) {
         return { label: 'Futuro', color: 'yellow' };
       }
     }
@@ -112,7 +119,6 @@ const ProjectCard = ({ project, onArchive, userRole }) => {
   };
 
   const handleViewClick = () => {
-    console.log('🔍 Navegando para projeto:', project.id);
     navigate(`/projeto/${project.id}`);
   };
 
@@ -238,15 +244,13 @@ const ProjectsPage = () => {
       setLoading(true);
       setError('');
       
-      console.log('🔄 Carregando projetos para usuário:', userProfile?.funcao);
-      
       const projectsData = await projectService.getAllProjects();
       
-      // Ordenar por data de início
+      // Ordenar por data de início (mais recentes primeiro)
       const sortedProjects = projectsData.sort((a, b) => {
-        const dateA = a.dataInicio?.seconds ? new Date(a.dataInicio.seconds * 1000) : new Date(a.dataInicio || 0);
-        const dateB = b.dataInicio?.seconds ? new Date(b.dataInicio.seconds * 1000) : new Date(b.dataInicio || 0);
-        return dateB - dateA;
+        const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
+        const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
+        return bDate - aDate;
       });
       
       setAllProjects(sortedProjects);
@@ -258,8 +262,6 @@ const ProjectsPage = () => {
           .filter(Boolean)
       )];
       setEvents(uniqueEvents);
-
-      console.log('✅ Projetos carregados:', sortedProjects.length);
 
     } catch (err) {
       console.error('Erro ao carregar projetos:', err);
@@ -274,66 +276,42 @@ const ProjectsPage = () => {
 
     let projectsToDisplay = [...allProjects];
 
-    // APLICAR PERMISSÕES BASEADAS NO PAPEL DO USUÁRIO
+    // Permissões por papel
     const userRole = userProfile.funcao;
-    const userId = userProfile.id || user.uid;
-
-    console.log('🔍 Filtrando projetos para:', userRole, 'ID:', userId);
+    const userId = userProfile.id || user?.uid;
 
     if (userRole === 'administrador' || userRole === 'gerente' || userRole === 'operador') {
-      // Administradores, gerentes e operadores veem todos os projetos
-      console.log('✅ Usuário pode ver todos os projetos');
+      // vê tudo
     } else if (userRole === 'consultor') {
-      // Consultores veem apenas projetos vinculados a eles
-      projectsToDisplay = projectsToDisplay.filter(project => {
-        const isAssigned = project.consultorId === userId || 
-                          project.consultorUid === userId ||
-                          project.consultorEmail === userProfile.email ||
-                          project.consultorNome === userProfile.nome;
-        
-        if (isAssigned) {
-          console.log('✅ Projeto vinculado ao consultor:', project.nome);
-        }
-        
-        return isAssigned;
-      });
-      console.log('🎯 Projetos filtrados para consultor:', projectsToDisplay.length);
+      projectsToDisplay = projectsToDisplay.filter(project => (
+        project.consultorId === userId || 
+        project.consultorUid === userId ||
+        project.consultorEmail === userProfile.email ||
+        project.consultorNome === userProfile.nome
+      ));
     } else if (userRole === 'produtor') {
-      // Produtores veem apenas projetos vinculados a eles
-      projectsToDisplay = projectsToDisplay.filter(project => {
-        const isAssigned = project.produtorId === userId || 
-                          project.produtorUid === userId ||
-                          project.produtorEmail === userProfile.email ||
-                          project.produtorNome === userProfile.nome;
-        
-        if (isAssigned) {
-          console.log('✅ Projeto vinculado ao produtor:', project.nome);
-        }
-        
-        return isAssigned;
-      });
-      console.log('👤 Projetos filtrados para produtor:', projectsToDisplay.length);
+      projectsToDisplay = projectsToDisplay.filter(project => (
+        project.produtorId === userId || 
+        project.produtorUid === userId ||
+        project.produtorEmail === userProfile.email ||
+        project.produtorNome === userProfile.nome
+      ));
     } else {
-      // Outros papéis não veem projetos
       projectsToDisplay = [];
-      console.log('❌ Papel sem permissão para ver projetos:', userRole);
     }
 
-    // Filtrar por status
+    // Status
     if (activeTab === 'ativos') {
       projectsToDisplay = projectsToDisplay.filter(p => p.status !== 'encerrado');
     } else {
       projectsToDisplay = projectsToDisplay.filter(p => p.status === 'encerrado');
     }
 
-    // Filtrar por evento
+    // Por evento
     if (selectedEvent && selectedEvent !== 'todos') {
-      projectsToDisplay = projectsToDisplay.filter(p => 
-        (p.feira || p.evento) === selectedEvent
-      );
+      projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
     }
-    
-    console.log('📊 Projetos finais após filtros:', projectsToDisplay.length);
+
     setFilteredProjects(projectsToDisplay);
   };
 
@@ -345,8 +323,6 @@ const ProjectsPage = () => {
         status: 'encerrado',
         dataEncerramento: new Date()
       });
-      
-      // Recarregar projetos
       loadProjects();
     } catch (error) {
       console.error('Erro ao encerrar projeto:', error);
@@ -354,7 +330,6 @@ const ProjectsPage = () => {
     }
   };
 
-  // Verificar se usuário tem permissão para criar projetos
   const canCreateProject = userProfile?.funcao === 'administrador';
 
   if (loading) {
@@ -370,8 +345,7 @@ const ProjectsPage = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      
-      {/* ✅ BOTÃO ADICIONADO AQUI */}
+      {/* Voltar */}
       <button
         onClick={() => navigate('/dashboard')}
         className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
@@ -458,12 +432,8 @@ const ProjectsPage = () => {
       {/* Content */}
       {filteredProjects.length === 0 ? (
         <div className="text-center py-16">
-          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">
-            ⚠️
-          </div>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            Nenhum projeto encontrado
-          </h3>
+          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum projeto encontrado</h3>
           <p className="mt-1 text-sm text-gray-500">
             {activeTab === 'ativos' 
               ? (userProfile?.funcao === 'consultor' || userProfile?.funcao === 'produtor' 
