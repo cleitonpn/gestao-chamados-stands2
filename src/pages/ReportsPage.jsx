@@ -227,27 +227,65 @@ const ReportsPage = () => {
       return acc;
     }, {});
 
-    // Análise de performance por usuário
+    // 🔧 ANÁLISE DE PERFORMANCE POR USUÁRIO CORRIGIDA
     const performanceByUser = allUsers.map(user => {
-      const userTickets = currentTickets.filter(t => 
-        t.criadoPor === user.id || 
-        t.atribuidoA === user.id || 
-        t.resolvidoPor === user.id
-      );
+      const userId = user.id || user.uid;
       
-      const created = userTickets.filter(t => t.criadoPor === user.id).length;
-      const assigned = userTickets.filter(t => t.atribuidoA === user.id && !['concluido', 'arquivado', 'cancelado'].includes(t.status)).length;
-      const resolved = userTickets.filter(t => t.resolvidoPor === user.id).length;
+      // Chamados criados por este usuário
+      const created = currentTickets.filter(t => t.criadoPor === userId).length;
+      
+      // Chamados atualmente atribuídos a este usuário (em aberto)
+      const assigned = currentTickets.filter(t => 
+        t.atribuidoA === userId && 
+        !['concluido', 'arquivado', 'cancelado'].includes(t.status)
+      ).length;
+      
+      // 🔧 CORREÇÃO: Chamados resolvidos por este usuário
+      // Verificar múltiplos campos onde pode estar a informação de quem resolveu
+      const resolved = currentTickets.filter(t => {
+        const isResolved = ['concluido', 'arquivado'].includes(t.status);
+        if (!isResolved) return false;
+        
+        // Verificar diferentes campos onde pode estar quem resolveu
+        return (
+          t.resolvidoPor === userId ||           // Campo específico de quem resolveu
+          t.concluídoPor === userId ||           // Campo alternativo
+          t.finalizadoPor === userId ||          // Outro campo possível
+          (t.atribuidoA === userId && isResolved) || // Se estava atribuído e foi resolvido
+          // Verificar no histórico de status se este usuário marcou como concluído
+          (t.statusHistory && t.statusHistory.some(h => 
+            h.changedBy === userId && 
+            ['concluido', 'arquivado'].includes(h.status)
+          ))
+        );
+      }).length;
+      
+      const total = created + assigned + resolved;
       
       return {
+        id: userId,
         nome: user.nome,
         funcao: user.funcao || user.papel || 'N/A',
         created,
         assigned,
         resolved,
-        total: created + assigned + resolved
+        total
       };
     }).filter(u => u.total > 0).sort((a, b) => b.total - a.total);
+
+    // 🔧 DEBUG: Log para verificar contagem
+    console.log('🔧 DEBUG Performance por Usuário:', performanceByUser);
+    
+    // Verificar alguns chamados resolvidos para debug
+    const resolvedTickets = currentTickets.filter(t => ['concluido', 'arquivado'].includes(t.status));
+    console.log('🔧 DEBUG Chamados Resolvidos:', resolvedTickets.map(t => ({
+      titulo: t.titulo,
+      status: t.status,
+      resolvidoPor: t.resolvidoPor,
+      concluídoPor: t.concluídoPor,
+      atribuidoA: t.atribuidoA,
+      statusHistory: t.statusHistory
+    })));
 
     return {
       openTicketsAnalysis,
@@ -827,7 +865,7 @@ const ReportsPage = () => {
           </Card>
         )}
 
-        {/* 🔧 SEÇÃO: PERFORMANCE POR USUÁRIO */}
+        {/* 🔧 SEÇÃO: PERFORMANCE POR USUÁRIO CORRIGIDA */}
         {flowAnalysis.performanceByUser?.length > 0 && (
           <Card>
             <CardHeader>
@@ -836,7 +874,7 @@ const ReportsPage = () => {
                 Performance por Usuário
               </CardTitle>
               <CardDescription>
-                Análise de produtividade e envolvimento nos chamados
+                Análise de produtividade e envolvimento nos chamados (contagem corrigida)
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -861,13 +899,17 @@ const ReportsPage = () => {
                         </td>
                         <td className="p-2 text-center">{user.created}</td>
                         <td className="p-2 text-center">
-                          {user.assigned > 0 && (
+                          {user.assigned > 0 ? (
                             <Badge variant="destructive">{user.assigned}</Badge>
+                          ) : (
+                            <span className="text-gray-400">0</span>
                           )}
                         </td>
                         <td className="p-2 text-center">
-                          {user.resolved > 0 && (
-                            <Badge variant="default">{user.resolved}</Badge>
+                          {user.resolved > 0 ? (
+                            <Badge variant="default" className="bg-green-600">{user.resolved}</Badge>
+                          ) : (
+                            <span className="text-gray-400">0</span>
                           )}
                         </td>
                         <td className="p-2 text-center font-bold">{user.total}</td>
@@ -875,6 +917,14 @@ const ReportsPage = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mt-4 text-sm text-gray-600">
+                <p><strong>Legenda:</strong></p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li><strong>Criados:</strong> Chamados abertos por este usuário</li>
+                  <li><strong>Atribuídos:</strong> Chamados atualmente sob responsabilidade deste usuário (em aberto)</li>
+                  <li><strong>Resolvidos:</strong> Chamados concluídos/arquivados por este usuário</li>
+                </ul>
               </div>
             </CardContent>
           </Card>
