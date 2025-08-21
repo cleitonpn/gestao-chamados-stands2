@@ -15,7 +15,8 @@ import { Badge } from '@/components/ui/badge';
 import { 
   ArrowLeft, Download, FileText, BarChart3, Calendar, Loader2, Eye,
   Filter, Search, X as XIcon, Building, PartyPopper, User, Clock,
-  AlertTriangle, CheckCircle, Users, Target, TrendingUp
+  AlertTriangle, CheckCircle, Users, Target, TrendingUp, Copy,
+  MessageSquare, Timer, History
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Legend as RechartsLegend } from 'recharts';
 
@@ -33,6 +34,7 @@ const ReportsPage = () => {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [reportPreview, setReportPreview] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
   
   // Estados para filtros e dados filtrados
   const [filters, setFilters] = useState({
@@ -79,11 +81,87 @@ const ReportsPage = () => {
     }
   };
 
+  // 🔧 FUNÇÃO PARA COPIAR CONTEÚDO DO PREVIEW
+  const handleCopyPreview = async () => {
+    try {
+      await navigator.clipboard.writeText(reportPreview);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (error) {
+      console.error('Erro ao copiar:', error);
+      // Fallback para navegadores mais antigos
+      const textArea = document.createElement('textarea');
+      textArea.value = reportPreview;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
+
   // 🔧 FUNÇÃO PARA OBTER INFORMAÇÕES DO USUÁRIO
   const getUserInfo = (userId) => {
     if (!userId) return { nome: 'Não definido', funcao: 'N/A' };
     const user = allUsers.find(u => u.id === userId || u.uid === userId);
     return user ? { nome: user.nome, funcao: user.funcao || user.papel || 'N/A' } : { nome: 'Usuário não encontrado', funcao: 'N/A' };
+  };
+
+  // 🔧 FUNÇÃO PARA ANALISAR TEMPO POR STATUS
+  const analyzeStatusTiming = (ticket) => {
+    const statusHistory = ticket.statusHistory || [];
+    const statusTiming = [];
+    
+    if (statusHistory.length === 0) {
+      // Se não há histórico, calcular baseado na data de criação
+      const createdAt = ticket.createdAt?.toDate() || new Date();
+      const now = new Date();
+      const daysInCurrentStatus = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+      
+      statusTiming.push({
+        status: ticket.status || 'aberto',
+        startDate: createdAt,
+        endDate: now,
+        days: daysInCurrentStatus,
+        isCurrent: true
+      });
+    } else {
+      // Analisar histórico de status
+      for (let i = 0; i < statusHistory.length; i++) {
+        const currentStatus = statusHistory[i];
+        const nextStatus = statusHistory[i + 1];
+        
+        const startDate = currentStatus.timestamp?.toDate() || new Date();
+        const endDate = nextStatus ? nextStatus.timestamp?.toDate() : new Date();
+        const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+        
+        statusTiming.push({
+          status: currentStatus.status,
+          startDate,
+          endDate,
+          days: Math.max(days, 0),
+          isCurrent: !nextStatus,
+          changedBy: getUserInfo(currentStatus.changedBy)
+        });
+      }
+    }
+    
+    return statusTiming;
+  };
+
+  // 🔧 FUNÇÃO PARA OBTER HISTÓRICO DE MENSAGENS
+  const getTicketMessages = async (ticketId) => {
+    try {
+      // Assumindo que existe um método para buscar mensagens
+      const messages = await ticketService.getTicketMessages(ticketId);
+      return messages || [];
+    } catch (error) {
+      console.error('Erro ao buscar mensagens:', error);
+      // Fallback: tentar obter do campo messages do ticket
+      const ticket = tickets.find(t => t.id === ticketId);
+      return ticket?.messages || ticket?.chat || [];
+    }
   };
 
   // 🔧 FUNÇÃO PARA ANALISAR FLUXO DOS CHAMADOS
@@ -96,6 +174,7 @@ const ReportsPage = () => {
       const createdBy = getUserInfo(ticket.criadoPor);
       const currentArea = ticket.area || 'Área não definida';
       const currentUser = ticket.atribuidoA ? getUserInfo(ticket.atribuidoA) : null;
+      const statusTiming = analyzeStatusTiming(ticket);
       
       return {
         id: ticket.id,
@@ -106,7 +185,8 @@ const ReportsPage = () => {
         currentUser: currentUser,
         createdAt: ticket.createdAt,
         isExtra: ticket.isExtra || false,
-        projeto: projects.find(p => p.id === ticket.projetoId)?.nome || 'Projeto não encontrado'
+        projeto: projects.find(p => p.id === ticket.projetoId)?.nome || 'Projeto não encontrado',
+        statusTiming: statusTiming
       };
     });
 
@@ -116,6 +196,7 @@ const ReportsPage = () => {
       const executedBy = ticket.resolvidoPor ? getUserInfo(ticket.resolvidoPor) : 
                         ticket.atribuidoA ? getUserInfo(ticket.atribuidoA) : 
                         { nome: 'Não identificado', funcao: 'N/A' };
+      const statusTiming = analyzeStatusTiming(ticket);
       
       return {
         id: ticket.id,
@@ -126,7 +207,8 @@ const ReportsPage = () => {
         createdAt: ticket.createdAt,
         resolvedAt: ticket.resolvidoEm || ticket.updatedAt,
         isExtra: ticket.isExtra || false,
-        projeto: projects.find(p => p.id === ticket.projetoId)?.nome || 'Projeto não encontrado'
+        projeto: projects.find(p => p.id === ticket.projetoId)?.nome || 'Projeto não encontrado',
+        statusTiming: statusTiming
       };
     });
 
@@ -266,9 +348,9 @@ const ReportsPage = () => {
     setSearchTerm('');
   };
 
-  // 🔧 FUNÇÃO MELHORADA PARA GERAR RELATÓRIO COM FLUXO
-  const generateGeneralReportMarkdown = () => {
-      let markdown = `# Relatório Geral com Análise de Fluxo\n\n`;
+  // 🔧 FUNÇÃO MELHORADA PARA GERAR RELATÓRIO COM TODAS AS FUNCIONALIDADES
+  const generateGeneralReportMarkdown = async () => {
+      let markdown = `# Relatório Completo com Análise de Fluxo\n\n`;
       markdown += `**Período:** ${filters.dateRange.from || 'Início'} a ${filters.dateRange.to || 'Fim'}\n`;
       markdown += `**Gerado em:** ${new Date().toLocaleString('pt-BR')}\n\n`;
       
@@ -286,14 +368,15 @@ const ReportsPage = () => {
       markdown += `* **Chamados Extras:** ${kpiStats.extraTickets}\n`;
       markdown += `* **Taxa de Resolução:** ${kpiStats.resolutionRate?.toFixed(1)}%\n`;
 
-      // 🔧 SEÇÃO DE ANÁLISE DE FLUXO - CHAMADOS ABERTOS
+      // 🔧 SEÇÃO DE ANÁLISE DE FLUXO - CHAMADOS ABERTOS COM TEMPO POR STATUS
       if (flowAnalysis.openTicketsAnalysis?.length > 0) {
-        markdown += `\n---\n\n## 🚨 Chamados em Aberto - Análise de Gargalos\n\n`;
-        markdown += `### Onde estão parados os chamados:\n\n`;
+        markdown += `\n---\n\n## 🚨 Chamados em Aberto - Análise Detalhada\n\n`;
         
-        flowAnalysis.openTicketsAnalysis.forEach(ticket => {
+        for (const ticket of flowAnalysis.openTicketsAnalysis) {
           const daysOpen = ticket.createdAt ? Math.floor((new Date() - ticket.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 0;
-          markdown += `**${ticket.titulo}** ${ticket.isExtra ? '(EXTRA)' : ''}\n`;
+          
+          markdown += `### ${ticket.titulo} ${ticket.isExtra ? '(EXTRA)' : ''}\n\n`;
+          markdown += `**Informações Gerais:**\n`;
           markdown += `- **Aberto por:** ${ticket.createdBy.nome} (${ticket.createdBy.funcao})\n`;
           markdown += `- **Parado na área:** ${ticket.currentArea}\n`;
           if (ticket.currentUser) {
@@ -301,11 +384,42 @@ const ReportsPage = () => {
           } else {
             markdown += `- **Atribuído a:** Nenhum usuário específico\n`;
           }
-          markdown += `- **Status:** ${ticket.status}\n`;
+          markdown += `- **Status atual:** ${ticket.status}\n`;
           markdown += `- **Projeto:** ${ticket.projeto}\n`;
-          markdown += `- **Dias em aberto:** ${daysOpen} dias\n`;
-          markdown += `\n`;
-        });
+          markdown += `- **Total de dias em aberto:** ${daysOpen} dias\n\n`;
+
+          // 🔧 NOVA FUNCIONALIDADE: Tempo por Status
+          if (ticket.statusTiming && ticket.statusTiming.length > 0) {
+            markdown += `**⏱️ Tempo em cada Status:**\n`;
+            ticket.statusTiming.forEach(timing => {
+              const statusLabel = timing.isCurrent ? `${timing.status} (ATUAL)` : timing.status;
+              markdown += `- **${statusLabel}:** ${timing.days} dias`;
+              if (timing.changedBy) {
+                markdown += ` (alterado por ${timing.changedBy.nome})`;
+              }
+              markdown += `\n`;
+            });
+            markdown += `\n`;
+          }
+
+          // 🔧 NOVA FUNCIONALIDADE: Histórico de Mensagens
+          try {
+            const messages = await getTicketMessages(ticket.id);
+            if (messages && messages.length > 0) {
+              markdown += `**💬 Histórico de Mensagens:**\n`;
+              messages.forEach(msg => {
+                const msgDate = msg.timestamp?.toDate ? msg.timestamp.toDate().toLocaleString('pt-BR') : 'Data não disponível';
+                const sender = getUserInfo(msg.senderId || msg.userId);
+                markdown += `- **${msgDate}** - ${sender.nome}: ${msg.message || msg.texto}\n`;
+              });
+              markdown += `\n`;
+            }
+          } catch (error) {
+            console.error('Erro ao buscar mensagens:', error);
+          }
+
+          markdown += `---\n\n`;
+        }
 
         // Análise de gargalos por área
         if (Object.keys(flowAnalysis.bottlenecksByArea).length > 0) {
@@ -322,24 +436,56 @@ const ReportsPage = () => {
         }
       }
 
-      // 🔧 SEÇÃO DE ANÁLISE DE FLUXO - CHAMADOS CONCLUÍDOS
+      // 🔧 SEÇÃO DE ANÁLISE DE FLUXO - CHAMADOS CONCLUÍDOS COM TEMPO POR STATUS
       if (flowAnalysis.closedTicketsAnalysis?.length > 0) {
-        markdown += `\n---\n\n## ✅ Chamados Concluídos - Quem Executou\n\n`;
+        markdown += `\n---\n\n## ✅ Chamados Concluídos - Análise Detalhada\n\n`;
         
-        flowAnalysis.closedTicketsAnalysis.forEach(ticket => {
+        for (const ticket of flowAnalysis.closedTicketsAnalysis) {
           const resolutionTime = ticket.createdAt && ticket.resolvedAt ? 
             Math.floor((ticket.resolvedAt.toDate() - ticket.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 'N/A';
           
-          markdown += `**${ticket.titulo}** ${ticket.isExtra ? '(EXTRA)' : ''}\n`;
+          markdown += `### ${ticket.titulo} ${ticket.isExtra ? '(EXTRA)' : ''}\n\n`;
+          markdown += `**Informações Gerais:**\n`;
           markdown += `- **Aberto por:** ${ticket.createdBy.nome} (${ticket.createdBy.funcao})\n`;
           markdown += `- **Executado por:** ${ticket.executedBy.nome} (${ticket.executedBy.funcao})\n`;
           markdown += `- **Status:** ${ticket.status}\n`;
           markdown += `- **Projeto:** ${ticket.projeto}\n`;
           if (resolutionTime !== 'N/A') {
-            markdown += `- **Tempo de resolução:** ${resolutionTime} dias\n`;
+            markdown += `- **Tempo total de resolução:** ${resolutionTime} dias\n`;
           }
           markdown += `\n`;
-        });
+
+          // 🔧 NOVA FUNCIONALIDADE: Tempo por Status
+          if (ticket.statusTiming && ticket.statusTiming.length > 0) {
+            markdown += `**⏱️ Tempo em cada Status:**\n`;
+            ticket.statusTiming.forEach(timing => {
+              markdown += `- **${timing.status}:** ${timing.days} dias`;
+              if (timing.changedBy) {
+                markdown += ` (alterado por ${timing.changedBy.nome})`;
+              }
+              markdown += `\n`;
+            });
+            markdown += `\n`;
+          }
+
+          // 🔧 NOVA FUNCIONALIDADE: Histórico de Mensagens
+          try {
+            const messages = await getTicketMessages(ticket.id);
+            if (messages && messages.length > 0) {
+              markdown += `**💬 Histórico de Mensagens:**\n`;
+              messages.forEach(msg => {
+                const msgDate = msg.timestamp?.toDate ? msg.timestamp.toDate().toLocaleString('pt-BR') : 'Data não disponível';
+                const sender = getUserInfo(msg.senderId || msg.userId);
+                markdown += `- **${msgDate}** - ${sender.nome}: ${msg.message || msg.texto}\n`;
+              });
+              markdown += `\n`;
+            }
+          } catch (error) {
+            console.error('Erro ao buscar mensagens:', error);
+          }
+
+          markdown += `---\n\n`;
+        }
       }
 
       // 🔧 SEÇÃO DE PERFORMANCE POR USUÁRIO
@@ -383,11 +529,11 @@ const ReportsPage = () => {
   const handleGeneralReportAction = async (isPreview) => {
     setGenerating(true);
     try {
-      const markdown = generateGeneralReportMarkdown();
+      const markdown = await generateGeneralReportMarkdown();
       if (isPreview) {
         setReportPreview(markdown);
       } else {
-        const fileName = `relatorio_fluxo_${Date.now()}`;
+        const fileName = `relatorio_completo_${Date.now()}`;
         const response = await fetch('https://kkh7ikcgpp6y.manus.space/api/generate-pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -476,8 +622,8 @@ const ReportsPage = () => {
                 <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
               </Button>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">📊 Relatórios e Análise de Fluxo</h1>
-                <p className="text-sm text-gray-600">Explore os dados e identifique gargalos na operação</p>
+                <h1 className="text-2xl font-bold text-gray-900">📊 Relatórios Completos com Análise Avançada</h1>
+                <p className="text-sm text-gray-600">Análise completa de fluxo, tempo por status e histórico de mensagens</p>
               </div>
             </div>
         </div>
@@ -601,31 +747,50 @@ const ReportsPage = () => {
           </CardContent>
         </Card>
 
-        {/* 🔧 NOVA SEÇÃO: ANÁLISE DE FLUXO */}
+        {/* 🔧 SEÇÃO: ANÁLISE DE FLUXO COM TEMPO POR STATUS */}
         {flowAnalysis.openTicketsAnalysis?.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
-                <AlertTriangle className="h-5 w-5 mr-2 text-red-500" /> 
-                Gargalos Identificados - Chamados Parados
+                <Timer className="h-5 w-5 mr-2 text-red-500" /> 
+                Análise de Tempo por Status - Chamados Parados
               </CardTitle>
               <CardDescription>
-                Chamados em aberto e onde estão parados no fluxo
+                Tempo detalhado que cada chamado ficou em cada status
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {flowAnalysis.openTicketsAnalysis.map(ticket => {
+                {flowAnalysis.openTicketsAnalysis.slice(0, 5).map(ticket => {
                   const daysOpen = ticket.createdAt ? Math.floor((new Date() - ticket.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 0;
                   return (
                     <div key={ticket.id} className="border rounded-lg p-4 bg-red-50">
-                      <div className="flex justify-between items-start mb-2">
+                      <div className="flex justify-between items-start mb-3">
                         <h4 className="font-semibold text-lg">{ticket.titulo}</h4>
                         <div className="flex gap-2">
                           {ticket.isExtra && <Badge variant="secondary">EXTRA</Badge>}
-                          <Badge variant="destructive">{daysOpen} dias</Badge>
+                          <Badge variant="destructive">{daysOpen} dias total</Badge>
                         </div>
                       </div>
+                      
+                      {/* Tempo por Status */}
+                      {ticket.statusTiming && ticket.statusTiming.length > 0 && (
+                        <div className="mb-3">
+                          <h5 className="font-medium text-sm mb-2 flex items-center">
+                            <Clock className="h-4 w-4 mr-1" />
+                            Tempo em cada Status:
+                          </h5>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {ticket.statusTiming.map((timing, index) => (
+                              <div key={index} className={`p-2 rounded text-sm ${timing.isCurrent ? 'bg-red-200' : 'bg-gray-200'}`}>
+                                <p className="font-medium">{timing.status}</p>
+                                <p className="text-xs">{timing.days} dias</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="font-medium text-blue-600">Aberto por:</p>
@@ -649,16 +814,20 @@ const ReportsPage = () => {
                           )}
                         </div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-2">Projeto: {ticket.projeto}</p>
                     </div>
                   );
                 })}
+                {flowAnalysis.openTicketsAnalysis.length > 5 && (
+                  <p className="text-center text-gray-500 text-sm">
+                    E mais {flowAnalysis.openTicketsAnalysis.length - 5} chamados... (veja o relatório completo)
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* 🔧 NOVA SEÇÃO: PERFORMANCE POR USUÁRIO */}
+        {/* 🔧 SEÇÃO: PERFORMANCE POR USUÁRIO */}
         {flowAnalysis.performanceByUser?.length > 0 && (
           <Card>
             <CardHeader>
@@ -684,7 +853,7 @@ const ReportsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {flowAnalysis.performanceByUser.map((user, index) => (
+                    {flowAnalysis.performanceByUser.slice(0, 10).map((user, index) => (
                       <tr key={index} className="border-b hover:bg-gray-50">
                         <td className="p-2 font-medium">{user.nome}</td>
                         <td className="p-2">
@@ -714,30 +883,44 @@ const ReportsPage = () => {
         {/* Geração de Relatórios */}
         <Card>
             <CardHeader>
-                <CardTitle className="flex items-center"><Download className="h-5 w-5 mr-2" /> Geração de Relatórios com Análise de Fluxo</CardTitle>
+                <CardTitle className="flex items-center">
+                  <Download className="h-5 w-5 mr-2" /> 
+                  Geração de Relatórios Completos
+                </CardTitle>
                 <CardDescription>
-                  Relatórios agora incluem análise detalhada de quem abriu, onde está parado e quem executou cada chamado
+                  Relatórios agora incluem: análise de fluxo, tempo por status, histórico de mensagens e performance detalhada
                 </CardDescription>
             </CardHeader>
             <CardContent>
                 <Tabs defaultValue="geral">
                     <TabsList className="grid w-full grid-cols-3">
-                        <TabsTrigger value="geral">Geral com Fluxo</TabsTrigger>
+                        <TabsTrigger value="geral">
+                          <MessageSquare className="h-4 w-4 mr-2" />
+                          Completo
+                        </TabsTrigger>
                         <TabsTrigger value="projeto">Por Projeto</TabsTrigger>
                         <TabsTrigger value="chamado">Por Chamado</TabsTrigger>
                     </TabsList>
                     <TabsContent value="geral" className="pt-4">
-                        <p className="text-sm text-gray-600 mb-2">
-                          Gera um relatório consolidado com análise de fluxo, gargalos e performance por usuário.
-                        </p>
-                        <div className="flex space-x-2">
-                          <Button onClick={() => handleGeneralReportAction(true)} disabled={generating} variant="outline">
-                            <Eye className="h-4 w-4 mr-2" />Preview
-                          </Button>
-                          <Button onClick={() => handleGeneralReportAction(false)} disabled={generating}>
-                            {generating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-                            Gerar PDF
-                          </Button>
+                        <div className="space-y-4">
+                          <p className="text-sm text-gray-600">
+                            Gera um relatório completo com:
+                          </p>
+                          <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
+                            <li>⏱️ Tempo detalhado em cada status</li>
+                            <li>💬 Histórico completo de mensagens</li>
+                            <li>🚨 Análise de gargalos e performance</li>
+                            <li>📊 Estatísticas e métricas avançadas</li>
+                          </ul>
+                          <div className="flex space-x-2">
+                            <Button onClick={() => handleGeneralReportAction(true)} disabled={generating} variant="outline">
+                              <Eye className="h-4 w-4 mr-2" />Preview Completo
+                            </Button>
+                            <Button onClick={() => handleGeneralReportAction(false)} disabled={generating}>
+                              {generating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                              Gerar PDF Completo
+                            </Button>
+                          </div>
                         </div>
                     </TabsContent>
                     <TabsContent value="projeto" className="pt-4 space-y-2">
@@ -762,19 +945,36 @@ const ReportsPage = () => {
             </CardContent>
         </Card>
 
-        {/* Preview do Relatório */}
+        {/* 🔧 PREVIEW MELHORADO COM BOTÃO DE COPIAR */}
         {reportPreview && (
           <Card>
             <CardHeader>
-              <CardTitle>Preview do Relatório</CardTitle>
-              <div className="flex justify-end">
-                <Button onClick={() => setReportPreview('')} variant="ghost" size="sm">
-                  <XIcon className="h-4 w-4 mr-2" /> Fechar
-                </Button>
+              <div className="flex justify-between items-center">
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Preview do Relatório Completo
+                </CardTitle>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleCopyPreview} 
+                    variant="outline" 
+                    size="sm"
+                    className={copySuccess ? 'bg-green-100 text-green-700' : ''}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    {copySuccess ? 'Copiado!' : 'Copiar Tudo'}
+                  </Button>
+                  <Button onClick={() => setReportPreview('')} variant="ghost" size="sm">
+                    <XIcon className="h-4 w-4 mr-2" /> Fechar
+                  </Button>
+                </div>
               </div>
+              <CardDescription>
+                Conteúdo completo do relatório com análise de fluxo, tempo por status e histórico de mensagens
+              </CardDescription>
             </CardHeader>
             <CardContent className="bg-gray-50 p-4 rounded-lg max-h-[500px] overflow-y-auto">
-              <pre className="whitespace-pre-wrap text-sm">{reportPreview}</pre>
+              <pre className="whitespace-pre-wrap text-sm font-mono">{reportPreview}</pre>
             </CardContent>
           </Card>
         )}
@@ -792,7 +992,10 @@ const ReportsPage = () => {
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="font-semibold mb-2">Projetos Filtrados ({displayedProjects.length})</h3>
+                  <h3 className="font-semibold mb-2 flex items-center">
+                    <Building className="h-4 w-4 mr-2" />
+                    Projetos Filtrados ({displayedProjects.length})
+                  </h3>
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
                     {displayedProjects.map(project => (
                       <div key={project.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
@@ -808,10 +1011,14 @@ const ReportsPage = () => {
                   </div>
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-2">Chamados Filtrados ({displayedTickets.length})</h3>
+                  <h3 className="font-semibold mb-2 flex items-center">
+                    <FileText className="h-4 w-4 mr-2" />
+                    Chamados Filtrados ({displayedTickets.length})
+                  </h3>
                   <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
                     {displayedTickets.map(ticket => {
                       const createdBy = getUserInfo(ticket.criadoPor);
+                      const daysOpen = ticket.createdAt ? Math.floor((new Date() - ticket.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 0;
                       return (
                         <div key={ticket.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
                           <div>
@@ -820,6 +1027,7 @@ const ReportsPage = () => {
                               <Badge variant="outline">{ticket.status}</Badge>
                               <span>por {createdBy.nome}</span>
                               {ticket.isExtra && <Badge variant="secondary">EXTRA</Badge>}
+                              <Badge variant="ghost" className="text-xs">{daysOpen}d</Badge>
                             </div>
                           </div>
                           <Button size="sm" variant="outline" onClick={() => handleIndividualReportAction('ticket', ticket.id, false)}>
