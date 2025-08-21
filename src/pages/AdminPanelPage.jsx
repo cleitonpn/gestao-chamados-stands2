@@ -124,7 +124,7 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
         }
         const projectName = projects.find(p => p.id === ticket.projetoId)?.nome || 'N/A';
         const subject = `Aviso: Pendência no Chamado #${ticket.numero || ticket.id.slice(-6)} - "${ticket.titulo}"`;
-        const body = `Olá ${assignee.nome},\n\nGostaríamos de pedir sua atenção para o seguinte chamado que está sem atualização há mais de 24 horas:\n\n- Chamado: #${ticket.numero || ticket.id.slice(-6)}\n- Título: ${ticket.titulo}\n- Projeto: ${projectName}\n- Prioridade: ${ticket.prioridade}\n\nPor favor, verifique o status e forneça uma atualização assim que possível.\nVocê pode acessar o chamado aqui: ${window.location.origin}/chamado/${ticket.id}\n\nObrigado,\nEquipe de Administração`;
+        const body = `Olá ${assignee.nome},\n\nGostaríamos de pedir sua atenção para o seguinte chamado que está sem atualização há mais de 24 horas:\n\n- Chamado: #${ticket.numero || ticket.id.slice(-6)}\n- Título: ${ticket.titulo}\n- Projeto: ${projectName}\n- Prioridade: ${ticket.prioridade}\n\nPor favor, verifique o status e forneça uma atualização assim que possível.\nVocê pode acessar o chamado aqui: ${window.location.origin}/#/chamado/${ticket.id}\n\nObrigado,\nEquipe de Administração`;
         const mailtoLink = `mailto:${assignee.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         window.location.href = mailtoLink;
     };
@@ -162,7 +162,7 @@ const TicketCommandCenter = ({ tickets, users, projects, onUpdate, stalledTicket
         selectedStalledTickets.forEach(ticket => {
             const projectName = projects.find(p => p.id === ticket.projetoId)?.nome || 'N/A';
             const assigneeName = users.find(u => u.id === ticket.atribuidoA)?.nome || 'Não atribuído';
-            const link = `${window.location.origin}/chamado/${ticket.id}`;
+            const link = `${window.location.origin}/#/chamado/${ticket.id}`;
             
             body += `--------------------------------------------------\n`;
             body += `Chamado: #${ticket.numero || ticket.id.slice(-6)} - ${ticket.titulo}\n`;
