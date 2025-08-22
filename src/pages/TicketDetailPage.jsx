@@ -2189,6 +2189,17 @@ updateData.canceladoEm = new Date();
                   <Label className="text-xs sm:text-sm font-medium text-gray-700">Nome</Label>
                   <p className="text-sm sm:text-base text-gray-900 break-words">{project?.nome || 'Projeto não encontrado'}</p>
                 </div>
+                <div>
+  <Label className="text-xs sm:text-sm font-medium text-gray-700">Evento</Label>
+  <p className="text-sm sm:text-base text-gray-900 break-words">
+    {project?.evento ||
+     project?.nomeEvento ||
+     project?.eventoNome ||
+     project?.tituloEvento ||
+     project?.eventName ||
+     'Não informado'}
+  </p>
+</div>
                 {project?.cliente && (
                   <div>
                     <Label className="text-xs sm:text-sm font-medium text-gray-700">Cliente</Label>
