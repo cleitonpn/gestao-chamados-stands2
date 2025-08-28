@@ -2415,4 +2415,3 @@ updateData.canceladoEm = new Date();
 };
 
 export default TicketDetailPage;
-
