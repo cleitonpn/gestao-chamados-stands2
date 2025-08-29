@@ -663,8 +663,9 @@ const TicketDetailPage = () => {
 
       setTicket(ticketData);
 
-      if (ticketData.chamadoPaiId) {
-          const parentTicketData = await ticketService.getTicketById(ticketData.chamadoPaiId);
+      // Verificar se é um chamado vinculado (filho) e carregar dados do chamado pai
+      if (ticketData.linkedTicketId) {
+          const parentTicketData = await ticketService.getTicketById(ticketData.linkedTicketId);
           setParentTicketForLink(parentTicketData);
       }
 
@@ -2244,6 +2245,57 @@ updateData.canceladoEm = new Date();
               </CardContent>
             </Card>
 
+            {/* Sidebox para Chamado Vinculado */}
+            {ticket?.linkedTicketId && (
+              <Card>
+                <CardHeader className="pb-3 sm:pb-4">
+                  <CardTitle className="flex items-center text-base sm:text-lg">
+                    <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                    Chamado Vinculado
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 sm:space-y-4">
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <LinkIcon className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-800">
+                        Este chamado é vinculado ao chamado pai
+                      </span>
+                    </div>
+                    {parentTicketForLink && (
+                      <div className="space-y-2">
+                        <div>
+                          <Label className="text-xs font-medium text-blue-700">Chamado Pai</Label>
+                          <p className="text-sm text-blue-900">#{parentTicketForLink.numero || ticket.linkedTicketId.slice(-6)}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium text-blue-700">Título</Label>
+                          <p className="text-sm text-blue-900">{parentTicketForLink.titulo}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium text-blue-700">Status</Label>
+                          <Badge variant={parentTicketForLink.status === 'concluido' ? 'success' : 'default'} className="text-xs">
+                            {getStatusText(parentTicketForLink.status)}
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
+                    <div className="pt-3 mt-3 border-t border-blue-200">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-blue-600 border-blue-300 hover:bg-blue-50"
+                        onClick={() => navigate(`/chamado/${ticket.linkedTicketId}`)}
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Ver Chamado Pai
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {!isArchived && (
               <Card>
                 <CardHeader className="pb-3 sm:pb-4">
@@ -2415,3 +2467,4 @@ updateData.canceladoEm = new Date();
 };
 
 export default TicketDetailPage;
+
