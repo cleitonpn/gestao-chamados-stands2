@@ -56,7 +56,7 @@ const DashboardPage = () => {
   const [savedFilters, setSavedFilters] = useState([]);
 
   // controle de filtros: no desktop é Dialog; no mobile é painel expansível
-  const [filtersOpen, setFiltersOpen] = useState(false);      // desktop Dialog
+  const [filtersOpen, setFiltersOpen] = useState(false);            // desktop Dialog
   const [showMobileFilters, setShowMobileFilters] = useState(false); // mobile painel
 
   // breakpoint
@@ -164,6 +164,8 @@ const DashboardPage = () => {
         const isConfidential = ticket.isConfidential || ticket.confidencial;
         if (!isConfidential) return true;
         const isCreator = ticket.criadoPor === user.uid;
+        the: {
+        }
         const isAdmin = userProfile?.funcao === 'administrador';
         const isOperatorOfArea =
           userProfile?.funcao === 'operador' && (
@@ -378,6 +380,7 @@ const DashboardPage = () => {
       }
     }
 
+    // Busca por título/descrição
     const term = (searchTerm || '').trim().toLowerCase();
     if (term) {
       base = base.filter(t => {
@@ -387,6 +390,7 @@ const DashboardPage = () => {
       });
     }
 
+    // Filtro por evento (project.feira)
     if (selectedEvent && selectedEvent !== 'todos') {
       base = base.filter(t => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
@@ -395,10 +399,12 @@ const DashboardPage = () => {
       });
     }
 
+    // Chips extras
     if (selectedStatuses.size > 0) base = base.filter(t => selectedStatuses.has(t.status));
     if (selectedAreas.size > 0) base = base.filter(t => selectedAreas.has(t.area));
     if (selectedPriorities.size > 0) base = base.filter(t => selectedPriorities.has(t.prioridade));
 
+    // Ordenação
     return [...base].sort((a, b) => {
       if (sortBy === 'priority') {
         const pa = priorityOrder[a.prioridade] || 0;
@@ -412,7 +418,8 @@ const DashboardPage = () => {
         if (sa !== sb) return sa - sb;
         return getUpdatedDate(b) - getUpdatedDate(a);
       }
-      return getUpdatedDate(b) - getUpdatedDate(a); // updatedAtDesc
+      // padrão: atualização (desc)
+      return getUpdatedDate(b) - getUpdatedDate(a);
     });
   };
 
@@ -470,159 +477,155 @@ const DashboardPage = () => {
     );
   }
 
-  // -------------- Views --------------
-  const DesktopToolbarExtra = () => (
-    <div className="hidden lg:flex items-center gap-3 px-4 sm:px-6 lg:px-8 pb-3">
-      <div className="w-64">
-        <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-          <SelectTrigger className="h-9">
-            <SelectValue placeholder="Filtrar por evento" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos os eventos</SelectItem>
-            {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="w-56">
-        <Select value={sortBy} onValueChange={setSortBy}>
-          <SelectTrigger className="h-9">
-            <SelectValue placeholder="Ordenar por" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
-            <SelectItem value="priority">Prioridade</SelectItem>
-            <SelectItem value="status">Status</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+  // --------- Painel de filtros reutilizável ---------
+  const FiltersPanel = ({ variant = 'mobile' }) => {
+    const isDesktop = variant === 'desktop';
+    const wrapperClass = `${isDesktop ? '' : 'lg:hidden'} px-4 sm:px-6 lg:px-8 pb-3`;
 
-      <div className="ml-auto flex items-center gap-2">
-        <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline">Filtros salvos</Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[220px]">
-            {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
-            {savedFilters.map(sf => (
-              <div key={sf.name} className="flex items-center justify-between px-2 py-1">
-                <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
-                <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
-              </div>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  );
+    return (
+      <div className={wrapperClass}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Evento</label>
+            <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Todos os eventos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os eventos</SelectItem>
+                {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
 
-  const MobileFiltersPanel = () => (
-    <div className="lg:hidden px-4 sm:px-6 lg:px-8 pb-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Evento</label>
-          <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Todos os eventos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos os eventos</SelectItem>
-              {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Ordenar por</label>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Ordenar por" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
-              <SelectItem value="priority">Prioridade</SelectItem>
-              <SelectItem value="status">Status</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Chips */}
-      <div className="space-y-3 mt-3">
-        <div>
-          <div className="text-xs font-medium text-gray-500 mb-2">Status</div>
-          <div className="flex flex-wrap gap-2">
-            {allStatuses.map(st => (
-              <button key={st}
-                onClick={() => setSelectedStatuses(prev => {
-                  const n = new Set(prev); n.has(st) ? n.delete(st) : n.add(st); return n;
-                })}
-                className={`text-xs px-3 py-1 rounded-full border transition ${selectedStatuses.has(st) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                {st.replaceAll('_',' ')}
-              </button>
-            ))}
-            {!!allStatuses.length && (
-              <button onClick={() => setSelectedStatuses(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-            )}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Ordenar por</label>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Ordenar por" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+                <SelectItem value="priority">Prioridade</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        <div>
-          <div className="text-xs font-medium text-gray-500 mb-2">Área</div>
-          <div className="flex flex-wrap gap-2">
-            {allAreas.map(ar => (
-              <button key={ar}
-                onClick={() => setSelectedAreas(prev => {
-                  const n = new Set(prev); n.has(ar) ? n.delete(ar) : n.add(ar); return n;
-                })}
-                className={`text-xs px-3 py-1 rounded-full border transition ${selectedAreas.has(ar) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                {ar.replaceAll('_',' ')}
+        {/* Chips */}
+        <div className="space-y-3 mt-3">
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Status</div>
+            <div className="flex flex-wrap gap-2">
+              {allStatuses.map(st => (
+                <button
+                  key={st}
+                  onClick={() => setSelectedStatuses(prev => {
+                    const n = new Set(prev); n.has(st) ? n.delete(st) : n.add(st); return n;
+                  })}
+                  className={`text-xs px-3 py-1 rounded-full border transition ${
+                    selectedStatuses.has(st)
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  {st.replaceAll('_', ' ')}
+                </button>
+              ))}
+              {!!allStatuses.length && (
+                <button
+                  onClick={() => setSelectedStatuses(new Set())}
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Área</div>
+            <div className="flex flex-wrap gap-2">
+              {allAreas.map(ar => (
+                <button
+                  key={ar}
+                  onClick={() => setSelectedAreas(prev => {
+                    const n = new Set(prev); n.has(ar) ? n.delete(ar) : n.add(ar); return n;
+                  })}
+                  className={`text-xs px-3 py-1 rounded-full border transition ${
+                    selectedAreas.has(ar)
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  {ar.replaceAll('_', ' ')}
+                </button>
+              ))}
+              {!!allAreas.length && (
+                <button
+                  onClick={() => setSelectedAreas(new Set())}
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Prioridade</div>
+            <div className="flex flex-wrap gap-2">
+              {['alta','media','baixa'].map(p => (
+                <button
+                  key={p}
+                  onClick={() => setSelectedPriorities(prev => {
+                    const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n;
+                  })}
+                  className={`text-xs px-3 py-1 rounded-full border transition ${
+                    selectedPriorities.has(p)
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                onClick={() => setSelectedPriorities(new Set())}
+                className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+              >
+                Limpar
               </button>
-            ))}
-            {!!allAreas.length && (
-              <button onClick={() => setSelectedAreas(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-            )}
+            </div>
           </div>
         </div>
 
-        <div>
-          <div className="text-xs font-medium text-gray-500 mb-2">Prioridade</div>
-          <div className="flex flex-wrap gap-2">
-            {['alta','media','baixa'].map(p => (
-              <button key={p}
-                onClick={() => setSelectedPriorities(prev => {
-                  const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n;
-                })}
-                className={`text-xs px-3 py-1 rounded-full border transition ${selectedPriorities.has(p) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                {p}
-              </button>
-            ))}
-            <button onClick={() => setSelectedPriorities(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-          </div>
+        {/* Filtros salvos */}
+        <div className="flex items-center gap-2 mt-3">
+          <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Filtros salvos</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[220px]">
+              {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+              {savedFilters.map(sf => (
+                <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                  <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                  <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+    );
+  };
 
-      {/* Filtros salvos */}
-      <div className="flex items-center gap-2 mt-3">
-        <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline">Filtros salvos</Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[220px]">
-            {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
-            {savedFilters.map(sf => (
-              <div key={sf.name} className="flex items-center justify-between px-2 py-1">
-                <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
-                <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
-              </div>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  );
+  const counts = getTicketCounts();
 
+  // --------- Render helpers ---------
   const renderTicketsTable = () => (
     <div className="bg-white border rounded-lg overflow-auto">
       <table className="min-w-full text-sm">
@@ -812,8 +815,7 @@ const DashboardPage = () => {
     );
   };
 
-  const counts = getTicketCounts();
-
+  // --------- Página ---------
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
@@ -963,14 +965,56 @@ const DashboardPage = () => {
                 </div>
 
                 {/* Extra (desktop) */}
-                <DesktopToolbarExtra />
+                <div className="hidden lg:flex items-center gap-3 px-4 sm:px-6 lg:px-8 pb-3">
+                  <div className="w-64">
+                    <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Filtrar por evento" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos os eventos</SelectItem>
+                        {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-56">
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Ordenar por" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+                        <SelectItem value="priority">Prioridade</SelectItem>
+                        <SelectItem value="status">Status</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline">Filtros salvos</Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-[220px]">
+                        {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+                        {savedFilters.map(sf => (
+                          <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                            <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                            <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+                          </div>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
 
                 {/* Painel de filtros (mobile) */}
-                {showMobileFilters && <MobileFiltersPanel />}
+                {showMobileFilters && <FiltersPanel variant="mobile" />}
 
-                {/* Cards coloridos SEMPRE no mobile (grade), e grid completo no desktop */}
+                {/* Cards coloridos — mobile (grid 2 col) e desktop (grid grande) */}
                 <div className="px-4 sm:px-6 lg:px-8 pb-3">
-                  {/* mobile: grid 2 colunas com os cards coloridos (como você prefere) */}
+                  {/* mobile */}
                   <div className="grid grid-cols-2 gap-3 lg:hidden">
                     {filterCards.map((card) => {
                       const Icon = card.icon;
@@ -994,7 +1038,7 @@ const DashboardPage = () => {
                     })}
                   </div>
 
-                  {/* desktop: grid grande de cards resumidos */}
+                  {/* desktop */}
                   <div className="hidden lg:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3">
                     {filterCards.map((card) => {
                       const Icon = card.icon;
@@ -1046,15 +1090,11 @@ const DashboardPage = () => {
 
               {/* Dialog de filtros — apenas DESKTOP (no mobile usamos painel) */}
               <Dialog open={filtersOpen && !isMobile} onOpenChange={setFiltersOpen}>
-                <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+                <DialogContent className="sm:max-w-[760px] lg:max-w-[920px] w-[95vw] max-h-[85vh] overflow-y-auto">
                   <DialogHeader><DialogTitle>Filtros e Ordenação</DialogTitle></DialogHeader>
-
-                  {/* Reaproveitando o mesmo conteúdo do painel mobile */}
-                  <MobileFiltersPanel />
-                  <div className="px-4 sm:px-6 lg:px-8 pb-3">
-                    <div className="ml-auto flex items-center justify-end">
-                      <Button onClick={() => setFiltersOpen(false)}>Aplicar</Button>
-                    </div>
+                  <FiltersPanel variant="desktop" />
+                  <div className="px-4 sm:px-6 lg:px-8 pb-3 flex justify-end">
+                    <Button onClick={() => setFiltersOpen(false)}>Aplicar</Button>
                   </div>
                 </DialogContent>
               </Dialog>
