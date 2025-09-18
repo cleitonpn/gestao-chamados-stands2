@@ -5,6 +5,7 @@ import { projectService } from '../services/projectService';
 import { ticketService } from '../services/ticketService';
 import { userService } from '../services/userService';
 import notificationService from '../services/notificationService';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
 import NotificationCenter from '../components/NotificationCenter';
+
 import {
   LogOut,
   Plus,
@@ -38,7 +42,8 @@ import {
   Archive,
   List as ListIcon,
   LayoutGrid,
-  Lock
+  Lock,
+  SlidersHorizontal
 } from 'lucide-react';
 
 const LOCAL_STORAGE_FILTERS_KEY = 'dashboard_saved_filters_v2';
@@ -47,7 +52,7 @@ const DashboardPage = () => {
   const { user, userProfile, logout, authInitialized } = useAuth();
   const navigate = useNavigate();
 
-  // --- Estados principais (mantidos) ---
+  // -------------------- Estados (originais) --------------------
   const [tickets, setTickets] = useState([]);
   const [projects, setProjects] = useState([]);
   const [users, setUsers] = useState([]);
@@ -56,30 +61,43 @@ const DashboardPage = () => {
   const [expandedProjects, setExpandedProjects] = useState({});
   const [ticketNotifications, setTicketNotifications] = useState({});
   const [selectedTickets, setSelectedTickets] = useState(new Set());
-  const [bulkActionMode, setBulkActionMode] = useState(false); // mantido (sem UI nova)
-  const [bulkActionLoading, setBulkActionLoading] = useState(false); // mantido (sem UI nova)
+  const [bulkActionMode, setBulkActionMode] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState('todos');
 
-  // --- Novos estados UI/UX ---
+  // -------------------- Novos estados de UI/UX --------------------
   const [projectMeta, setProjectMeta] = useState({}); // { [id]: {nome, feira} }
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEvent, setSelectedEvent] = useState('todos');
-  const [sortBy, setSortBy] = useState('updatedAtDesc'); // 'updatedAtDesc' | 'priority' | 'status'
+  const [sortBy, setSortBy] = useState('updatedAtDesc'); // updatedAtDesc | priority | status
   const [selectedStatuses, setSelectedStatuses] = useState(new Set());
   const [selectedAreas, setSelectedAreas] = useState(new Set());
   const [selectedPriorities, setSelectedPriorities] = useState(new Set());
-  const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'list'
+  const [viewMode, setViewMode] = useState('cards'); // cards | list
   const [savedFilters, setSavedFilters] = useState([]);
+  const [filtersOpen, setFiltersOpen] = useState(false); // Dialog mobile
 
-  const isActiveTicket = (t) => !['concluido', 'cancelado', 'arquivado'].includes(t.status);
+  // Responsivo: default para lista no mobile
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const apply = () => {
+      const m = window.innerWidth < 1024; // <lg
+      setIsMobile(m);
+      if (m) setViewMode('list');
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, []);
 
+  // -------------------- Utilidades/negócio (mantidos) --------------------
+  const isActiveTicket = (t) => !['concluido','cancelado','arquivado'].includes(t.status);
   const ticketHasAnyProject = (t, ids) => {
     if (!ids || ids.length === 0) return false;
     if (Array.isArray(t.projetos) && t.projetos.length) return t.projetos.some(id => ids.includes(id));
     if (t.projetoId) return ids.includes(t.projetoId);
     return false;
   };
-
   const getProjectLabel = (projetoId) => {
     const meta = projectMeta[projetoId];
     if (!meta) return 'Projeto não encontrado – Sem Evento';
@@ -87,13 +105,7 @@ const DashboardPage = () => {
     return `${meta.nome} – ${evento}`;
   };
 
-  const toggleSetValue = (setObj, value) => {
-    const next = new Set(setObj);
-    if (next.has(value)) next.delete(value);
-    else next.add(value);
-    return next;
-  };
-
+  // -------------------- Listas derivadas --------------------
   const allEvents = useMemo(() => {
     const names = new Set();
     projects.forEach(p => p?.feira && names.add(p.feira));
@@ -114,7 +126,7 @@ const DashboardPage = () => {
 
   const allPriorities = ['alta', 'media', 'baixa'];
 
-  // --- Notificações ---
+  // -------------------- Notificações (mantido) --------------------
   const loadTicketNotifications = async () => {
     if (!user?.uid || !tickets.length) return;
     try {
@@ -149,7 +161,7 @@ const DashboardPage = () => {
     }
   }, [tickets, user?.uid]);
 
-  // --- Carregamento de dados (mantendo regras de negócio e confidencialidade) ---
+  // -------------------- Carregamento de dados (mantendo regras) --------------------
   useEffect(() => {
     if (authInitialized && user && userProfile && user.uid) {
       loadDashboardData();
@@ -188,9 +200,7 @@ const DashboardPage = () => {
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        setProjects(allProjects);
-        setTickets(allTickets);
-        setUsers(allUsers);
+        setProjects(allProjects); setTickets(allTickets); setUsers(allUsers);
         const meta = {};
         allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
         setProjectMeta(meta);
@@ -201,15 +211,11 @@ const DashboardPage = () => {
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        const produtorProjects = allProjects.filter(p => p.produtorId === user.uid);
-        const produtorIds = produtorProjects.map(p => p.id);
-        const produtorTickets = allTickets.filter(t => ticketHasAnyProject(t, produtorIds) && isActiveTicket(t) && filterConfidential(t));
-        setProjects(produtorProjects);
-        setTickets(produtorTickets);
-        setUsers(allUsers);
-        const meta = {};
-        produtorProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
-        setProjectMeta(meta);
+        const myProjects = allProjects.filter(p => p.produtorId === user.uid);
+        const ids = myProjects.map(p => p.id);
+        const myTickets = allTickets.filter(t => ticketHasAnyProject(t, ids) && isActiveTicket(t) && filterConfidential(t));
+        setProjects(myProjects); setTickets(myTickets); setUsers(allUsers);
+        const meta = {}; myProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; }); setProjectMeta(meta);
 
       } else if (userProfile?.funcao === 'consultor') {
         const [allProjects, allTickets, allUsers] = await Promise.all([
@@ -217,15 +223,11 @@ const DashboardPage = () => {
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        const consultorProjects = allProjects.filter(p => p.consultorId === user.uid);
-        const consultorIds = consultorProjects.map(p => p.id);
-        const consultorTickets = allTickets.filter(t => ticketHasAnyProject(t, consultorIds) && isActiveTicket(t) && filterConfidential(t));
-        setProjects(consultorProjects);
-        setTickets(consultorTickets);
-        setUsers(allUsers);
-        const meta = {};
-        allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
-        setProjectMeta(meta);
+        const myProjects = allProjects.filter(p => p.consultorId === user.uid);
+        const ids = myProjects.map(p => p.id);
+        const myTickets = allTickets.filter(t => ticketHasAnyProject(t, ids) && isActiveTicket(t) && filterConfidential(t));
+        setProjects(myProjects); setTickets(myTickets); setUsers(allUsers);
+        const meta = {}; allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; }); setProjectMeta(meta);
 
       } else if (userProfile?.funcao === 'operador') {
         const [allProjects, allTickets, allUsers] = await Promise.all([
@@ -256,12 +258,8 @@ const DashboardPage = () => {
             atribuido || abertoPeloUsuario || escaladoParaArea ||
             transferidoParaArea || precisaFinanceiro) && filterConfidential(t);
         });
-        setProjects(allProjects);
-        setTickets(operatorTickets);
-        setUsers(allUsers);
-        const meta = {};
-        allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
-        setProjectMeta(meta);
+        setProjects(allProjects); setTickets(operatorTickets); setUsers(allUsers);
+        const meta = {}; allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; }); setProjectMeta(meta);
 
       } else if (userProfile?.funcao === 'gerente') {
         const [allProjects, allTickets, allUsers] = await Promise.all([
@@ -269,12 +267,8 @@ const DashboardPage = () => {
           ticketService.getAllTickets(),
           userService.getAllUsers()
         ]);
-        setProjects(allProjects);
-        setTickets(allTickets);
-        setUsers(allUsers);
-        const meta = {};
-        allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
-        setProjectMeta(meta);
+        setProjects(allProjects); setTickets(allTickets); setUsers(allUsers);
+        const meta = {}; allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; }); setProjectMeta(meta);
 
       } else {
         const [allProjects, userTickets, allUsers] = await Promise.all([
@@ -282,17 +276,12 @@ const DashboardPage = () => {
           ticketService.getTicketsByUser(user.uid),
           userService.getAllUsers()
         ]);
-        setProjects(allProjects);
-        setTickets(userTickets);
-        setUsers(allUsers);
-        const meta = {};
-        allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
-        setProjectMeta(meta);
+        setProjects(allProjects); setTickets(userTickets); setUsers(allUsers);
+        const meta = {}; allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; }); setProjectMeta(meta);
       }
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      setProjects([]);
-      setTickets([]);
+      setProjects([]); setTickets([]);
     } finally {
       setLoading(false);
     }
@@ -300,33 +289,22 @@ const DashboardPage = () => {
 
   useEffect(() => { loadTicketNotifications(); }, [tickets]);
 
-  // --- Filtros salvos (localStorage) ---
+  // -------------------- Filtros salvos --------------------
   useEffect(() => {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_FILTERS_KEY);
       if (stored) setSavedFilters(JSON.parse(stored));
-    } catch (e) {
-      console.warn('Não foi possível carregar filtros salvos.', e);
-    }
+    } catch {}
   }, []);
-
   const persistSavedFilters = (list) => {
     setSavedFilters(list);
-    try {
-      localStorage.setItem(LOCAL_STORAGE_FILTERS_KEY, JSON.stringify(list));
-    } catch (e) {
-      console.warn('Não foi possível salvar filtros.', e);
-    }
+    try { localStorage.setItem(LOCAL_STORAGE_FILTERS_KEY, JSON.stringify(list)); } catch {}
   };
-
   const saveCurrentFilterCombination = () => {
     const name = window.prompt('Nome para este filtro:');
     if (!name) return;
     const data = {
-      activeFilter,
-      selectedEvent,
-      searchTerm,
-      sortBy,
+      activeFilter, selectedEvent, searchTerm, sortBy,
       selectedStatuses: Array.from(selectedStatuses),
       selectedAreas: Array.from(selectedAreas),
       selectedPriorities: Array.from(selectedPriorities),
@@ -334,7 +312,6 @@ const DashboardPage = () => {
     const next = [...savedFilters.filter(f => f.name !== name), { name, data }];
     persistSavedFilters(next);
   };
-
   const applySavedFilterByName = (name) => {
     const item = savedFilters.find(f => f.name === name);
     if (!item) return;
@@ -346,13 +323,13 @@ const DashboardPage = () => {
     setSelectedStatuses(new Set(d.selectedStatuses ?? []));
     setSelectedAreas(new Set(d.selectedAreas ?? []));
     setSelectedPriorities(new Set(d.selectedPriorities ?? []));
+    setFiltersOpen(false);
   };
-
   const deleteSavedFilterByName = (name) => {
     persistSavedFilters(savedFilters.filter(f => f.name !== name));
   };
 
-  // --- Aparência ---
+  // -------------------- Aparência --------------------
   const getStatusColor = (status) => {
     const colors = {
       'aberto': 'bg-blue-100 text-blue-800',
@@ -370,12 +347,10 @@ const DashboardPage = () => {
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
-
   const getPriorityColor = (priority) => {
     const colors = { 'baixa': 'bg-green-100 text-green-800', 'media': 'bg-yellow-100 text-yellow-800', 'alta': 'bg-red-100 text-red-800' };
     return colors[priority] || 'bg-gray-100 text-gray-800';
   };
-
   const handleTicketSelect = (ticketId, checked) => {
     const next = new Set(selectedTickets);
     if (checked) next.add(ticketId);
@@ -383,27 +358,17 @@ const DashboardPage = () => {
     setSelectedTickets(next);
   };
 
-  // --- Ordenação ---
+  // -------------------- Ordenação --------------------
   const priorityOrder = { 'alta': 3, 'media': 2, 'baixa': 1 };
   const statusOrder = {
-    'aberto': 1,
-    'em_tratativa': 2,
-    'em_execucao': 3,
-    'executado_aguardando_validacao': 4,
-    'executado_aguardando_validacao_operador': 5,
-    'aguardando_aprovacao': 6,
-    'enviado_para_area': 7,
-    'escalado_para_area': 8,
-    'escalado_para_outra_area': 9,
-    'devolvido': 10,
-    'concluido': 98,
-    'cancelado': 99,
-    'arquivado': 100
+    'aberto': 1, 'em_tratativa': 2, 'em_execucao': 3,
+    'executado_aguardando_validacao': 4, 'executado_aguardando_validacao_operador': 5,
+    'aguardando_aprovacao': 6, 'enviado_para_area': 7, 'escalado_para_area': 8, 'escalado_para_outra_area': 9,
+    'devolvido': 10, 'concluido': 98, 'cancelado': 99, 'arquivado': 100
   };
-
   const getUpdatedDate = (t) => t.arquivadoEm?.toDate?.() || t.dataUltimaAtualizacao?.toDate?.() || t.createdAt?.toDate?.() || new Date(0);
 
-  // --- Filtro e ordenação principais ---
+  // -------------------- Filtro + ordenação --------------------
   const getFilteredTickets = () => {
     let base = [];
     if (activeFilter === 'arquivados') {
@@ -411,21 +376,12 @@ const DashboardPage = () => {
     } else {
       base = tickets.filter(t => t.status !== 'arquivado');
       switch (activeFilter) {
-        case 'com_notificacao':
-          base = base.filter(t => ticketNotifications[t.id]);
-          break;
-        case 'sem_tratativa':
-          base = base.filter(t => t.status === 'aberto');
-          break;
-        case 'em_tratativa':
-          base = base.filter(t => t.status === 'em_tratativa');
-          break;
-        case 'em_execucao':
-          base = base.filter(t => t.status === 'em_execucao');
-          break;
+        case 'com_notificacao': base = base.filter(t => ticketNotifications[t.id]); break;
+        case 'sem_tratativa': base = base.filter(t => t.status === 'aberto'); break;
+        case 'em_tratativa': base = base.filter(t => t.status === 'em_tratativa'); break;
+        case 'em_execucao': base = base.filter(t => t.status === 'em_execucao'); break;
         case 'escalado':
-          base = base.filter(t => t.status === 'enviado_para_area' || t.status === 'escalado_para_area');
-          break;
+          base = base.filter(t => t.status === 'enviado_para_area' || t.status === 'escalado_para_area'); break;
         case 'escalado_para_mim':
           base = base.filter(t => {
             if (t.status === 'escalado_para_outra_area') {
@@ -437,17 +393,10 @@ const DashboardPage = () => {
           });
           break;
         case 'aguardando_validacao':
-          base = base.filter(t => t.status === 'executado_aguardando_validacao' || t.status === 'executado_aguardando_validacao_operador');
-          break;
-        case 'concluidos':
-          base = base.filter(t => t.status === 'concluido');
-          break;
-        case 'aguardando_aprovacao':
-          base = base.filter(t => t.status === 'aguardando_aprovacao');
-          break;
-        case 'todos':
-        default:
-          break;
+          base = base.filter(t => t.status === 'executado_aguardando_validacao' || t.status === 'executado_aguardando_validacao_operador'); break;
+        case 'concluidos': base = base.filter(t => t.status === 'concluido'); break;
+        case 'aguardando_aprovacao': base = base.filter(t => t.status === 'aguardando_aprovacao'); break;
+        default: break;
       }
     }
 
@@ -472,7 +421,7 @@ const DashboardPage = () => {
     if (selectedAreas.size > 0) base = base.filter(t => selectedAreas.has(t.area));
     if (selectedPriorities.size > 0) base = base.filter(t => selectedPriorities.has(t.prioridade));
 
-    const sorted = [...base].sort((a, b) => {
+    return [...base].sort((a, b) => {
       if (sortBy === 'priority') {
         const pa = priorityOrder[a.prioridade] || 0;
         const pb = priorityOrder[b.prioridade] || 0;
@@ -485,10 +434,8 @@ const DashboardPage = () => {
         if (sa !== sb) return sa - sb;
         return getUpdatedDate(b) - getUpdatedDate(a);
       }
-      return getUpdatedDate(b) - getUpdatedDate(a);
+      return getUpdatedDate(b) - getUpdatedDate(a); // updatedAtDesc
     });
-
-    return sorted;
   };
 
   const getTicketCounts = () => {
@@ -508,7 +455,9 @@ const DashboardPage = () => {
         }
         return false;
       }).length,
-      aguardando_validacao: activeTickets.filter(t => t.status === 'executado_aguardando_validacao' || t.status === 'executado_aguardando_validacao_operador').length,
+      aguardando_validacao: activeTickets.filter(t =>
+        t.status === 'executado_aguardando_validacao' || t.status === 'executado_aguardando_validacao_operador'
+      ).length,
       concluidos: activeTickets.filter(t => t.status === 'concluido').length,
       aguardando_aprovacao: activeTickets.filter(t => t.status === 'aguardando_aprovacao').length,
       arquivados: tickets.filter(t => t.status === 'arquivado').length
@@ -518,12 +467,8 @@ const DashboardPage = () => {
   const filterCards = [
     { id: 'todos', title: 'Todos', icon: FileText, color: 'bg-blue-50 border-blue-200 hover:bg-blue-100', iconColor: 'text-blue-600', activeColor: 'bg-blue-500 text-white border-blue-500' },
     ...(userProfile?.funcao === 'gerente' ? [{
-      id: 'aguardando_aprovacao',
-      title: 'Aguardando Aprovação',
-      icon: UserIcon,
-      color: 'bg-orange-50 border-orange-200 hover:bg-orange-100',
-      iconColor: 'text-orange-600',
-      activeColor: 'bg-orange-500 text-white border-orange-500'
+      id: 'aguardando_aprovacao', title: 'Aguardando Aprovação', icon: UserIcon,
+      color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500'
     }] : []),
     { id: 'com_notificacao', title: 'Notificações', icon: BellRing, color: 'bg-red-50 border-red-200 hover:bg-red-100', iconColor: 'text-red-600', activeColor: 'bg-red-500 text-white border-red-500' },
     { id: 'sem_tratativa', title: 'Sem Tratativa', icon: AlertCircle, color: 'bg-orange-50 border-orange-200 hover:bg-orange-100', iconColor: 'text-orange-600', activeColor: 'bg-orange-500 text-white border-orange-500' },
@@ -535,14 +480,11 @@ const DashboardPage = () => {
     { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' },
     { id: 'arquivados', title: 'Arquivados', icon: Archive, color: 'bg-gray-50 border-gray-200 hover:bg-gray-100', iconColor: 'text-gray-600', activeColor: 'bg-gray-500 text-white border-gray-500' }
   ];
-
   const counts = getTicketCounts();
-  const displayedTickets = () => getFilteredTickets();
 
   const getTicketsByProject = () => {
     const grouped = {};
-    const arr = displayedTickets();
-    arr.forEach(ticket => {
+    getFilteredTickets().forEach(ticket => {
       const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
       if (!ids.length) {
         const label = 'Sem Projeto – Sem Evento';
@@ -584,7 +526,7 @@ const DashboardPage = () => {
         <nav className="mt-6 px-3">
           <div className="space-y-1">
             {(userProfile?.funcao === 'produtor' || userProfile?.funcao === 'consultor' || userProfile?.funcao === 'administrador' ||
-              (userProfile?.funcao === 'operador' && ['operacional', 'comunicacao_visual', 'almoxarifado', 'logistica'].includes(userProfile?.area))) && (
+              (userProfile?.funcao === 'operador' && ['operacional','comunicacao_visual','almoxarifado','logistica'].includes(userProfile?.area))) && (
               <Button onClick={() => navigate('/novo-chamado')} className="w-full justify-start mb-4">
                 <Plus className="h-4 w-4 mr-3" />
                 Novo Chamado
@@ -654,7 +596,7 @@ const DashboardPage = () => {
       </div>
 
       {mobileMenuOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
       )}
 
       {/* Main */}
@@ -678,142 +620,144 @@ const DashboardPage = () => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
-          <Tabs defaultValue="chamados" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-1">
-              <TabsTrigger value="chamados" className="flex items-center space-x-2">
-                <FileText className="h-4 w-4" />
-                <span>Chamados</span>
-              </TabsTrigger>
-              {/* "Projetos" removido */}
-            </TabsList>
+        <main className="flex-1 overflow-auto">
+          <Tabs defaultValue="chamados" className="space-y-0">
+            <div className="px-4 sm:px-6 lg:px-8 pt-4">
+              <TabsList className="grid w-full grid-cols-1">
+                <TabsTrigger value="chamados" className="flex items-center space-x-2">
+                  <FileText className="h-4 w-4" />
+                  <span>Chamados</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-            <TabsContent value="chamados" className="space-y-6">
-              {/* Toolbar */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-                <div className="lg:col-span-4">
+            <TabsContent value="chamados">
+              {/* Sticky toolbar (mobile-first) */}
+              <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
+                <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
                   <Input
+                    className="flex-1 h-9"
                     placeholder="Buscar por título ou descrição..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
-                </div>
-
-                <div className="lg:col-span-3">
-                  <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Filtrar por evento" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">Todos os eventos</SelectItem>
-                      {allEvents.map(ev => (
-                        <SelectItem key={ev} value={ev}>{ev}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="lg:col-span-3">
-                  <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Ordenar por" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
-                      <SelectItem value="priority">Prioridade</SelectItem>
-                      <SelectItem value="status">Status</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="lg:col-span-2 flex items-center justify-end gap-2">
-                  <Button variant={viewMode === 'cards' ? 'default' : 'outline'} size="icon" onClick={() => setViewMode('cards')} title="Cards">
-                    <LayoutGrid className="h-4 w-4" />
+                  {/* Botão abre filtros (no mobile); em desktop vira redundante mas útil */}
+                  <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setFiltersOpen(true)} title="Filtros">
+                    <SlidersHorizontal className="h-4 w-4" />
                   </Button>
-                  <Button variant={viewMode === 'list' ? 'default' : 'outline'} size="icon" onClick={() => setViewMode('list')} title="Lista">
-                    <ListIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Chips rápidos */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-medium text-gray-500">Status:</span>
-                  {allStatuses.map(st => (
-                    <button
-                      key={st}
-                      onClick={() => setSelectedStatuses(prev => toggleSetValue(prev, st))}
-                      className={`text-xs px-3 py-1 rounded-full border transition ${
-                        selectedStatuses.has(st) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
-                      {st.replaceAll('_', ' ')}
-                    </button>
-                  ))}
-                  {allStatuses.length > 0 && (
-                    <button
-                      onClick={() => setSelectedStatuses(new Set())}
-                      className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
-                      title="Limpar status"
-                    >
-                      Limpar
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-medium text-gray-500">Área:</span>
-                  {allAreas.map(ar => (
-                    <button
-                      key={ar}
-                      onClick={() => setSelectedAreas(prev => toggleSetValue(prev, ar))}
-                      className={`text-xs px-3 py-1 rounded-full border transition ${
-                        selectedAreas.has(ar) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
-                      {ar.replaceAll('_', ' ')}
-                    </button>
-                  ))}
-                  {allAreas.length > 0 && (
-                    <button
-                      onClick={() => setSelectedAreas(new Set())}
-                      className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
-                      title="Limpar áreas"
-                    >
-                      Limpar
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-medium text-gray-500">Prioridade:</span>
-                  {allPriorities.map(p => (
-                    <button
-                      key={p}
-                      onClick={() => setSelectedPriorities(prev => toggleSetValue(prev, p))}
-                      className={`text-xs px-3 py-1 rounded-full border transition ${
-                        selectedPriorities.has(p) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setSelectedPriorities(new Set())}
-                    className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
-                    title="Limpar prioridades"
+                  <Button
+                    variant={viewMode === 'list' ? 'default' : 'outline'}
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => setViewMode(viewMode === 'list' ? 'cards' : 'list')}
+                    title={viewMode === 'list' ? 'Ver em cards' : 'Ver em lista'}
                   >
-                    Limpar
-                  </button>
+                    {viewMode === 'list' ? <LayoutGrid className="h-4 w-4" /> : <ListIcon className="h-4 w-4" />}
+                  </Button>
+                </div>
+
+                {/* Linha secundária (aparece em desktop) */}
+                <div className="hidden lg:flex items-center gap-3 px-4 sm:px-6 lg:px-8 pb-3">
+                  <div className="w-64">
+                    <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Filtrar por evento" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos os eventos</SelectItem>
+                        {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-56">
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Ordenar por" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+                        <SelectItem value="priority">Prioridade</SelectItem>
+                        <SelectItem value="status">Status</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline">Filtros salvos</Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-[220px]">
+                        {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+                        {savedFilters.map(sf => (
+                          <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                            <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                            <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+                          </div>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+
+                {/* Resumo compacto: rolagem horizontal no mobile */}
+                <div className="px-4 sm:px-6 lg:px-8 pb-3">
+                  <div className="lg:hidden -mx-2 overflow-x-auto">
+                    <div className="flex gap-2 px-2">
+                      {filterCards.map(card => {
+                        const Icon = card.icon;
+                        const isActive = activeFilter === card.id;
+                        const count = counts[card.id];
+                        return (
+                          <button
+                            key={card.id}
+                            onClick={() => setActiveFilter(card.id)}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border shrink-0 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-800'}`}
+                          >
+                            <Icon className="h-4 w-4" />
+                            <span className="text-xs font-medium">{card.title}</span>
+                            <span className="text-[11px] opacity-80">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Grade completa no desktop */}
+                  <div className="hidden lg:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3">
+                    {filterCards.map((card) => {
+                      const Icon = card.icon;
+                      const isActive = activeFilter === card.id;
+                      const count = counts[card.id];
+                      return (
+                        <Card
+                          key={card.id}
+                          className={`cursor-pointer transition-all duration-200 ${isActive ? card.activeColor : card.color} hover:shadow-md`}
+                          onClick={() => setActiveFilter(card.id)}
+                        >
+                          <CardContent className="p-3 sm:p-4">
+                            <div className="flex flex-col items-center text-center space-y-2">
+                              <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${isActive ? 'text-white' : card.iconColor}`} />
+                              <div>
+                                <p className={`text-xs sm:text-sm font-medium ${isActive ? 'text-white' : 'text-gray-900'}`}>{card.title}</p>
+                                <p className={`text-lg sm:text-xl font-bold ${isActive ? 'text-white' : card.iconColor}`}>{count}</p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              {/* Barra de filtro ativo + filtros salvos */}
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                {activeFilter !== 'todos' ? (
+              {/* Conteúdo */}
+              <div className="px-4 sm:px-6 lg:px-8 py-4 space-y-4">
+                {/* Badge de filtro ativo (apenas quando não for "todos") */}
+                {activeFilter !== 'todos' && (
                   <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-2">
                       <Filter className="h-4 w-4 text-blue-600" />
                       <span className="text-sm font-medium text-blue-900">
                         Filtro ativo: {filterCards.find(c => c.id === activeFilter)?.title}
@@ -823,281 +767,318 @@ const DashboardPage = () => {
                       </Badge>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => setActiveFilter('todos')} className="text-blue-600 hover:text-blue-800">
-                      <X className="h-4 w-4 mr-1" />
-                      Limpar filtro
+                      <X className="h-4 w-4 mr-1" /> Limpar
                     </Button>
                   </div>
-                ) : <div />}
+                )}
 
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" onClick={saveCurrentFilterCombination}>
-                    Salvar filtro atual
-                  </Button>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline">Filtros salvos</Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="min-w-[220px]">
-                      {savedFilters.length === 0 && (
-                        <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>
-                      )}
-                      {savedFilters.map(sf => (
-                        <div key={sf.name} className="flex items-center justify-between px-2 py-1">
-                          <button className="text-sm text-left hover:underline" onClick={() => applySavedFilterByName(sf.name)}>
-                            {sf.name}
-                          </button>
-                          <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)} title="Excluir">
-                            Excluir
-                          </button>
-                        </div>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              {/* Cards de contagem por filtro */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3">
-                {filterCards.map((card) => {
-                  const IconComponent = card.icon;
-                  const isActive = activeFilter === card.id;
-                  const count = counts[card.id];
-                  return (
-                    <Card
-                      key={card.id}
-                      className={`cursor-pointer transition-all duration-200 ${isActive ? card.activeColor : card.color} hover:shadow-md`}
-                      onClick={() => setActiveFilter(card.id)}
-                    >
-                      <CardContent className="p-3 sm:p-4">
-                        <div className="flex flex-col items-center text-center space-y-2">
-                          <IconComponent className={`h-5 w-5 sm:h-6 sm:w-6 ${isActive ? 'text-white' : card.iconColor}`} />
-                          <div>
-                            <p className={`text-xs sm:text-sm font-medium ${isActive ? 'text-white' : 'text-gray-900'}`}>
-                              {card.title}
-                            </p>
-                            <p className={`text-lg sm:text-xl font-bold ${isActive ? 'text-white' : card.iconColor}`}>
-                              {count}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              {/* Conteúdo: lista ou cards agrupados */}
-              {viewMode === 'list' ? (
-                <div className="bg-white border rounded-lg overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-700">
-                      <tr className="text-left">
-                        <th className="px-4 py-3 font-medium">Título</th>
-                        <th className="px-4 py-3 font-medium">Status</th>
-                        <th className="px-4 py-3 font-medium">Prioridade</th>
-                        <th className="px-4 py-3 font-medium">Área</th>
-                        <th className="px-4 py-3 font-medium">Projeto/Evento</th>
-                        <th className="px-4 py-3 font-medium">Última atualização</th>
-                        <th className="px-4 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayedTickets().map((ticket) => {
-                        const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
-                        const projLabels = ids.length ? ids.map(getProjectLabel).join(' • ') : 'Sem Projeto – Sem Evento';
-                        const d = getUpdatedDate(ticket);
-                        const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
-                        const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-                        return (
-                          <tr key={ticket.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-3 max-w-[380px]">
-                              <div className="flex items-center gap-2">
-                                {(ticket.isConfidential || ticket.confidencial) && (
-                                  <Lock className="h-4 w-4 text-orange-500 flex-shrink-0" title="Chamado Confidencial" />
-                                )}
-                                <div className="truncate">{ticket.titulo}</div>
-                                {ticketNotifications[ticket.id] && (
-                                  <Badge className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
-                                    {ticketNotifications[ticket.id]}
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-500 line-clamp-1">
-                                {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : (ticket.descricao || '')}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge className={`${getStatusColor(ticket.status)} text-[10px]`}>{ticket.status?.replaceAll('_',' ')}</Badge>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge className={`${getPriorityColor(ticket.prioridade)} text-[10px]`}>{ticket.prioridade}</Badge>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="text-xs text-gray-700">{ticket.area?.replaceAll('_',' ')}</span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="text-xs text-gray-700">{projLabels}</span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="text-xs text-gray-700">{dateStr}</div>
-                              <div className="text-[10px] text-gray-500">{timeStr}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Button variant="ghost" size="sm" onClick={() => navigate(`/chamado/${ticket.id}`)}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
+                {/* Lista ou Cards */}
+                {viewMode === 'list' ? (
+                  <div className="bg-white border rounded-lg overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-700">
+                        <tr className="text-left">
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Título</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Status</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Prioridade</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Área</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Projeto/Evento</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Última atualização</th>
+                          <th className="px-3 sm:px-4 py-2 sm:py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {getFilteredTickets().map((ticket) => {
+                          const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
+                          const projLabels = ids.length ? ids.map(getProjectLabel).join(' • ') : 'Sem Projeto – Sem Evento';
+                          const d = getUpdatedDate(ticket);
+                          const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
+                          const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                          return (
+                            <tr key={ticket.id} className="border-t hover:bg-gray-50">
+                              <td className="px-3 sm:px-4 py-2 sm:py-3 max-w-[380px]">
+                                <div className="flex items-center gap-2">
+                                  {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
+                                  <div className="truncate">{ticket.titulo}</div>
+                                  {ticketNotifications[ticket.id] && (
+                                    <Badge className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                                      {ticketNotifications[ticket.id]}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 line-clamp-1">
+                                  {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : (ticket.descricao || '')}
+                                </div>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <Badge className={`${getStatusColor(ticket.status)} text-[10px]`}>{ticket.status?.replaceAll('_',' ')}</Badge>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <Badge className={`${getPriorityColor(ticket.prioridade)} text-[10px]`}>{ticket.prioridade}</Badge>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs text-gray-700">{ticket.area?.replaceAll('_',' ')}</span>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <span className="text-xs text-gray-700">{projLabels}</span>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <div className="text-xs text-gray-700">{dateStr}</div>
+                                <div className="text-[10px] text-gray-500">{timeStr}</div>
+                              </td>
+                              <td className="px-3 sm:px-4 py-2 sm:py-3">
+                                <Button variant="ghost" size="sm" onClick={() => navigate(`/chamado/${ticket.id}`)}>
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {getFilteredTickets().length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                              Nenhum chamado encontrado com os filtros atuais.
                             </td>
                           </tr>
-                        );
-                      })}
-                      {displayedTickets().length === 0 && (
-                        <tr>
-                          <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                            Nenhum chamado encontrado com os filtros atuais.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {Object.entries(getTicketsByProject()).map(([projectLabel, projectTickets]) => (
-                    <div key={projectLabel} className="border rounded-lg">
-                      <button
-                        onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
-                        className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="flex items-center space-x-3">
-                          {expandedProjects[projectLabel] ? (
-                            <ChevronDown className="h-4 w-4 text-gray-500" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-gray-500" />
-                          )}
-                          <div>
-                            <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
-                            <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
-                          </div>
-                        </div>
-                      </button>
-
-                      {expandedProjects[projectLabel] && (
-                        <div className="border-t bg-gray-50/50 p-4 space-y-3">
-                          {projectTickets.map((ticket) => {
-                            const isAwaitingApproval =
-                              ticket.status === 'aguardando_aprovacao' &&
-                              userProfile?.funcao === 'gerente' &&
-                              ticket.gerenteResponsavelId === user.uid;
-
-                            const cardClassName = `${bulkActionMode ? 'cursor-default' : 'cursor-pointer hover:shadow-md'} transition-shadow ${
-                              isAwaitingApproval ? 'bg-orange-50 border-2 border-orange-400 shadow-lg ring-2 ring-orange-200' : 'bg-white'
-                            } ${selectedTickets.has(ticket.id) ? 'ring-2 ring-blue-500' : ''}`;
-
-                            const d = getUpdatedDate(ticket);
-                            const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
-                            const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-
-                            return (
-                              <Card
-                                key={ticket.id}
-                                className={cardClassName}
-                                onClick={bulkActionMode ? undefined : () => navigate(`/chamado/${ticket.id}`)}
-                              >
-                                <CardContent className="p-3 md:p-4">
-                                  <div className="flex flex-col space-y-3">
-                                    <div className="flex items-start justify-between">
-                                      {bulkActionMode && (
-                                        <div className="flex items-center mr-3">
-                                          <Checkbox
-                                            checked={selectedTickets.has(ticket.id)}
-                                            onCheckedChange={(checked) => handleTicketSelect(ticket.id, checked)}
-                                            onClick={(e) => e.stopPropagation()}
-                                          />
-                                        </div>
-                                      )}
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          {(ticket.isConfidential || ticket.confidencial) && (
-                                            <Lock className="h-4 w-4 text-orange-500 flex-shrink-0" title="Chamado Confidencial" />
-                                          )}
-                                          <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
-                                          {ticketNotifications[ticket.id] && (
-                                            <Badge className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
-                                              {ticketNotifications[ticket.id]}
-                                            </Badge>
-                                          )}
-                                        </div>
-                                        <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">
-                                          {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : ticket.descricao}
-                                        </p>
-                                      </div>
-
-                                      <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
-                                        <div className="text-right text-xs text-gray-500">
-                                          <div className="flex flex-col items-end">
-                                            <span className="font-medium">{dateStr}</span>
-                                            <span className="text-xs opacity-75">{timeStr}</span>
-                                          </div>
-                                        </div>
-
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            navigate(`/chamado/${ticket.id}`);
-                                          }}
-                                          className="h-8 w-8 p-0"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <Badge className={`${getStatusColor(ticket.status)} text-xs`}>
-                                        {ticket.status?.replaceAll('_', ' ')}
-                                      </Badge>
-                                      <Badge className={`${getPriorityColor(ticket.prioridade)} text-xs`}>
-                                        {ticket.prioridade}
-                                      </Badge>
-                                      <span className="text-xs text-gray-500">
-                                        {ticket.area?.replaceAll('_', ' ')}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {Object.keys(getTicketsByProject()).length === 0 && (
-                    <Card>
-                      <CardContent className="p-8 text-center">
-                        <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-900 mb-2">
-                          {activeFilter === 'todos' ? 'Nenhum chamado encontrado' : 'Nenhum chamado neste filtro'}
-                        </h3>
-                        <p className="text-gray-500">
-                          {activeFilter === 'todos'
-                            ? 'Não há chamados para exibir no momento.'
-                            : `Não há chamados com o filtro "${filterCards.find(c => c.id === activeFilter)?.title}" aplicado.`}
-                        </p>
-                        {activeFilter !== 'todos' && (
-                          <Button variant="outline" onClick={() => setActiveFilter('todos')} className="mt-4">
-                            Ver todos os chamados
-                          </Button>
                         )}
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.entries(getTicketsByProject()).map(([projectLabel, projectTickets]) => (
+                      <div key={projectLabel} className="border rounded-lg">
+                        <button
+                          onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
+                          className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center space-x-3">
+                            {expandedProjects[projectLabel] ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+                            <div>
+                              <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
+                              <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
+                            </div>
+                          </div>
+                        </button>
+
+                        {expandedProjects[projectLabel] && (
+                          <div className="border-t bg-gray-50/50 p-3 sm:p-4 space-y-3">
+                            {projectTickets.map((ticket) => {
+                              const isAwaitingApproval =
+                                ticket.status === 'aguardando_aprovacao' &&
+                                userProfile?.funcao === 'gerente' &&
+                                ticket.gerenteResponsavelId === user.uid;
+                              const cardClassName = `${bulkActionMode ? 'cursor-default' : 'cursor-pointer hover:shadow-md'} transition-shadow ${
+                                isAwaitingApproval ? 'bg-orange-50 border-2 border-orange-400 shadow-lg ring-2 ring-orange-200' : 'bg-white'
+                              } ${selectedTickets.has(ticket.id) ? 'ring-2 ring-blue-500' : ''}`;
+
+                              const d = getUpdatedDate(ticket);
+                              const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
+                              const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+                              return (
+                                <Card
+                                  key={ticket.id}
+                                  className={cardClassName}
+                                  onClick={bulkActionMode ? undefined : () => navigate(`/chamado/${ticket.id}`)}
+                                >
+                                  <CardContent className="p-3 md:p-4">
+                                    <div className="flex flex-col gap-2">
+                                      <div className="flex items-start justify-between gap-2">
+                                        {bulkActionMode && (
+                                          <div className="flex items-center mr-3">
+                                            <Checkbox
+                                              checked={selectedTickets.has(ticket.id)}
+                                              onCheckedChange={(checked) => handleTicketSelect(ticket.id, checked)}
+                                              onClick={(e) => e.stopPropagation()}
+                                            />
+                                          </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
+                                            <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
+                                            {ticketNotifications[ticket.id] && (
+                                              <Badge className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                                                {ticketNotifications[ticket.id]}
+                                              </Badge>
+                                            )}
+                                          </div>
+                                          <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">
+                                            {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : ticket.descricao}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <div className="text-right text-xs text-gray-500">
+                                            <div className="flex flex-col items-end">
+                                              <span className="font-medium">{dateStr}</span>
+                                              <span className="text-xs opacity-75">{timeStr}</span>
+                                            </div>
+                                          </div>
+                                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/chamado/${ticket.id}`); }} className="h-8 w-8 p-0">
+                                            <Eye className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Badge className={`${getStatusColor(ticket.status)} text-xs`}>{ticket.status?.replaceAll('_', ' ')}</Badge>
+                                        <Badge className={`${getPriorityColor(ticket.prioridade)} text-xs`}>{ticket.prioridade}</Badge>
+                                        <span className="text-xs text-gray-500">{ticket.area?.replaceAll('_', ' ')}</span>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {Object.keys(getTicketsByProject()).length === 0 && (
+                      <Card>
+                        <CardContent className="p-8 text-center">
+                          <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                          <h3 className="text-lg font-medium text-gray-900 mb-2">
+                            {activeFilter === 'todos' ? 'Nenhum chamado encontrado' : 'Nenhum chamado neste filtro'}
+                          </h3>
+                          <p className="text-gray-500">
+                            {activeFilter === 'todos'
+                              ? 'Não há chamados para exibir no momento.'
+                              : `Não há chamados com o filtro "${filterCards.find(c => c.id === activeFilter)?.title}" aplicado.`}
+                          </p>
+                          {activeFilter !== 'todos' && (
+                            <Button variant="outline" onClick={() => setActiveFilter('todos')} className="mt-4">Ver todos os chamados</Button>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Dialog de Filtros (mobile-first) */}
+              <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+                <DialogContent className="sm:max-w-[700px]">
+                  <DialogHeader>
+                    <DialogTitle>Filtros e Ordenação</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-500 block mb-1">Evento</label>
+                        <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Todos os eventos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todos">Todos os eventos</SelectItem>
+                            {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 block mb-1">Ordenar por</label>
+                        <Select value={sortBy} onValueChange={setSortBy}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Ordenar por" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+                            <SelectItem value="priority">Prioridade</SelectItem>
+                            <SelectItem value="status">Status</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Chips rápidos dentro do dialog */}
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-2">Status</div>
+                        <div className="flex flex-wrap gap-2">
+                          {allStatuses.map(st => (
+                            <button key={st}
+                              onClick={() => setSelectedStatuses(prev => {
+                                const n = new Set(prev);
+                                n.has(st) ? n.delete(st) : n.add(st);
+                                return n;
+                              })}
+                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedStatuses.has(st) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                              {st.replaceAll('_',' ')}
+                            </button>
+                          ))}
+                          {!!allStatuses.length && (
+                            <button onClick={() => setSelectedStatuses(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-2">Área</div>
+                        <div className="flex flex-wrap gap-2">
+                          {allAreas.map(ar => (
+                            <button key={ar}
+                              onClick={() => setSelectedAreas(prev => {
+                                const n = new Set(prev);
+                                n.has(ar) ? n.delete(ar) : n.add(ar);
+                                return n;
+                              })}
+                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedAreas.has(ar) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                              {ar.replaceAll('_',' ')}
+                            </button>
+                          ))}
+                          {!!allAreas.length && (
+                            <button onClick={() => setSelectedAreas(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-2">Prioridade</div>
+                        <div className="flex flex-wrap gap-2">
+                          {['alta','media','baixa'].map(p => (
+                            <button key={p}
+                              onClick={() => setSelectedPriorities(prev => {
+                                const n = new Set(prev);
+                                n.has(p) ? n.delete(p) : n.add(p);
+                                return n;
+                              })}
+                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedPriorities.has(p) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                              {p}
+                            </button>
+                          ))}
+                          <button onClick={() => setSelectedPriorities(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Filtros salvos dentro do dialog (mobile) */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline">Filtros salvos</Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-[220px]">
+                          {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+                          {savedFilters.map(sf => (
+                            <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                              <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                              <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+                            </div>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <div className="ml-auto">
+                        <Button onClick={() => setFiltersOpen(false)}>Aplicar</Button>
+                      </div>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </TabsContent>
           </Tabs>
         </main>
