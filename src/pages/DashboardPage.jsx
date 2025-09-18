@@ -19,30 +19,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import NotificationCenter from '../components/NotificationCenter';
 
 import {
-  LogOut,
-  Plus,
-  AlertCircle,
-  Clock,
-  CheckCircle,
-  Users,
-  FolderOpen,
-  BarChart3,
-  Menu,
-  X,
-  Calendar,
-  ChevronDown,
-  ChevronRight,
-  BellRing,
-  ArrowUp,
-  Hourglass,
-  User as UserIcon,
-  FileText,
-  Eye,
-  Filter,
-  Archive,
-  List as ListIcon,
-  LayoutGrid,
-  Lock,
+  LogOut, Plus, AlertCircle, Clock, CheckCircle, Users, FolderOpen, BarChart3,
+  Menu, X, Calendar, ChevronDown, ChevronRight, BellRing, ArrowUp, Hourglass,
+  User as UserIcon, FileText, Eye, Filter, Archive, List as ListIcon, LayoutGrid, Lock,
   SlidersHorizontal
 } from 'lucide-react';
 
@@ -52,7 +31,7 @@ const DashboardPage = () => {
   const { user, userProfile, logout, authInitialized } = useAuth();
   const navigate = useNavigate();
 
-  // -------------------- Estados (originais) --------------------
+  // --------- Estado base (regras de negócio intactas) ---------
   const [tickets, setTickets] = useState([]);
   const [projects, setProjects] = useState([]);
   const [users, setUsers] = useState([]);
@@ -65,7 +44,7 @@ const DashboardPage = () => {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState('todos');
 
-  // -------------------- Novos estados de UI/UX --------------------
+  // --------- Novos estados de UI ---------
   const [projectMeta, setProjectMeta] = useState({}); // { [id]: {nome, feira} }
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEvent, setSelectedEvent] = useState('todos');
@@ -73,24 +52,27 @@ const DashboardPage = () => {
   const [selectedStatuses, setSelectedStatuses] = useState(new Set());
   const [selectedAreas, setSelectedAreas] = useState(new Set());
   const [selectedPriorities, setSelectedPriorities] = useState(new Set());
-  const [viewMode, setViewMode] = useState('cards'); // cards | list
+  const [viewMode, setViewMode] = useState('list'); // mobile = list; desktop pode alternar
   const [savedFilters, setSavedFilters] = useState([]);
-  const [filtersOpen, setFiltersOpen] = useState(false); // Dialog mobile
 
-  // Responsivo: default para lista no mobile
+  // controle de filtros: no desktop é Dialog; no mobile é painel expansível
+  const [filtersOpen, setFiltersOpen] = useState(false);      // desktop Dialog
+  const [showMobileFilters, setShowMobileFilters] = useState(false); // mobile painel
+
+  // breakpoint
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const apply = () => {
       const m = window.innerWidth < 1024; // <lg
       setIsMobile(m);
-      if (m) setViewMode('list');
+      if (m) setViewMode('list'); // mobile começa em lista
     };
     apply();
     window.addEventListener('resize', apply);
     return () => window.removeEventListener('resize', apply);
   }, []);
 
-  // -------------------- Utilidades/negócio (mantidos) --------------------
+  // --------- Utilidades (regras de negócio intactas) ---------
   const isActiveTicket = (t) => !['concluido','cancelado','arquivado'].includes(t.status);
   const ticketHasAnyProject = (t, ids) => {
     if (!ids || ids.length === 0) return false;
@@ -105,7 +87,7 @@ const DashboardPage = () => {
     return `${meta.nome} – ${evento}`;
   };
 
-  // -------------------- Listas derivadas --------------------
+  // --------- Listas derivadas ---------
   const allEvents = useMemo(() => {
     const names = new Set();
     projects.forEach(p => p?.feira && names.add(p.feira));
@@ -126,7 +108,7 @@ const DashboardPage = () => {
 
   const allPriorities = ['alta', 'media', 'baixa'];
 
-  // -------------------- Notificações (mantido) --------------------
+  // --------- Notificações (mantido) ---------
   const loadTicketNotifications = async () => {
     if (!user?.uid || !tickets.length) return;
     try {
@@ -161,7 +143,7 @@ const DashboardPage = () => {
     }
   }, [tickets, user?.uid]);
 
-  // -------------------- Carregamento de dados (mantendo regras) --------------------
+  // --------- Carregamento de dados (regras intactas) ---------
   useEffect(() => {
     if (authInitialized && user && userProfile && user.uid) {
       loadDashboardData();
@@ -201,8 +183,7 @@ const DashboardPage = () => {
           userService.getAllUsers()
         ]);
         setProjects(allProjects); setTickets(allTickets); setUsers(allUsers);
-        const meta = {};
-        allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
+        const meta = {}; allProjects.forEach(p => { meta[p.id] = { nome: p.nome, feira: p.feira || '' }; });
         setProjectMeta(meta);
 
       } else if (userProfile?.funcao === 'produtor') {
@@ -248,11 +229,8 @@ const DashboardPage = () => {
           const escaladoParaArea = t.status === 'escalado_para_outra_area' && t.areaEscalada === areaOp;
           const transferidoParaArea = t.status === 'transferido_para_area' && t.areaDestino === areaOp;
           const precisaFinanceiro = areaOp === 'financeiro' && (
-            t.tipo === 'despesas_programada' ||
-            t.tipo === 'despesas_nao_programadas' ||
-            t.area === 'financeiro' ||
-            t.areaDeOrigem === 'financeiro' ||
-            t.gerenciaDestino === 'gerente_financeiro'
+            t.tipo === 'despesas_programada' || t.tipo === 'despesas_nao_programadas' ||
+            t.area === 'financeiro' || t.areaDeOrigem === 'financeiro' || t.gerenciaDestino === 'gerente_financeiro'
           );
           return (atual || origem || destino || devolvido || rejeitou || envolvido ||
             atribuido || abertoPeloUsuario || escaladoParaArea ||
@@ -289,7 +267,7 @@ const DashboardPage = () => {
 
   useEffect(() => { loadTicketNotifications(); }, [tickets]);
 
-  // -------------------- Filtros salvos --------------------
+  // --------- Filtros salvos ---------
   useEffect(() => {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_FILTERS_KEY);
@@ -324,12 +302,13 @@ const DashboardPage = () => {
     setSelectedAreas(new Set(d.selectedAreas ?? []));
     setSelectedPriorities(new Set(d.selectedPriorities ?? []));
     setFiltersOpen(false);
+    setShowMobileFilters(false);
   };
   const deleteSavedFilterByName = (name) => {
     persistSavedFilters(savedFilters.filter(f => f.name !== name));
   };
 
-  // -------------------- Aparência --------------------
+  // --------- Aparência ---------
   const getStatusColor = (status) => {
     const colors = {
       'aberto': 'bg-blue-100 text-blue-800',
@@ -358,7 +337,7 @@ const DashboardPage = () => {
     setSelectedTickets(next);
   };
 
-  // -------------------- Ordenação --------------------
+  // --------- Ordenação e filtros ---------
   const priorityOrder = { 'alta': 3, 'media': 2, 'baixa': 1 };
   const statusOrder = {
     'aberto': 1, 'em_tratativa': 2, 'em_execucao': 3,
@@ -368,7 +347,6 @@ const DashboardPage = () => {
   };
   const getUpdatedDate = (t) => t.arquivadoEm?.toDate?.() || t.dataUltimaAtualizacao?.toDate?.() || t.createdAt?.toDate?.() || new Date(0);
 
-  // -------------------- Filtro + ordenação --------------------
   const getFilteredTickets = () => {
     let base = [];
     if (activeFilter === 'arquivados') {
@@ -480,26 +458,6 @@ const DashboardPage = () => {
     { id: 'concluidos', title: 'Concluídos', icon: CheckCircle, color: 'bg-green-50 border-green-200 hover:bg-green-100', iconColor: 'text-green-600', activeColor: 'bg-green-500 text-white border-green-500' },
     { id: 'arquivados', title: 'Arquivados', icon: Archive, color: 'bg-gray-50 border-gray-200 hover:bg-gray-100', iconColor: 'text-gray-600', activeColor: 'bg-gray-500 text-white border-gray-500' }
   ];
-  const counts = getTicketCounts();
-
-  const getTicketsByProject = () => {
-    const grouped = {};
-    getFilteredTickets().forEach(ticket => {
-      const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
-      if (!ids.length) {
-        const label = 'Sem Projeto – Sem Evento';
-        if (!grouped[label]) grouped[label] = [];
-        grouped[label].push(ticket);
-      } else {
-        ids.forEach(pid => {
-          const label = getProjectLabel(pid);
-          if (!grouped[label]) grouped[label] = [];
-          grouped[label].push(ticket);
-        });
-      }
-    });
-    return grouped;
-  };
 
   if (!authInitialized || loading) {
     return (
@@ -511,6 +469,350 @@ const DashboardPage = () => {
       </div>
     );
   }
+
+  // -------------- Views --------------
+  const DesktopToolbarExtra = () => (
+    <div className="hidden lg:flex items-center gap-3 px-4 sm:px-6 lg:px-8 pb-3">
+      <div className="w-64">
+        <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Filtrar por evento" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos os eventos</SelectItem>
+            {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="w-56">
+        <Select value={sortBy} onValueChange={setSortBy}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Ordenar por" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+            <SelectItem value="priority">Prioridade</SelectItem>
+            <SelectItem value="status">Status</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="ml-auto flex items-center gap-2">
+        <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline">Filtros salvos</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[220px]">
+            {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+            {savedFilters.map(sf => (
+              <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+              </div>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+
+  const MobileFiltersPanel = () => (
+    <div className="lg:hidden px-4 sm:px-6 lg:px-8 pb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Evento</label>
+          <Select value={selectedEvent} onValueChange={setSelectedEvent}>
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Todos os eventos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos os eventos</SelectItem>
+              {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Ordenar por</label>
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Ordenar por" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
+              <SelectItem value="priority">Prioridade</SelectItem>
+              <SelectItem value="status">Status</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Chips */}
+      <div className="space-y-3 mt-3">
+        <div>
+          <div className="text-xs font-medium text-gray-500 mb-2">Status</div>
+          <div className="flex flex-wrap gap-2">
+            {allStatuses.map(st => (
+              <button key={st}
+                onClick={() => setSelectedStatuses(prev => {
+                  const n = new Set(prev); n.has(st) ? n.delete(st) : n.add(st); return n;
+                })}
+                className={`text-xs px-3 py-1 rounded-full border transition ${selectedStatuses.has(st) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                {st.replaceAll('_',' ')}
+              </button>
+            ))}
+            {!!allStatuses.length && (
+              <button onClick={() => setSelectedStatuses(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-medium text-gray-500 mb-2">Área</div>
+          <div className="flex flex-wrap gap-2">
+            {allAreas.map(ar => (
+              <button key={ar}
+                onClick={() => setSelectedAreas(prev => {
+                  const n = new Set(prev); n.has(ar) ? n.delete(ar) : n.add(ar); return n;
+                })}
+                className={`text-xs px-3 py-1 rounded-full border transition ${selectedAreas.has(ar) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                {ar.replaceAll('_',' ')}
+              </button>
+            ))}
+            {!!allAreas.length && (
+              <button onClick={() => setSelectedAreas(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-medium text-gray-500 mb-2">Prioridade</div>
+          <div className="flex flex-wrap gap-2">
+            {['alta','media','baixa'].map(p => (
+              <button key={p}
+                onClick={() => setSelectedPriorities(prev => {
+                  const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n;
+                })}
+                className={`text-xs px-3 py-1 rounded-full border transition ${selectedPriorities.has(p) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
+                {p}
+              </button>
+            ))}
+            <button onClick={() => setSelectedPriorities(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros salvos */}
+      <div className="flex items-center gap-2 mt-3">
+        <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline">Filtros salvos</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[220px]">
+            {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
+            {savedFilters.map(sf => (
+              <div key={sf.name} className="flex items-center justify-between px-2 py-1">
+                <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
+                <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
+              </div>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+
+  const renderTicketsTable = () => (
+    <div className="bg-white border rounded-lg overflow-auto">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-50 text-gray-700">
+          <tr className="text-left">
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Título</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Status</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Prioridade</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Área</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Projeto/Evento</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Última atualização</th>
+            <th className="px-3 sm:px-4 py-2 sm:py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {getFilteredTickets().map((ticket) => {
+            const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
+            const projLabels = ids.length ? ids.map(getProjectLabel).join(' • ') : 'Sem Projeto – Sem Evento';
+            const d = getUpdatedDate(ticket);
+            const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
+            const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+            return (
+              <tr key={ticket.id} className="border-t hover:bg-gray-50">
+                <td className="px-3 sm:px-4 py-2 sm:py-3 max-w-[380px]">
+                  <div className="flex items-center gap-2">
+                    {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
+                    <div className="truncate">{ticket.titulo}</div>
+                    {ticketNotifications[ticket.id] && (
+                      <Badge className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                        {ticketNotifications[ticket.id]}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 line-clamp-1">
+                    {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : (ticket.descricao || '')}
+                  </div>
+                </td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3">
+                  <Badge className={`${getStatusColor(ticket.status)} text-[10px]`}>{ticket.status?.replaceAll('_',' ')}</Badge>
+                </td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3">
+                  <Badge className={`${getPriorityColor(ticket.prioridade)} text-[10px]`}>{ticket.prioridade}</Badge>
+                </td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3"><span className="text-xs text-gray-700">{ticket.area?.replaceAll('_',' ')}</span></td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3"><span className="text-xs text-gray-700">{projLabels}</span></td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3">
+                  <div className="text-xs text-gray-700">{dateStr}</div>
+                  <div className="text-[10px] text-gray-500">{timeStr}</div>
+                </td>
+                <td className="px-3 sm:px-4 py-2 sm:py-3">
+                  <Button variant="ghost" size="sm" onClick={() => navigate(`/chamado/${ticket.id}`)}>
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
+          {getFilteredTickets().length === 0 && (
+            <tr>
+              <td colSpan={7} className="px-4 py-8 text-center text-gray-500">Nenhum chamado encontrado com os filtros atuais.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const renderTicketsByProjectCards = () => {
+    const getTicketsByProject = () => {
+      const grouped = {};
+      getFilteredTickets().forEach(ticket => {
+        const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
+        if (!ids.length) {
+          const label = 'Sem Projeto – Sem Evento';
+          if (!grouped[label]) grouped[label] = [];
+          grouped[label].push(ticket);
+        } else {
+          ids.forEach(pid => {
+            const label = getProjectLabel(pid);
+            if (!grouped[label]) grouped[label] = [];
+            grouped[label].push(ticket);
+          });
+        }
+      });
+      return grouped;
+    };
+
+    const grouped = getTicketsByProject();
+
+    return (
+      <div className="space-y-4">
+        {Object.entries(grouped).map(([projectLabel, projectTickets]) => (
+          <div key={projectLabel} className="border rounded-lg">
+            <button
+              onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
+              className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center space-x-3">
+                {expandedProjects[projectLabel] ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+                <div>
+                  <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
+                  <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
+                </div>
+              </div>
+            </button>
+
+            {expandedProjects[projectLabel] && (
+              <div className="border-t bg-gray-50/50 p-3 sm:p-4 space-y-3">
+                {projectTickets.map((ticket) => {
+                  const isAwaitingApproval =
+                    ticket.status === 'aguardando_aprovacao' &&
+                    userProfile?.funcao === 'gerente' &&
+                    ticket.gerenteResponsavelId === user.uid;
+                  const cardClassName = `${bulkActionMode ? 'cursor-default' : 'cursor-pointer hover:shadow-md'} transition-shadow ${
+                    isAwaitingApproval ? 'bg-orange-50 border-2 border-orange-400 shadow-lg ring-2 ring-orange-200' : 'bg-white'
+                  } ${selectedTickets.has(ticket.id) ? 'ring-2 ring-blue-500' : ''}`;
+
+                  const d = getUpdatedDate(ticket);
+                  const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
+                  const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+                  return (
+                    <Card key={ticket.id} className={cardClassName} onClick={bulkActionMode ? undefined : () => navigate(`/chamado/${ticket.id}`)}>
+                      <CardContent className="p-3 md:p-4">
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-start justify-between gap-2">
+                            {bulkActionMode && (
+                              <div className="flex items-center mr-3">
+                                <Checkbox
+                                  checked={selectedTickets.has(ticket.id)}
+                                  onCheckedChange={(checked) => handleTicketSelect(ticket.id, checked)}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
+                                <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
+                                {ticketNotifications[ticket.id] && (
+                                  <Badge className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                                    {ticketNotifications[ticket.id]}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">
+                                {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : ticket.descricao}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-right text-xs text-gray-500">
+                                <div className="flex flex-col items-end">
+                                  <span className="font-medium">{dateStr}</span>
+                                  <span className="text-xs opacity-75">{timeStr}</span>
+                                </div>
+                              </div>
+                              <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/chamado/${ticket.id}`); }} className="h-8 w-8 p-0">
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={`${getStatusColor(ticket.status)} text-xs`}>{ticket.status?.replaceAll('_', ' ')}</Badge>
+                            <Badge className={`${getPriorityColor(ticket.prioridade)} text-xs`}>{ticket.prioridade}</Badge>
+                            <span className="text-xs text-gray-500">{ticket.area?.replaceAll('_', ' ')}</span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+        {Object.keys(grouped).length === 0 && (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum chamado encontrado</h3>
+              <p className="text-gray-500">Ajuste os filtros para ver outros resultados.</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  };
+
+  const counts = getTicketCounts();
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -609,9 +911,7 @@ const DashboardPage = () => {
               </button>
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Dashboard</h2>
-                <p className="text-sm text-gray-500">
-                  Bem-vindo, {userProfile?.nome || user?.email} ({userProfile?.funcao})
-                </p>
+                <p className="text-sm text-gray-500">Bem-vindo, {userProfile?.nome || user?.email} ({userProfile?.funcao})</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
@@ -628,11 +928,12 @@ const DashboardPage = () => {
                   <FileText className="h-4 w-4" />
                   <span>Chamados</span>
                 </TabsTrigger>
+                {/* Aba "Projetos" removida conforme requisito */}
               </TabsList>
             </div>
 
             <TabsContent value="chamados">
-              {/* Sticky toolbar (mobile-first) */}
+              {/* Barra sticky: busca + filtros + toggle view */}
               <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
                   <Input
@@ -641,8 +942,13 @@ const DashboardPage = () => {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
-                  {/* Botão abre filtros (no mobile); em desktop vira redundante mas útil */}
-                  <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => setFiltersOpen(true)} title="Filtros">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => (isMobile ? setShowMobileFilters(v => !v) : setFiltersOpen(true))}
+                    title="Filtros"
+                  >
                     <SlidersHorizontal className="h-4 w-4" />
                   </Button>
                   <Button
@@ -656,75 +962,39 @@ const DashboardPage = () => {
                   </Button>
                 </div>
 
-                {/* Linha secundária (aparece em desktop) */}
-                <div className="hidden lg:flex items-center gap-3 px-4 sm:px-6 lg:px-8 pb-3">
-                  <div className="w-64">
-                    <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Filtrar por evento" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="todos">Todos os eventos</SelectItem>
-                        {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-56">
-                    <Select value={sortBy} onValueChange={setSortBy}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Ordenar por" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
-                        <SelectItem value="priority">Prioridade</SelectItem>
-                        <SelectItem value="status">Status</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                {/* Extra (desktop) */}
+                <DesktopToolbarExtra />
 
-                  <div className="ml-auto flex items-center gap-2">
-                    <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline">Filtros salvos</Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-[220px]">
-                        {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
-                        {savedFilters.map(sf => (
-                          <div key={sf.name} className="flex items-center justify-between px-2 py-1">
-                            <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
-                            <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
-                          </div>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
+                {/* Painel de filtros (mobile) */}
+                {showMobileFilters && <MobileFiltersPanel />}
 
-                {/* Resumo compacto: rolagem horizontal no mobile */}
+                {/* Cards coloridos SEMPRE no mobile (grade), e grid completo no desktop */}
                 <div className="px-4 sm:px-6 lg:px-8 pb-3">
-                  <div className="lg:hidden -mx-2 overflow-x-auto">
-                    <div className="flex gap-2 px-2">
-                      {filterCards.map(card => {
-                        const Icon = card.icon;
-                        const isActive = activeFilter === card.id;
-                        const count = counts[card.id];
-                        return (
-                          <button
-                            key={card.id}
-                            onClick={() => setActiveFilter(card.id)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border shrink-0 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-800'}`}
-                          >
-                            <Icon className="h-4 w-4" />
-                            <span className="text-xs font-medium">{card.title}</span>
-                            <span className="text-[11px] opacity-80">{count}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  {/* mobile: grid 2 colunas com os cards coloridos (como você prefere) */}
+                  <div className="grid grid-cols-2 gap-3 lg:hidden">
+                    {filterCards.map((card) => {
+                      const Icon = card.icon;
+                      const isActive = activeFilter === card.id;
+                      const count = counts[card.id];
+                      return (
+                        <Card
+                          key={card.id}
+                          className={`cursor-pointer transition-all duration-200 ${isActive ? card.activeColor : card.color} hover:shadow-md`}
+                          onClick={() => setActiveFilter(card.id)}
+                        >
+                          <CardContent className="p-3">
+                            <div className="flex items-center justify-between">
+                              <Icon className={`h-5 w-5 ${isActive ? 'text-white' : card.iconColor}`} />
+                              <span className={`text-xs font-medium ${isActive ? 'text-white' : 'text-gray-900'}`}>{card.title}</span>
+                              <span className={`text-sm font-bold ${isActive ? 'text-white' : card.iconColor}`}>{count}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
 
-                  {/* Grade completa no desktop */}
+                  {/* desktop: grid grande de cards resumidos */}
                   <div className="hidden lg:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-3">
                     {filterCards.map((card) => {
                       const Icon = card.icon;
@@ -754,7 +1024,6 @@ const DashboardPage = () => {
 
               {/* Conteúdo */}
               <div className="px-4 sm:px-6 lg:px-8 py-4 space-y-4">
-                {/* Badge de filtro ativo (apenas quando não for "todos") */}
                 {activeFilter !== 'todos' && (
                   <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <div className="flex items-center gap-2">
@@ -772,309 +1041,19 @@ const DashboardPage = () => {
                   </div>
                 )}
 
-                {/* Lista ou Cards */}
-                {viewMode === 'list' ? (
-                  <div className="bg-white border rounded-lg overflow-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-700">
-                        <tr className="text-left">
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Título</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Status</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Prioridade</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Área</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Projeto/Evento</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3 font-medium">Última atualização</th>
-                          <th className="px-3 sm:px-4 py-2 sm:py-3"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getFilteredTickets().map((ticket) => {
-                          const ids = Array.isArray(ticket.projetos) && ticket.projetos.length ? ticket.projetos : (ticket.projetoId ? [ticket.projetoId] : []);
-                          const projLabels = ids.length ? ids.map(getProjectLabel).join(' • ') : 'Sem Projeto – Sem Evento';
-                          const d = getUpdatedDate(ticket);
-                          const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
-                          const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-                          return (
-                            <tr key={ticket.id} className="border-t hover:bg-gray-50">
-                              <td className="px-3 sm:px-4 py-2 sm:py-3 max-w-[380px]">
-                                <div className="flex items-center gap-2">
-                                  {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
-                                  <div className="truncate">{ticket.titulo}</div>
-                                  {ticketNotifications[ticket.id] && (
-                                    <Badge className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
-                                      {ticketNotifications[ticket.id]}
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="text-xs text-gray-500 line-clamp-1">
-                                  {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : (ticket.descricao || '')}
-                                </div>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <Badge className={`${getStatusColor(ticket.status)} text-[10px]`}>{ticket.status?.replaceAll('_',' ')}</Badge>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <Badge className={`${getPriorityColor(ticket.prioridade)} text-[10px]`}>{ticket.prioridade}</Badge>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <span className="text-xs text-gray-700">{ticket.area?.replaceAll('_',' ')}</span>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <span className="text-xs text-gray-700">{projLabels}</span>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <div className="text-xs text-gray-700">{dateStr}</div>
-                                <div className="text-[10px] text-gray-500">{timeStr}</div>
-                              </td>
-                              <td className="px-3 sm:px-4 py-2 sm:py-3">
-                                <Button variant="ghost" size="sm" onClick={() => navigate(`/chamado/${ticket.id}`)}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        {getFilteredTickets().length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                              Nenhum chamado encontrado com os filtros atuais.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {Object.entries(getTicketsByProject()).map(([projectLabel, projectTickets]) => (
-                      <div key={projectLabel} className="border rounded-lg">
-                        <button
-                          onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
-                          className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="flex items-center space-x-3">
-                            {expandedProjects[projectLabel] ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
-                            <div>
-                              <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
-                              <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
-                            </div>
-                          </div>
-                        </button>
-
-                        {expandedProjects[projectLabel] && (
-                          <div className="border-t bg-gray-50/50 p-3 sm:p-4 space-y-3">
-                            {projectTickets.map((ticket) => {
-                              const isAwaitingApproval =
-                                ticket.status === 'aguardando_aprovacao' &&
-                                userProfile?.funcao === 'gerente' &&
-                                ticket.gerenteResponsavelId === user.uid;
-                              const cardClassName = `${bulkActionMode ? 'cursor-default' : 'cursor-pointer hover:shadow-md'} transition-shadow ${
-                                isAwaitingApproval ? 'bg-orange-50 border-2 border-orange-400 shadow-lg ring-2 ring-orange-200' : 'bg-white'
-                              } ${selectedTickets.has(ticket.id) ? 'ring-2 ring-blue-500' : ''}`;
-
-                              const d = getUpdatedDate(ticket);
-                              const dateStr = d ? d.toLocaleDateString('pt-BR') : 'N/A';
-                              const timeStr = d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-
-                              return (
-                                <Card
-                                  key={ticket.id}
-                                  className={cardClassName}
-                                  onClick={bulkActionMode ? undefined : () => navigate(`/chamado/${ticket.id}`)}
-                                >
-                                  <CardContent className="p-3 md:p-4">
-                                    <div className="flex flex-col gap-2">
-                                      <div className="flex items-start justify-between gap-2">
-                                        {bulkActionMode && (
-                                          <div className="flex items-center mr-3">
-                                            <Checkbox
-                                              checked={selectedTickets.has(ticket.id)}
-                                              onCheckedChange={(checked) => handleTicketSelect(ticket.id, checked)}
-                                              onClick={(e) => e.stopPropagation()}
-                                            />
-                                          </div>
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2">
-                                            {(ticket.isConfidential || ticket.confidencial) && <Lock className="h-4 w-4 text-orange-500" title="Confidencial" />}
-                                            <h3 className="font-medium text-sm md:text-base truncate">{ticket.titulo}</h3>
-                                            {ticketNotifications[ticket.id] && (
-                                              <Badge className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
-                                                {ticketNotifications[ticket.id]}
-                                              </Badge>
-                                            )}
-                                          </div>
-                                          <p className="text-xs md:text-sm text-gray-600 mt-1 line-clamp-2">
-                                            {(ticket.isConfidential || ticket.confidencial) ? 'Descrição confidencial' : ticket.descricao}
-                                          </p>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <div className="text-right text-xs text-gray-500">
-                                            <div className="flex flex-col items-end">
-                                              <span className="font-medium">{dateStr}</span>
-                                              <span className="text-xs opacity-75">{timeStr}</span>
-                                            </div>
-                                          </div>
-                                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/chamado/${ticket.id}`); }} className="h-8 w-8 p-0">
-                                            <Eye className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <Badge className={`${getStatusColor(ticket.status)} text-xs`}>{ticket.status?.replaceAll('_', ' ')}</Badge>
-                                        <Badge className={`${getPriorityColor(ticket.prioridade)} text-xs`}>{ticket.prioridade}</Badge>
-                                        <span className="text-xs text-gray-500">{ticket.area?.replaceAll('_', ' ')}</span>
-                                      </div>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-
-                    {Object.keys(getTicketsByProject()).length === 0 && (
-                      <Card>
-                        <CardContent className="p-8 text-center">
-                          <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                          <h3 className="text-lg font-medium text-gray-900 mb-2">
-                            {activeFilter === 'todos' ? 'Nenhum chamado encontrado' : 'Nenhum chamado neste filtro'}
-                          </h3>
-                          <p className="text-gray-500">
-                            {activeFilter === 'todos'
-                              ? 'Não há chamados para exibir no momento.'
-                              : `Não há chamados com o filtro "${filterCards.find(c => c.id === activeFilter)?.title}" aplicado.`}
-                          </p>
-                          {activeFilter !== 'todos' && (
-                            <Button variant="outline" onClick={() => setActiveFilter('todos')} className="mt-4">Ver todos os chamados</Button>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-                )}
+                {viewMode === 'list' ? renderTicketsTable() : renderTicketsByProjectCards()}
               </div>
 
-              {/* Dialog de Filtros (mobile-first) */}
-              <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
-                <DialogContent className="sm:max-w-[700px]">
-                  <DialogHeader>
-                    <DialogTitle>Filtros e Ordenação</DialogTitle>
-                  </DialogHeader>
+              {/* Dialog de filtros — apenas DESKTOP (no mobile usamos painel) */}
+              <Dialog open={filtersOpen && !isMobile} onOpenChange={setFiltersOpen}>
+                <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+                  <DialogHeader><DialogTitle>Filtros e Ordenação</DialogTitle></DialogHeader>
 
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-gray-500 block mb-1">Evento</label>
-                        <Select value={selectedEvent} onValueChange={setSelectedEvent}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Todos os eventos" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="todos">Todos os eventos</SelectItem>
-                            {allEvents.map(ev => <SelectItem key={ev} value={ev}>{ev}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500 block mb-1">Ordenar por</label>
-                        <Select value={sortBy} onValueChange={setSortBy}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Ordenar por" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="updatedAtDesc">Atualização (desc)</SelectItem>
-                            <SelectItem value="priority">Prioridade</SelectItem>
-                            <SelectItem value="status">Status</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {/* Chips rápidos dentro do dialog */}
-                    <div className="space-y-3">
-                      <div>
-                        <div className="text-xs font-medium text-gray-500 mb-2">Status</div>
-                        <div className="flex flex-wrap gap-2">
-                          {allStatuses.map(st => (
-                            <button key={st}
-                              onClick={() => setSelectedStatuses(prev => {
-                                const n = new Set(prev);
-                                n.has(st) ? n.delete(st) : n.add(st);
-                                return n;
-                              })}
-                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedStatuses.has(st) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                              {st.replaceAll('_',' ')}
-                            </button>
-                          ))}
-                          {!!allStatuses.length && (
-                            <button onClick={() => setSelectedStatuses(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-medium text-gray-500 mb-2">Área</div>
-                        <div className="flex flex-wrap gap-2">
-                          {allAreas.map(ar => (
-                            <button key={ar}
-                              onClick={() => setSelectedAreas(prev => {
-                                const n = new Set(prev);
-                                n.has(ar) ? n.delete(ar) : n.add(ar);
-                                return n;
-                              })}
-                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedAreas.has(ar) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                              {ar.replaceAll('_',' ')}
-                            </button>
-                          ))}
-                          {!!allAreas.length && (
-                            <button onClick={() => setSelectedAreas(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-medium text-gray-500 mb-2">Prioridade</div>
-                        <div className="flex flex-wrap gap-2">
-                          {['alta','media','baixa'].map(p => (
-                            <button key={p}
-                              onClick={() => setSelectedPriorities(prev => {
-                                const n = new Set(prev);
-                                n.has(p) ? n.delete(p) : n.add(p);
-                                return n;
-                              })}
-                              className={`text-xs px-3 py-1 rounded-full border transition ${selectedPriorities.has(p) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}`}>
-                              {p}
-                            </button>
-                          ))}
-                          <button onClick={() => setSelectedPriorities(new Set())} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Limpar</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Filtros salvos dentro do dialog (mobile) */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="outline">Filtros salvos</Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-[220px]">
-                          {savedFilters.length === 0 && <DropdownMenuItem disabled>Nenhum filtro salvo</DropdownMenuItem>}
-                          {savedFilters.map(sf => (
-                            <div key={sf.name} className="flex items-center justify-between px-2 py-1">
-                              <button className="text-sm hover:underline" onClick={() => applySavedFilterByName(sf.name)}>{sf.name}</button>
-                              <button className="text-xs text-red-600 hover:underline" onClick={() => deleteSavedFilterByName(sf.name)}>Excluir</button>
-                            </div>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <div className="ml-auto">
-                        <Button onClick={() => setFiltersOpen(false)}>Aplicar</Button>
-                      </div>
+                  {/* Reaproveitando o mesmo conteúdo do painel mobile */}
+                  <MobileFiltersPanel />
+                  <div className="px-4 sm:px-6 lg:px-8 pb-3">
+                    <div className="ml-auto flex items-center justify-end">
+                      <Button onClick={() => setFiltersOpen(false)}>Aplicar</Button>
                     </div>
                   </div>
                 </DialogContent>
