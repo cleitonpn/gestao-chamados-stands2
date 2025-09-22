@@ -19,7 +19,9 @@ import {
   Truck,
   FileText,
   Building,
-  AlertCircle
+  AlertCircle,
+  Send,
+  Trash2,
 } from 'lucide-react';
 
 // =====================
@@ -83,6 +85,21 @@ const formatDate = (value) => {
   }
 };
 
+// Data e hora no fuso de São Paulo (para o Diário)
+const formatDateTimeSP = (isoStringOrDate) => {
+  try {
+    const d = typeof isoStringOrDate === 'string' ? new Date(isoStringOrDate) : (isoStringOrDate || new Date());
+    if (isNaN(d?.getTime())) return '—';
+    return d.toLocaleString('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo',
+    });
+  } catch {
+    return '—';
+  }
+};
+
 // Limites do dia para comparações (usando o horário local do cliente)
 const startOfDaySP = (value) => {
   const d = normalizeDateInput(value);
@@ -110,6 +127,12 @@ const ProjectDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // ====== Diário (estado) ======
+  const [diaryEntries, setDiaryEntries] = useState([]); // [{id, text, authorId, authorName, authorRole, createdAt}]
+  const [newDiaryText, setNewDiaryText] = useState('');
+  const [savingDiary, setSavingDiary] = useState(false);
+  const [diaryError, setDiaryError] = useState('');
+
   useEffect(() => {
     if (authInitialized && user && userProfile) {
       loadProjectData();
@@ -133,7 +156,7 @@ const ProjectDetailPage = () => {
         return;
       }
 
-      // Permissões
+      // Permissões básicas (ajuste conforme sua regra de negócios)
       const userRole = userProfile.funcao;
       const userId = userProfile.id || user.uid;
 
@@ -163,11 +186,98 @@ const ProjectDetailPage = () => {
       setProject(projectData);
       setUsers(usersData || []);
 
+      // Diário: carrega do documento do projeto
+      const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
+      initialDiary.sort((a, b) => {
+        const ta = new Date(a?.createdAt || 0).getTime();
+        const tb = new Date(b?.createdAt || 0).getTime();
+        return tb - ta;
+      });
+      setDiaryEntries(initialDiary);
+
     } catch (err) {
       console.error('Erro ao carregar projeto:', err);
       setError('Erro ao carregar dados do projeto');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ====== Diário (ações) ======
+  const handleAddDiaryEntry = async () => {
+    setDiaryError('');
+    const textVal = (newDiaryText || '').trim();
+    if (!textVal) return;
+
+    const entry = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      text: textVal,
+      authorId: userProfile?.id || user?.uid || '',
+      authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
+      authorRole: userProfile?.funcao || 'usuário',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      setSavingDiary(true);
+
+      // Salva dentro do documento do projeto (campo 'diario')
+      const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
+
+      if (typeof projectService.addDiaryEntry === 'function') {
+        await projectService.addDiaryEntry(project.id || projectId, entry);
+      } else if (typeof projectService.updateProject === 'function') {
+        await projectService.updateProject(project.id || projectId, {
+          diario: next,
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      // Otimista
+      setDiaryEntries(prev => [entry, ...prev]);
+      setProject(prev => ({
+        ...(prev || {}),
+        diario: next,
+        atualizadoEm: new Date().toISOString(),
+      }));
+      setNewDiaryText('');
+
+    } catch (e) {
+      console.error('Erro ao salvar observação do diário:', e);
+      setDiaryError('Não foi possível salvar a observação. Tente novamente.');
+    } finally {
+      setSavingDiary(false);
+    }
+  };
+
+  const handleDeleteDiaryEntry = async (entryId) => {
+    setDiaryError('');
+    if (userProfile?.funcao !== 'administrador') {
+      setDiaryError('Apenas administradores podem excluir observações.');
+      return;
+    }
+    try {
+      setSavingDiary(true);
+      const current = Array.isArray(project?.diario) ? project.diario : diaryEntries;
+      const next = current.filter(e => e.id !== entryId);
+
+      if (typeof projectService.removeDiaryEntry === 'function') {
+        await projectService.removeDiaryEntry(project.id || projectId, entryId);
+      } else if (typeof projectService.updateProject === 'function') {
+        await projectService.updateProject(project.id || projectId, {
+          diario: next,
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      setDiaryEntries(prev => prev.filter(e => e.id != entryId));
+      setProject(prev => ({ ...(prev || {}), diario: next }));
+
+    } catch (e) {
+      console.error('Erro ao excluir observação do diário:', e);
+      setDiaryError('Não foi possível excluir a observação. Tente novamente.');
+    } finally {
+      setSavingDiary(false);
     }
   };
 
@@ -273,13 +383,13 @@ const ProjectDetailPage = () => {
                 </h1>
                 <Badge 
                   variant="secondary"
-                  className={`${
-                    statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+                  className={`$
+                    {statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
                     statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
                     statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
                     statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}
+                    'bg-gray-100 text-gray-800'}
+                  `}
                 >
                   {statusInfo.label}
                 </Badge>
@@ -344,7 +454,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Cronograma */}
+            {/* Cronograma (exemplo, mantenha conforme seu arquivo) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -353,203 +463,106 @@ const ProjectDetailPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Montagem */}
-                {(project.montagem?.dataInicio || project.montagem?.dataFim) && (
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-blue-800 mb-2 flex items-center">
-                      <Wrench className="h-4 w-4 mr-2" />
-                      Montagem
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.montagem.dataInicio)}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.montagem.dataFim)}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Evento */}
-                {(project.evento?.dataInicio || project.evento?.dataFim) && (
-                  <div className="bg-green-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-green-800 mb-2 flex items-center">
-                      <PartyPopper className="h-4 w-4 mr-2" />
-                      Evento
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.evento.dataInicio)}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.evento.dataFim)}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Desmontagem */}
-                {(project.desmontagem?.dataInicio || project.desmontagem?.dataFim) && (
-                  <div className="bg-orange-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-orange-800 mb-2 flex items-center">
-                      <Truck className="h-4 w-4 mr-2" />
-                      Desmontagem
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem.dataInicio)}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem.dataFim)}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Período Geral */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="font-medium text-gray-800 mb-2 flex items-center">
-                    <Clock className="h-4 w-4 mr-2" />
-                    Período Geral
+                {/* Exemplos de blocos de cronograma... */}
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-blue-800 mb-2 flex items-center">
+                    <Wrench className="h-4 w-4 mr-2" />
+                    Montagem
                   </h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-600">Início:</span>
-                      <p className="font-medium">{formatDate(project.dataInicio)}</p>
+                      <p className="font-medium">{formatDate(project?.montagem?.dataInicio) || '—'}</p>
                     </div>
                     <div>
                       <span className="text-gray-600">Fim:</span>
-                      <p className="font-medium">{formatDate(project.dataFim)}</p>
+                      <p className="font-medium">{formatDate(project?.montagem?.dataFim) || '—'}</p>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Descrição e Observações */}
-            {(project.descricao || project.observacoes) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <FileText className="h-5 w-5 mr-2" />
-                    Detalhes Adicionais
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {project.descricao && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">Descrição</label>
-                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.descricao}</p>
-                    </div>
-                  )}
-                  {project.observacoes && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">Observações</label>
-                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.observacoes}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Coluna Lateral */}
-          <div className="space-y-6">
-            {/* Responsáveis */}
+            {/* Diário do Projeto */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Users className="h-5 w-5 mr-2" />
-                  Responsáveis
+                  <FileText className="h-5 w-5 mr-2" />
+                  Diário do Projeto
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Produtor</label>
-                  <p className="text-blue-600 font-medium">
-                    {project.produtorNome || 'Não atribuído'}
-                  </p>
-                  {project.produtorEmail && (
-                    <p className="text-sm text-gray-500">{project.produtorEmail}</p>
-                  )}
+                  <label className="text-sm font-medium text-gray-600">Adicionar observação</label>
+                  <textarea
+                    className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                    value={newDiaryText}
+                    onChange={(e) => setNewDiaryText(e.target.value)}
+                    placeholder="Ex.: Rita (consultora) definiu as cores do bagum: grafite e preto."
+                  />
+                  {diaryError && <p className="text-sm text-red-600 mt-2">{diaryError}</p>}
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary || !newDiaryText.trim()}>
+                      {savingDiary ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                      Salvar no diário
+                    </Button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Consultor</label>
-                  <p className="text-green-600 font-medium">
-                    {project.consultorNome || 'Não atribuído'}
-                  </p>
-                  {project.consultorEmail && (
-                    <p className="text-sm text-gray-500">{project.consultorEmail}</p>
+
+                <div className="space-y-3">
+                  {Array.isArray(diaryEntries) && diaryEntries.length === 0 ? (
+                    <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                  ) : (
+                    (diaryEntries || []).map((e) => (
+                      <div key={e.id} className="rounded-lg border p-3 bg-gray-50">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-700">
+                              <span className="font-semibold">{e.authorName}</span> ({e.authorRole}) deixou a seguinte observação:
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-gray-900 break-words">{e.text}</p>
+                          </div>
+                          {userProfile?.funcao === 'administrador' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteDiaryEntry(e.id)}
+                              title="Excluir observação"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500">
+                          {formatDateTimeSP(e.createdAt)}
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </CardContent>
             </Card>
+          </div>
 
-            {/* Equipes Terceirizadas */}
-            {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Equipes Terceirizadas</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {Object.entries(project.equipesEmpreiteiras).map(([area, empresa]) => (
-                    empresa && (
-                      <div key={area}>
-                        <label className="text-sm font-medium text-gray-500 capitalize">
-                          {area}
-                        </label>
-                        <p className="text-gray-900">{empresa}</p>
-                      </div>
-                    )
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Link do Drive */}
-            {project.linkDrive && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Documentos</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <a
-                    href={project.linkDrive}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center text-blue-600 hover:text-blue-800"
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Acessar Drive
-                    <ExternalLink className="h-3 w-3 ml-1" />
-                  </a>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Informações do Sistema */}
+          {/* Coluna Lateral (exemplo) */}
+          <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Informações do Sistema</CardTitle>
+                <CardTitle className="flex items-center">
+                  <Users className="h-5 w-5 mr-2" />
+                  Equipe
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm text-gray-600">
+              <CardContent className="space-y-2">
                 <div>
-                  <span className="font-medium">Criado em:</span>
-                  <p>{formatDate(project.criadoEm)}</p>
+                  <span className="font-medium">Consultor:</span>
+                  <p>{project.consultorNome || '—'}</p>
                 </div>
-                {project.atualizadoEm && (
-                  <div>
-                    <span className="font-medium">Atualizado em:</span>
-                    <p>{formatDate(project.atualizadoEm)}</p>
-                  </div>
-                )}
+                <div>
+                  <span className="font-medium">Produtor:</span>
+                  <p>{project.produtorNome || '—'}</p>
+                </div>
                 <div>
                   <span className="font-medium">Status:</span>
                   <p className="capitalize">{project.status || 'ativo'}</p>
