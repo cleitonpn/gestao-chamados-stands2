@@ -20,6 +20,9 @@ import {
   FileText,
   Building,
   AlertCircle
+} ,
+  Send,
+  Trash2
 } from 'lucide-react';
 
 // =====================
@@ -81,7 +84,23 @@ const formatDate = (value) => {
     console.error('Erro ao formatar data:', e);
     return 'Data inválida';
   }
+}
+
+// Data e hora no fuso de São Paulo (para o Diário)
+const formatDateTimeSP = (isoStringOrDate) => {
+  try {
+    const d = typeof isoStringOrDate === 'string' ? new Date(isoStringOrDate) : (isoStringOrDate || new Date());
+    if (isNaN(d?.getTime())) return '—';
+    return d.toLocaleString('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo',
+    });
+  } catch {
+    return '—';
+  }
 };
+;
 
 // Limites do dia para comparações (usando o horário local do cliente)
 const startOfDaySP = (value) => {
@@ -110,7 +129,15 @@ const ProjectDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  
+
+  // ====== Diário (estado) ======
+  const [diaryEntries, setDiaryEntries] = useState([]); // [{id, text, authorName, authorRole, createdAt, linkUrl?}]
+  const [newDiaryText, setNewDiaryText] = useState('');
+  const [newDiaryLink, setNewDiaryLink] = useState('');
+  const [savingDiary, setSavingDiary] = useState(false);
+  const [diaryError, setDiaryError] = useState('');
+useEffect(() => {
     if (authInitialized && user && userProfile) {
       loadProjectData();
     } else if (authInitialized && !user) {
@@ -163,6 +190,16 @@ const ProjectDetailPage = () => {
       setProject(projectData);
       setUsers(usersData || []);
 
+      // Diário: carrega do documento do projeto (se existir)
+      const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
+      initialDiary.sort((a, b) => {
+        const ta = new Date(a?.createdAt || 0).getTime();
+        const tb = new Date(b?.createdAt || 0).getTime();
+        return tb - ta;
+      });
+      setDiaryEntries(initialDiary);
+
+
     } catch (err) {
       console.error('Erro ao carregar projeto:', err);
       setError('Erro ao carregar dados do projeto');
@@ -171,7 +208,91 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const getStatusInfo = () => {
+  
+  // ====== Diário (ações) ======
+  const handleAddDiaryEntry = async () => {
+    setDiaryError('');
+    const textVal = (newDiaryText || '').trim();
+    const linkVal = (newDiaryLink || '').trim();
+    if (!textVal) return;
+
+    // valida link simples
+    if (linkVal && !/^https?:\/\//i.test(linkVal)) {
+      setDiaryError('Informe um link válido (http/https)');
+      return;
+    }
+
+    const entry = {
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+      text: textVal,
+      authorId: userProfile?.id || user?.uid || '',
+      authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
+      authorRole: userProfile?.funcao || 'usuário',
+      createdAt: new Date().toISOString(),
+      ...(linkVal ? { linkUrl: linkVal } : {}),
+    };
+
+    try {
+      setSavingDiary(true);
+      const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
+
+      if (typeof projectService.addDiaryEntry === 'function') {
+        await projectService.addDiaryEntry(project.id || projectId, entry);
+      } else if (typeof projectService.updateProject === 'function') {
+        await projectService.updateProject(project.id || projectId, {
+          diario: next,
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      setDiaryEntries(prev => [entry, ...prev]);
+      setProject(prev => ({
+        ...(prev || {}),
+        diario: next,
+        atualizadoEm: new Date().toISOString(),
+      }));
+      setNewDiaryText('');
+      setNewDiaryLink('');
+
+    } catch (e) {
+      console.error('Erro ao salvar observação do diário:', e);
+      setDiaryError('Não foi possível salvar a observação. Tente novamente.');
+    } finally {
+      setSavingDiary(false);
+    }
+  };
+
+  const handleDeleteDiaryEntry = async (entryId) => {
+    setDiaryError('');
+    if (userProfile?.funcao !== 'administrador') {
+      setDiaryError('Apenas administradores podem excluir observações.');
+      return;
+    }
+    try {
+      setSavingDiary(true);
+      const current = Array.isArray(project?.diario) ? project.diario : diaryEntries;
+      const next = current.filter(e => e.id !== entryId);
+
+      if (typeof projectService.removeDiaryEntry === 'function') {
+        await projectService.removeDiaryEntry(project.id || projectId, entryId);
+      } else if (typeof projectService.updateProject === 'function') {
+        await projectService.updateProject(project.id || projectId, {
+          diario: next,
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      setDiaryEntries(prev => prev.filter(e => e.id != entryId));
+      setProject(prev => ({ ...(prev || {}), diario: next }));
+
+    } catch (e) {
+      console.error('Erro ao excluir observação do diário:', e);
+      setDiaryError('Não foi possível excluir a observação. Tente novamente.');
+    } finally {
+      setSavingDiary(false);
+    }
+  };
+const getStatusInfo = () => {
     if (!project) return { label: 'Carregando...', color: 'gray' };
     
     const today = new Date();
@@ -339,6 +460,45 @@ const ProjectDetailPage = () => {
                   <div>
                     <label className="text-sm font-medium text-gray-500">Pavilhão</label>
                     <p>{project.pavilhao || 'Não especificado'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+
+            {/* Diário do Projeto — FORM (entre Info Básicas e Cronograma) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Diário do Projeto
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Adicionar observação</label>
+                  <textarea
+                    className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                    value={newDiaryText}
+                    onChange={(e) => setNewDiaryText(e.target.value)}
+                    placeholder="Ex.: Rita (consultora) definiu as cores do bagum: grafite e preto."
+                  />
+                  <div className="mt-2">
+                    <input
+                      type="url"
+                      className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Link do Drive (opcional): https://drive.google.com/…"
+                      value={newDiaryLink}
+                      onChange={(e) => setNewDiaryLink(e.target.value)}
+                    />
+                  </div>
+                  {diaryError && <p className="text-sm text-red-600 mt-2">{diaryError}</p>}
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary || !newDiaryText.trim()}>
+                      {savingDiary ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                      Salvar no diário
+                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -556,6 +716,60 @@ const ProjectDetailPage = () => {
                 </div>
               </CardContent>
             </Card>
+            {/* Diário do Projeto — ENTRADAS (abaixo de Informações do Sistema) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Observações do Projeto
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Array.isArray(diaryEntries) && diaryEntries.length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                ) : (
+                  (diaryEntries || []).map((e) => (
+                    <div key={e.id} className="rounded-lg border p-3 bg-gray-50">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">{e.authorName}</span> ({e.authorRole}) deixou a seguinte observação:
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-gray-900 break-words">{e.text}</p>
+                          {e.linkUrl && (
+                            <div className="mt-2 text-sm">
+                              <a
+                                href={e.linkUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                                Abrir link
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                        {userProfile?.funcao === 'administrador' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteDiaryEntry(e.id)}
+                            title="Excluir observação"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500">
+                        {formatDateTimeSP(e.createdAt)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
           </div>
         </div>
       </div>
