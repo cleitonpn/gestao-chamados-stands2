@@ -6,23 +6,7 @@ import { userService } from '../services/userService';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  ArrowLeft, 
-  Calendar,
-  MapPin,
-  Users, 
-  ExternalLink,
-  Loader2,
-  Clock,
-  Wrench,
-  PartyPopper,
-  Truck,
-  FileText,
-  Building,
-  AlertCircle,
-  Send,
-  Trash2,
-} from 'lucide-react';
+import { ArrowLeft, Calendar, MapPin, Users, ExternalLink, Loader2, Clock, Wrench, PartyPopper, Truck, FileText, Building, AlertCircle, Send, Trash2 } from 'lucide-react';
 
 // =====================
 // Helpers de Data / Fuso
@@ -83,7 +67,7 @@ const formatDate = (value) => {
     console.error('Erro ao formatar data:', e);
     return 'Data inválida';
   }
-};
+}
 
 // Data e hora no fuso de São Paulo (para o Diário)
 const formatDateTimeSP = (isoStringOrDate) => {
@@ -99,6 +83,7 @@ const formatDateTimeSP = (isoStringOrDate) => {
     return '—';
   }
 };
+;
 
 // Limites do dia para comparações (usando o horário local do cliente)
 const startOfDaySP = (value) => {
@@ -133,6 +118,7 @@ const ProjectDetailPage = () => {
   const [savingDiary, setSavingDiary] = useState(false);
   const [diaryError, setDiaryError] = useState('');
 
+
   useEffect(() => {
     if (authInitialized && user && userProfile) {
       loadProjectData();
@@ -156,7 +142,7 @@ const ProjectDetailPage = () => {
         return;
       }
 
-      // Permissões básicas (ajuste conforme sua regra de negócios)
+      // Permissões
       const userRole = userProfile.funcao;
       const userId = userProfile.id || user.uid;
 
@@ -189,19 +175,7 @@ const ProjectDetailPage = () => {
       // Diário: carrega do documento do projeto
       const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
       initialDiary.sort((a, b) => {
-        const ta = new Date(a?.createdAt || 0).getTime();
-        const tb = new Date(b?.createdAt || 0).getTime();
-        return tb - ta;
-      });
-      setDiaryEntries(initialDiary);
-
-    } catch (err) {
-      console.error('Erro ao carregar projeto:', err);
-      setError('Erro ao carregar dados do projeto');
-    } finally {
-      setLoading(false);
-    }
-  };
+    
 
   // ====== Diário (ações) ======
   const handleAddDiaryEntry = async () => {
@@ -221,7 +195,7 @@ const ProjectDetailPage = () => {
     try {
       setSavingDiary(true);
 
-      // Salva dentro do documento do projeto (campo 'diario')
+      // Fallback principal: salva dentro do documento do projeto (campo 'diario')
       const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
 
       if (typeof projectService.addDiaryEntry === 'function') {
@@ -233,7 +207,7 @@ const ProjectDetailPage = () => {
         });
       }
 
-      // Otimista
+      // Otimista: atualiza local e limpa campo
       setDiaryEntries(prev => [entry, ...prev]);
       setProject(prev => ({
         ...(prev || {}),
@@ -278,6 +252,20 @@ const ProjectDetailPage = () => {
       setDiaryError('Não foi possível excluir a observação. Tente novamente.');
     } finally {
       setSavingDiary(false);
+    }
+  };
+    const ta = new Date(a?.createdAt || 0).getTime();
+        const tb = new Date(b?.createdAt || 0).getTime();
+        return tb - ta;
+      });
+      setDiaryEntries(initialDiary);
+
+
+    } catch (err) {
+      console.error('Erro ao carregar projeto:', err);
+      setError('Erro ao carregar dados do projeto');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -383,13 +371,13 @@ const ProjectDetailPage = () => {
                 </h1>
                 <Badge 
                   variant="secondary"
-                  className={`$
-                    {statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+                  className={`${
+                    statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
                     statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
                     statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
                     statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'}
-                  `}
+                    'bg-gray-100 text-gray-800'
+                  }`}
                 >
                   {statusInfo.label}
                 </Badge>
@@ -454,7 +442,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Cronograma (exemplo, mantenha conforme seu arquivo) */}
+            {/* Cronograma */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -463,26 +451,112 @@ const ProjectDetailPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Exemplos de blocos de cronograma... */}
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <h4 className="font-medium text-blue-800 mb-2 flex items-center">
-                    <Wrench className="h-4 w-4 mr-2" />
-                    Montagem
+                {/* Montagem */}
+                {(project.montagem?.dataInicio || project.montagem?.dataFim) && (
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-blue-800 mb-2 flex items-center">
+                      <Wrench className="h-4 w-4 mr-2" />
+                      Montagem
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.montagem.dataInicio)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.montagem.dataFim)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Evento */}
+                {(project.evento?.dataInicio || project.evento?.dataFim) && (
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-green-800 mb-2 flex items-center">
+                      <PartyPopper className="h-4 w-4 mr-2" />
+                      Evento
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.evento.dataInicio)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.evento.dataFim)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Desmontagem */}
+                {(project.desmontagem?.dataInicio || project.desmontagem?.dataFim) && (
+                  <div className="bg-orange-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-orange-800 mb-2 flex items-center">
+                      <Truck className="h-4 w-4 mr-2" />
+                      Desmontagem
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.desmontagem.dataInicio)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.desmontagem.dataFim)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Período Geral */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-gray-800 mb-2 flex items-center">
+                    <Clock className="h-4 w-4 mr-2" />
+                    Período Geral
                   </h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-600">Início:</span>
-                      <p className="font-medium">{formatDate(project?.montagem?.dataInicio) || '—'}</p>
+                      <p className="font-medium">{formatDate(project.dataInicio)}</p>
                     </div>
                     <div>
                       <span className="text-gray-600">Fim:</span>
-                      <p className="font-medium">{formatDate(project?.montagem?.dataFim) || '—'}</p>
+                      <p className="font-medium">{formatDate(project.dataFim)}</p>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
+            {/* Descrição e Observações */}
+            {(project.descricao || project.observacoes) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <FileText className="h-5 w-5 mr-2" />
+                    Detalhes Adicionais
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {project.descricao && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Descrição</label>
+                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.descricao}</p>
+                    </div>
+                  )}
+                  {project.observacoes && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Observações</label>
+                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.observacoes}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          
             {/* Diário do Projeto */}
             <Card>
               <CardHeader>
@@ -543,26 +617,98 @@ const ProjectDetailPage = () => {
                 </div>
               </CardContent>
             </Card>
-          </div>
+</div>
 
-          {/* Coluna Lateral (exemplo) */}
+          {/* Coluna Lateral */}
           <div className="space-y-6">
+            {/* Responsáveis */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Users className="h-5 w-5 mr-2" />
-                  Equipe
+                  Responsáveis
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-4">
                 <div>
-                  <span className="font-medium">Consultor:</span>
-                  <p>{project.consultorNome || '—'}</p>
+                  <label className="text-sm font-medium text-gray-500">Produtor</label>
+                  <p className="text-blue-600 font-medium">
+                    {project.produtorNome || 'Não atribuído'}
+                  </p>
+                  {project.produtorEmail && (
+                    <p className="text-sm text-gray-500">{project.produtorEmail}</p>
+                  )}
                 </div>
                 <div>
-                  <span className="font-medium">Produtor:</span>
-                  <p>{project.produtorNome || '—'}</p>
+                  <label className="text-sm font-medium text-gray-500">Consultor</label>
+                  <p className="text-green-600 font-medium">
+                    {project.consultorNome || 'Não atribuído'}
+                  </p>
+                  {project.consultorEmail && (
+                    <p className="text-sm text-gray-500">{project.consultorEmail}</p>
+                  )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Equipes Terceirizadas */}
+            {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Equipes Terceirizadas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {Object.entries(project.equipesEmpreiteiras).map(([area, empresa]) => (
+                    empresa && (
+                      <div key={area}>
+                        <label className="text-sm font-medium text-gray-500 capitalize">
+                          {area}
+                        </label>
+                        <p className="text-gray-900">{empresa}</p>
+                      </div>
+                    )
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Link do Drive */}
+            {project.linkDrive && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Documentos</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <a
+                    href={project.linkDrive}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Acessar Drive
+                    <ExternalLink className="h-3 w-3 ml-1" />
+                  </a>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Informações do Sistema */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Informações do Sistema</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-gray-600">
+                <div>
+                  <span className="font-medium">Criado em:</span>
+                  <p>{formatDate(project.criadoEm)}</p>
+                </div>
+                {project.atualizadoEm && (
+                  <div>
+                    <span className="font-medium">Atualizado em:</span>
+                    <p>{formatDate(project.atualizadoEm)}</p>
+                  </div>
+                )}
                 <div>
                   <span className="font-medium">Status:</span>
                   <p className="capitalize">{project.status || 'ativo'}</p>
