@@ -1,13 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { gamificationService } from '@/services/gamificationService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Trophy, Medal, Award, Loader2, User } from 'lucide-react';
+import {
+  Trophy,
+  Medal,
+  Award,
+  Loader2,
+  User,
+  LayoutDashboard,
+} from 'lucide-react';
 
 const PeriodPicker = ({ value, onChange }) => (
   <Select value={String(value)} onValueChange={v => onChange(v === 'all' ? 'all' : Number(v))}>
@@ -24,30 +32,59 @@ const PeriodPicker = ({ value, onChange }) => (
   </Select>
 );
 
+/** Card do pódio com visual turbinado */
 const PodiumCard = ({ place, user, highlight }) => {
   const Icon = place === 1 ? Trophy : place === 2 ? Medal : Award;
-  const placeColors = place === 1
-    ? 'bg-yellow-100 text-yellow-800'
+
+  // estilos por colocação
+  const style = place === 1
+    ? {
+        bg: 'from-yellow-200 via-yellow-300 to-yellow-500',
+        ring: 'ring-yellow-400',
+        badge: 'bg-yellow-100 text-yellow-900 border-yellow-400',
+      }
     : place === 2
-      ? 'bg-gray-100 text-gray-800'
-      : 'bg-amber-100 text-amber-800';
+    ? {
+        bg: 'from-slate-100 via-slate-200 to-slate-400',
+        ring: 'ring-slate-400',
+        badge: 'bg-slate-100 text-slate-900 border-slate-400',
+      }
+    : {
+        bg: 'from-amber-200 via-amber-300 to-orange-500',
+        ring: 'ring-amber-500',
+        badge: 'bg-amber-100 text-amber-900 border-amber-500',
+      };
 
   if (!user) return null;
   return (
-    <Card className={`${highlight ? 'ring-2 ring-blue-500' : ''}`}>
+    <Card
+      className={[
+        'relative overflow-hidden border-0 shadow-lg hover:shadow-xl transition-all duration-300',
+        'transform hover:-translate-y-0.5 bg-gradient-to-br', style.bg,
+        highlight ? `ring-2 ${style.ring}` : '',
+        'rounded-2xl',
+      ].join(' ')}
+    >
+      {/* “Glow” decorativo */}
+      <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/30 blur-2xl" />
+
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Icon className="h-5 w-5" />
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <Icon className="h-6 w-6 drop-shadow-sm" />
           {place === 1 ? '1º lugar' : place === 2 ? '2º lugar' : '3º lugar'}
         </CardTitle>
-        <Badge className={placeColors}>{user.score} pts</Badge>
+        <Badge className={`border ${style.badge} text-sm px-2.5 py-1.5`}>
+          {user.score} pts
+        </Badge>
       </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold flex items-center gap-2">
+
+      <CardContent className="text-black/90">
+        <div className="text-2xl font-extrabold flex items-center gap-2 drop-shadow-sm">
           <User className="h-6 w-6" /> {user.nome}
         </div>
-        <p className="text-xs text-muted-foreground capitalize">{user.funcao}</p>
-        <div className="mt-3 text-xs text-muted-foreground flex gap-3">
+        <p className="text-xs/5 text-black/70 capitalize">{user.funcao}</p>
+
+        <div className="mt-3 text-xs text-black/75 flex flex-wrap gap-x-4 gap-y-1">
           <span>Chamados: <b>{user.tickets}</b></span>
           <span>Mensagens: <b>{user.messages}</b></span>
           <span>Diário: <b>{user.diary}</b></span>
@@ -59,6 +96,8 @@ const PodiumCard = ({ place, user, highlight }) => {
 
 const GamingPage = () => {
   const { user, userProfile } = useAuth();
+  const navigate = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState(30);
   const [data, setData] = useState({ rows: [], weights: { ticket: 3, message: 1, diary: 2 } });
@@ -78,8 +117,8 @@ const GamingPage = () => {
     }
   };
 
-  useEffect(() => { load(period); }, []); // primeira carga
-  useEffect(() => { load(period); }, [period]); // quando trocar de período
+  useEffect(() => { load(period); }, []);      // primeira carga
+  useEffect(() => { load(period); }, [period]); // ao trocar o período
 
   const podium = useMemo(() => data.rows.slice(0, 3), [data.rows]);
   const myRankIndex = useMemo(
@@ -93,12 +132,20 @@ const GamingPage = () => {
       <Header />
       <main className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">Gamificação</h1>
-            <p className="text-sm text-muted-foreground">
-              Ranking de interações (Chamados, Mensagens e Diário). Pesos: chamado {data.weights.ticket} • mensagem {data.weights.message} • diário {data.weights.diary}.
-            </p>
+          <div className="flex items-center gap-3">
+            {/* Botão para voltar à Dashboard */}
+            <Button variant="outline" onClick={() => navigate('/dashboard')}>
+              <LayoutDashboard className="h-4 w-4 mr-2" />
+              Voltar para Dashboard
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">Gamificação</h1>
+              <p className="text-sm text-muted-foreground">
+                Ranking de interações (Chamados, Mensagens e Diário). Pesos: chamado {data.weights.ticket} • mensagem {data.weights.message} • diário {data.weights.diary}.
+              </p>
+            </div>
           </div>
+
           <div className="flex items-center gap-2">
             <PeriodPicker value={period} onChange={setPeriod} />
             <Button variant="outline" onClick={() => load(period)} disabled={loading}>
@@ -108,7 +155,7 @@ const GamingPage = () => {
           </div>
         </div>
 
-        {/* Podium */}
+        {/* Pódio */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <PodiumCard place={1} user={podium[0]} highlight={podium[0]?.userId === currentUserId} />
           <PodiumCard place={2} user={podium[1]} highlight={podium[1]?.userId === currentUserId} />
@@ -132,7 +179,9 @@ const GamingPage = () => {
           </CardHeader>
           <CardContent>
             <Table>
-              <TableCaption>Interações {period === 'all' ? 'de todo o histórico' : `dos últimos ${period} dias`}</TableCaption>
+              <TableCaption>
+                Interações {period === 'all' ? 'de todo o histórico' : `dos últimos ${period} dias`}
+              </TableCaption>
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
