@@ -374,6 +374,35 @@ const ProjectDetailPage = () => {
     return { total, open, closed, completion, topAreas };
   }, [tickets]);
 
+  // ====== Permissão para ver lista de chamados (segue TicketDetailPage)
+  const canUserAccessTicketsList = useMemo(() => {
+    if (!user || !userProfile) return false;
+    const role = (userProfile.funcao || '').toLowerCase();
+
+    // admins/gerentes sempre podem
+    if (role === 'administrador' || role === 'gerente') return true;
+    if (!tickets || tickets.length === 0) return false;
+
+    const areaOp = userProfile.area;
+
+    // se existe pelo menos 1 chamado que o usuário poderia abrir no TicketDetailPage
+    return tickets.some((t) => {
+      const isConf = !!(t?.confidencial || t?.isConfidential);
+      const isCreator = t?.criadoPor && t.criadoPor === user.uid;
+
+      if (!isConf) return true;             // não-confidencial → ok
+      if (isCreator) return true;           // criador → ok
+
+      if (role === 'operador') {            // operador precisa ter área envolvida
+        const involved =
+          [t?.area, t?.areaDeOrigem, t?.areaDestino, t?.areaQueRejeitou].includes(areaOp) ||
+          (Array.isArray(t?.areasEnvolvidas) && t.areasEnvolvidas.includes(areaOp));
+        if (involved) return true;
+      }
+      return false;
+    });
+  }, [tickets, user, userProfile]);
+
   // Linkar para a lista filtrada (usa página /admin/chamados-filtrados)
   const goToFilteredTickets = () => {
     try {
@@ -896,17 +925,25 @@ const ProjectDetailPage = () => {
                       )}
                     </div>
 
-                    <div className="pt-2">
-                      <Button
-                        onClick={goToFilteredTickets}
-                        className="w-full"
-                        variant="outline"
-                        disabled={tickets.length === 0}
-                        title="Ver lista de chamados do projeto"
-                      >
-                        Ver todos os chamados
-                      </Button>
-                    </div>
+                    {/* Botão condicionado às regras de acesso (TicketDetailPage) */}
+                    {canUserAccessTicketsList && (
+                      <div className="pt-2">
+                        <Button
+                          onClick={goToFilteredTickets}
+                          className="w-full"
+                          variant="outline"
+                          disabled={tickets.length === 0}
+                          title="Ver lista de chamados do projeto"
+                        >
+                          Ver todos os chamados
+                        </Button>
+                      </div>
+                    )}
+                    {!canUserAccessTicketsList && (
+                      <p className="text-xs text-gray-500 pt-1">
+                        Você não tem permissão para visualizar a lista de chamados deste projeto.
+                      </p>
+                    )}
                   </>
                 )}
               </CardContent>
