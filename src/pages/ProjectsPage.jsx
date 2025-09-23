@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft , Search, BarChart3} from 'lucide-react';
 
 // =====================
 // Helpers de Data / Fuso
@@ -108,7 +108,35 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
   const statusInfo = getStatusInfo();
 
-  return (
+  
+const phaseCounts = useMemo(() => {
+  const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const inRange = (s, e) => {
+    const S = startOfDaySP(s), E = endOfDaySP(e);
+    return S && E && today >= S && today <= E;
+  };
+
+  for (const p of filteredProjects) {
+    let phase = 'finalizado';
+    if (p.status === 'encerrado') {
+      phase = 'finalizado';
+    } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
+      phase = 'desmontagem';
+    } else if (inRange(p.montagem?.dataInicio, p.montagem?.dataFim) || inRange(p.evento?.dataInicio, p.evento?.dataFim)) {
+      phase = 'andamento'; // inclui montagem + evento
+    } else {
+      const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
+      const S = startOfDaySP(start);
+      phase = (S && today < S) ? 'futuro' : 'finalizado';
+    }
+    counts[phase] = (counts[phase] || 0) + 1;
+  }
+  return counts;
+}, [filteredProjects]);
+
+return (
     <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
       <div className="flex justify-between items-start mb-4">
         <div className="flex items-center gap-2">
@@ -180,7 +208,10 @@ const ProjectsPage = () => {
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState('todos');
   const [activeTab, setActiveTab] = useState('ativos');
-  const [loading, setLoading] = useState(true);
+  
+const [searchTerm, setSearchTerm] = useState('');
+const currentSearch = useMemo(() => location.search, [location.search]);
+const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Seleção em massa
@@ -195,8 +226,10 @@ const ProjectsPage = () => {
     const params = new URLSearchParams(location.search);
     const eventFromUrl = params.get('evento');
     const tabFromUrl = params.get('tab');
+    const qFromUrl = params.get('q') || '';
     if (eventFromUrl) setSelectedEvent(eventFromUrl);
     if (tabFromUrl) setActiveTab(tabFromUrl);
+    setSearchTerm(qFromUrl);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -289,9 +322,24 @@ const ProjectsPage = () => {
       projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
     }
 
-    setFilteredProjects(projectsToDisplay);
+    
+    // Busca (nome, feira, local, consultor, produtor, pavilhão, tipo)
+    const term = (searchTerm || '').trim().toLowerCase();
+    if (term) {
+      const hit = (v) => (v || '').toString().toLowerCase().includes(term);
+      projectsToDisplay = projectsToDisplay.filter(p =>
+        hit(p.nome) ||
+        hit(p.feira || p.evento) ||
+        hit(p.local) ||
+        hit(p.consultorNome) ||
+        hit(p.produtorNome) ||
+        hit(p.pavilhao) ||
+        hit(p.tipoMontagem)
+      );
+    }
+setFilteredProjects(projectsToDisplay);
     setSelectedIds(new Set()); // limpa seleção ao mudar filtros
-  }, [allProjects, selectedEvent, activeTab, userProfile, user]);
+  }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
 
   // =====================
   // Encerramento (1) e em massa
