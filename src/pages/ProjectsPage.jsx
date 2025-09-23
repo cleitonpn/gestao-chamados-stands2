@@ -477,7 +477,7 @@ setFilteredProjects(projectsToDisplay);
                 ))}
               </select>
             </div>
-          )
+          )}
 
 {/* Busca */}
 <div className="w-full max-w-md">
