@@ -353,8 +353,10 @@ const ProjectDetailPage = () => {
   // ====== Métricas de chamados (memo)
   const ticketMetrics = useMemo(() => {
     const total = tickets.length;
-    const closedStatuses = new Set(['concluido']); // considerados conclusão
-    const notOpenStatuses = new Set(['concluido', 'cancelado', 'arquivado']);
+
+    // ✅ Conta concluído + arquivado na taxa de conclusão
+    const closedStatuses = new Set(['concluido', 'concluído', 'arquivado']);
+    const notOpenStatuses = new Set(['concluido', 'concluído', 'cancelado', 'arquivado']);
 
     const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
     const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
@@ -768,8 +770,24 @@ const ProjectDetailPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <div> Criado em: <span className="font-medium">{formatDateTimeSP(project.criadoEm || project.criadoem)}</span></div>
-                <div> Atualizado em: <span className="font-medium">{formatDateTimeSP(project.atualizadoEm || project.atualizadoem)}</span></div>
+                <div>
+                  Criado em:{' '}
+                  <span className="font-medium">
+                    {formatDateTimeSP(
+                      /* ✅ agora cobrimos createdAt também */
+                      project.createdAt || project.criadoEm || project.criadoem
+                    )}
+                  </span>
+                </div>
+                <div>
+                  Atualizado em:{' '}
+                  <span className="font-medium">
+                    {formatDateTimeSP(
+                      /* ✅ agora cobrimos updatedAt também */
+                      project.updatedAt || project.atualizadoEm || project.atualizadoem
+                    )}
+                  </span>
+                </div>
                 <div> Status: <span className="font-medium capitalize">{project.status || 'ativo'}</span></div>
                 <div> Ativo: <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span></div>
               </CardContent>
