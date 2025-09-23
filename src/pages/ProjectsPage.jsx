@@ -1,575 +1,348 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
+
+import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { ArrowLeft , Search, BarChart3} from 'lucide-react';
 
-// =====================
-// Helpers de Data / Fuso
-// =====================
-const isDateOnly = (value) => {
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
-    if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
-  }
-  if (value && typeof value === 'object' && value.seconds) {
-    const d = new Date(value.seconds * 1000);
-    return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
-  }
-  return false;
-};
+import { ArrowLeft, Search, BarChart3 } from 'lucide-react';
 
-const normalizeDateInput = (value) => {
-  if (!value) return null;
-  if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
-  if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
-    const [dd, mm, yyyy] = value.split('-');
-    return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
-  }
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return new Date(`${value}T00:00:00.000Z`);
-  }
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
-};
-
-// Saída DD-MM-YYYY
-const formatDate = (value) => {
-  if (!value) return 'N/A';
-  const date = normalizeDateInput(value);
-  if (!date) return 'N/A';
-  try {
-    if (isDateOnly(value)) {
-      const dd = String(date.getUTCDate()).padStart(2, '0');
-      const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const yyyy = String(date.getUTCFullYear());
-      return `${dd}-${mm}-${yyyy}`;
-    }
-    const dd = date.toLocaleString('pt-BR', { day: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const mm = date.toLocaleString('pt-BR', { month: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const yyyy = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
-    return `${dd}-${mm}-${yyyy}`;
-  } catch {
-    return 'N/A';
-  }
-};
-
-const startOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-};
-
-const endOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(23, 59, 59, 999);
-  return copy;
-};
-
-// =====================
-// ProjectCard
-// =====================
-const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
-  const navigate = useNavigate();
-
-  const getStatusInfo = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (project.montagem?.dataInicio && project.montagem?.dataFim) {
-      const inicio = startOfDaySP(project.montagem.dataInicio);
-      const fim = endOfDaySP(project.montagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Montagem', color: 'blue' };
-    }
-
-    if (project.evento?.dataInicio && project.evento?.dataFim) {
-      const inicio = startOfDaySP(project.evento.dataInicio);
-      const fim = endOfDaySP(project.evento.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
-    }
-
-    if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
-      const inicio = startOfDaySP(project.desmontagem.dataInicio);
-      const fim = endOfDaySP(project.desmontagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
-    }
-
-    const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
-    if (dataInicio) {
-      const inicio = startOfDaySP(dataInicio);
-      if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
-    }
-    return { label: 'Finalizado', color: 'gray' };
-  };
-
-  const statusInfo = getStatusInfo();
-
-  
-const phaseCounts = useMemo(() => {
-  const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
-  const today = new Date(); today.setHours(0,0,0,0);
-
-  const inRange = (s, e) => {
-    const S = startOfDaySP(s), E = endOfDaySP(e);
-    return S && E && today >= S && today <= E;
-  };
-
-  for (const p of filteredProjects) {
-    let phase = 'finalizado';
-    if (p.status === 'encerrado') {
-      phase = 'finalizado';
-    } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
-      phase = 'desmontagem';
-    } else if (inRange(p.montagem?.dataInicio, p.montagem?.dataFim) || inRange(p.evento?.dataInicio, p.evento?.dataFim)) {
-      phase = 'andamento'; // inclui montagem + evento
-    } else {
-      const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
-      const S = startOfDaySP(start);
-      phase = (S && today < S) ? 'futuro' : 'finalizado';
-    }
-    counts[phase] = (counts[phase] || 0) + 1;
-  }
-  return counts;
-}, [filteredProjects]);
-
-return (
-    <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelect(project.id)}
-            className="h-4 w-4"
-            aria-label="Selecionar projeto"
-          />
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-1">{project.nome}</h3>
-            <p className="text-sm text-gray-600">{project.feira} • {project.local}</p>
-          </div>
-        </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-          statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
-          statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
-          statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {statusInfo.label}
-        </span>
-      </div>
-
-      <div className="space-y-2 mb-4 text-sm text-gray-600">
-        <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
-        <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
-        <div className="text-xs text-gray-500">
-          <div>Início: {formatDate(project.dataInicio)}</div>
-          <div>Fim: {formatDate(project.dataFim)}</div>
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)}
-          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-        >👁️ Ver</button>
-
-        {(userRole === 'administrador') && (
-          <>
-            <button
-              onClick={() => navigate(`/projetos/editar/${project.id}${currentSearch}`)}
-              className="bg-gray-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition-colors"
-            >✏️</button>
-            <button
-              onClick={() => onArchive(project.id)}
-              className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
-            >🗑️</button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// =====================
-// Página
-// =====================
+/* =========================================================================
+   ProjectsPage
+   ========================================================================= */
 const ProjectsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, userProfile, authInitialized } = useAuth();
 
+  // dados
   const [allProjects, setAllProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState('todos');
-  const [activeTab, setActiveTab] = useState('ativos');
-  
-const [searchTerm, setSearchTerm] = useState('');
-const currentSearch = useMemo(() => location.search, [location.search]);
-const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
-  // Seleção em massa
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
+  // filtros
+  const [activeTab, setActiveTab] = useState('ativos'); // 'ativos' | 'encerrados'
+  const [selectedEvent, setSelectedEvent] = useState('todos'); // feira/evento
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // =====================
-  // Persistência de filtros na URL
-  // =====================
-  // Inicializar a partir dos params
+  // query atual (útil p/ navegar mantendo filtros)
+  const currentSearch = useMemo(() => location.search || '', [location.search]);
+
+  /* =========================
+     Carregar da URL (evento/tab/q)
+     ========================= */
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const eventFromUrl = params.get('evento');
     const tabFromUrl = params.get('tab');
     const qFromUrl = params.get('q') || '';
+
     if (eventFromUrl) setSelectedEvent(eventFromUrl);
     if (tabFromUrl) setActiveTab(tabFromUrl);
     setSearchTerm(qFromUrl);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Atualiza a URL quando filtros mudam
+  /* =========================
+     Sincronizar URL quando filtros mudam
+     ========================= */
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     params.set('evento', selectedEvent);
     params.set('tab', activeTab);
     params.set('q', searchTerm);
+
     const newSearch = `?${params.toString()}`;
     if (newSearch !== location.search) {
       navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
     }
-  }, [selectedEvent, activeTab, searchTerm, location.pathname, location.search, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEvent, activeTab, searchTerm]);
 
-  // String de query atual pra repassar ao navegar
-
-  // =====================
-  // Carregamento
-  // =====================
+  /* =========================
+     Carregar projetos
+     ========================= */
   useEffect(() => {
-    if (authInitialized && user && userProfile) {
-      loadProjects();
-    } else if (authInitialized && !user) {
+    if (!authInitialized) return;
+    if (!user) {
       navigate('/login');
+      return;
     }
-  }, [user, userProfile, authInitialized, navigate]);
 
-  const loadProjects = async () => {
-    try {
-      setLoading(true);
-      setError('');
+    (async () => {
+      try {
+        let list = [];
+        if (typeof projectService?.getAllProjects === 'function') {
+          list = await projectService.getAllProjects();
+        } else if (typeof projectService?.getAll === 'function') {
+          list = await projectService.getAll();
+        } else if (typeof projectService?.list === 'function') {
+          list = await projectService.list();
+        }
+        setAllProjects(Array.isArray(list) ? list : []);
+      } catch (err) {
+        console.error('Erro ao carregar projetos:', err);
+        setAllProjects([]);
+      }
+    })();
+  }, [authInitialized, user, navigate]);
 
-      const projectsData = await projectService.getAllProjects();
-
-      const sortedProjects = projectsData.sort((a, b) => {
-        const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
-        const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
-        return bDate - aDate;
-      });
-
-      setAllProjects(sortedProjects);
-
-      const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
-      setEvents(uniqueEvents);
-    } catch (err) {
-      console.error('Erro ao carregar projetos:', err);
-      setError('Não foi possível carregar os projetos.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // =====================
-  // Filtragem
-  // =====================
+  /* =========================
+     Filtro (aba / evento / busca)
+     ========================= */
   useEffect(() => {
-    if (!userProfile) return;
-
     let projectsToDisplay = [...allProjects];
 
-    const userRole = userProfile.funcao;
-    const userId = userProfile.id || user?.uid;
-
-    if (userRole === 'consultor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.consultorId === userId || 
-        project.consultorUid === userId ||
-        project.consultorEmail === userProfile.email ||
-        project.consultorNome === userProfile.nome
-      ));
-    } else if (userRole === 'produtor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.produtorId === userId || 
-        project.produtorUid === userId ||
-        project.produtorEmail === userProfile.email ||
-        project.produtorNome === userProfile.nome
-      ));
-    } else if (!['administrador','gerente','operador'].includes(userRole)) {
-      projectsToDisplay = [];
-    }
-
+    // Ativos x Encerrados (ajuste se seu status final for outro)
     if (activeTab === 'ativos') {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status !== 'encerrado');
+      projectsToDisplay = projectsToDisplay.filter(
+        (p) => (p.status || '').toLowerCase() !== 'encerrado' && (p.status || '').toLowerCase() !== 'finalizado'
+      );
     } else {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status === 'encerrado');
+      projectsToDisplay = projectsToDisplay.filter(
+        (p) => (p.status || '').toLowerCase() === 'encerrado' || (p.status || '').toLowerCase() === 'finalizado'
+      );
     }
 
+    // Filtro por Feira/Evento
     if (selectedEvent && selectedEvent !== 'todos') {
-      projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
+      projectsToDisplay = projectsToDisplay.filter(
+        (p) => (p.feira || p.evento || '') === selectedEvent
+      );
     }
 
-    
     // Busca (nome, feira, local, consultor, produtor, pavilhão, tipo)
     const term = (searchTerm || '').trim().toLowerCase();
     if (term) {
       const hit = (v) => (v || '').toString().toLowerCase().includes(term);
-      projectsToDisplay = projectsToDisplay.filter(p =>
-        hit(p.nome) ||
-        hit(p.feira || p.evento) ||
-        hit(p.local) ||
-        hit(p.consultorNome) ||
-        hit(p.produtorNome) ||
-        hit(p.pavilhao) ||
-        hit(p.tipoMontagem)
+      projectsToDisplay = projectsToDisplay.filter(
+        (p) =>
+          hit(p.nome) ||
+          hit(p.feira || p.evento) ||
+          hit(p.local) ||
+          hit(p.consultorNome) ||
+          hit(p.produtorNome) ||
+          hit(p.pavilhao) ||
+          hit(p.tipoMontagem)
       );
     }
-setFilteredProjects(projectsToDisplay);
-    setSelectedIds(new Set()); // limpa seleção ao mudar filtros
-  }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
 
-  // =====================
-  // Encerramento (1) e em massa
-  // =====================
-  const handleArchiveProject = async (projectId) => {
-    if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
-    try {
-      await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
-      await loadProjects();
-    } catch (error) {
-      console.error('Erro ao encerrar projeto:', error);
-      setError('Erro ao encerrar projeto. Tente novamente.');
+    setFilteredProjects(projectsToDisplay);
+  }, [allProjects, selectedEvent, activeTab, searchTerm]);
+
+  /* =========================
+     Eventos únicos para o select
+     ========================= */
+  const events = useMemo(() => {
+    const set = new Set();
+    for (const p of allProjects) {
+      const ev = p.feira || p.evento;
+      if (ev) set.add(ev);
     }
-  };
+    return Array.from(set).sort();
+  }, [allProjects]);
 
-  const toggleSelect = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  const allVisibleIds = useMemo(() => filteredProjects.map(p => p.id), [filteredProjects]);
-
-  const toggleSelectAll = () => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.size === allVisibleIds.length) return new Set();
-      return new Set(allVisibleIds);
-    });
-  };
-
-  const handleBulkArchive = async () => {
-    if (selectedIds.size === 0) return;
-    if (!window.confirm(`Encerrar ${selectedIds.size} projeto(s)?`)) return;
-    setBulkBusy(true);
-    try {
-      await Promise.all(Array.from(selectedIds).map(id =>
-        projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
-      ));
-      await loadProjects();
-      setSelectedIds(new Set());
-    } catch (e) {
-      console.error('Erro no encerramento em massa:', e);
-      setError('Alguns projetos podem não ter sido encerrados. Tente novamente.');
-    } finally {
-      setBulkBusy(false);
+  /* =========================
+     Helpers de data (classificação de fase)
+     ========================= */
+  const isDateOnly = (value) => {
+    if (typeof value === 'string') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
+      if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
     }
+    if (value && typeof value === 'object' && value.seconds) {
+      const d = new Date(value.seconds * 1000);
+      return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+    }
+    return false;
+  };
+  const normalizeDateInput = (value) => {
+    if (!value) return null;
+    if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
+    if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
+      const [dd, mm, yyyy] = value.split('-');
+      return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
+    }
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return new Date(`${value}T00:00:00.000Z`);
+    }
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const startOfDaySP = (value) => {
+    const d = normalizeDateInput(value);
+    if (!d) return null;
+    const copy = new Date(d.getTime());
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  };
+  const endOfDaySP = (value) => {
+    const d = normalizeDateInput(value);
+    if (!d) return null;
+    const copy = new Date(d.getTime());
+    copy.setHours(23, 59, 59, 999);
+    return copy;
   };
 
-  const canCreateProject = userProfile?.funcao === 'administrador';
+  /* =========================
+     Resumo por fase (usa filteredProjects)
+     ========================= */
+  const phaseCounts = useMemo(() => {
+    const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Carregando projetos...</p>
-        </div>
-      </div>
-    );
-  }
+    const inRange = (s, e) => {
+      const S = startOfDaySP(s), E = endOfDaySP(e);
+      return S && E && today >= S && today <= E;
+    };
 
+    for (const p of filteredProjects) {
+      let phase = 'finalizado';
+      const statusLower = (p.status || '').toLowerCase();
+
+      if (statusLower === 'encerrado' || statusLower === 'finalizado' || statusLower === 'arquivado') {
+        phase = 'finalizado';
+      } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
+        phase = 'desmontagem';
+      } else if (
+        inRange(p.montagem?.dataInicio, p.montagem?.dataFim) ||
+        inRange(p.evento?.dataInicio, p.evento?.dataFim)
+      ) {
+        phase = 'andamento'; // considera montagem + evento como andamento
+      } else {
+        const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
+        const S = startOfDaySP(start);
+        phase = (S && today < S) ? 'futuro' : 'finalizado';
+      }
+
+      counts[phase] = (counts[phase] || 0) + 1;
+    }
+    return counts;
+  }, [filteredProjects]);
+
+  /* =========================
+     UI
+     ========================= */
   return (
-    <div className="container mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate('/dashboard')}
-        className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Voltar ao Dashboard
-      </button>
-
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Projetos</h1>
-          <p className="text-gray-600 mt-1">
-            {['administrador','gerente','operador'].includes(userProfile?.funcao) ? 'Gerencie todos os projetos do sistema' : 'Seus projetos vinculados'}
-          </p>
-        </div>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={handleBulkArchive}
-            disabled={selectedIds.size === 0 || bulkBusy}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${selectedIds.size === 0 || bulkBusy ? 'bg-gray-200 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-            title={selectedIds.size ? `Encerrar ${selectedIds.size} selecionado(s)` : 'Selecione projetos para encerrar'}
-          >
-            {bulkBusy ? 'Encerrando...' : `Encerrar selecionados (${selectedIds.size})`}
-          </button>
-
-          {canCreateProject && (
-            <button
-              onClick={() => navigate(`/projetos/novo${currentSearch}`)}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
-            >
-              ➕ Novo Projeto
-            </button>
-          )}
+    <div className="container mx-auto px-4 py-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => navigate('/dashboard')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar
+          </Button>
+          <h1 className="text-2xl font-bold">Projetos</h1>
         </div>
       </div>
 
       {/* Filtros */}
-      <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-        <div className="flex flex-wrap gap-4 items-center">
-          {/* Tabs de Status */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setActiveTab('ativos')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ativos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Ativos ({filteredProjects.filter(p => p.status !== 'encerrado').length})
-            </button>
-            <button
-              onClick={() => setActiveTab('encerrados')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'encerrados' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Encerrados ({allProjects.filter(p => p.status === 'encerrado').length})
-            </button>
-          </div>
-
-          {/* Filtro por Evento */}
-          {events.length > 0 && (
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Feira:</label>
-              <select
-                value={selectedEvent}
-                onChange={(e) => setSelectedEvent(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="todos">Todas as feiras</option>
-                {events.map(event => (
-                  <option key={event} value={event}>{event}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-{/* Busca */}
-<div className="w-full max-w-md">
-  <div className="relative">
-    <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-    <input
-      type="text"
-      value={searchTerm}
-      onChange={(e) => setSearchTerm(e.target.value)}
-      placeholder="Buscar por nome, feira, local, consultor, produtor…"
-      className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-    />
-  </div>
-</div>
-
-}
-
-          {/* Selecionar todos */}
-          <button
-            onClick={toggleSelectAll}
-            className="ml-auto text-sm px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200"
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="flex items-center gap-2">
+          <Button
+            variant={activeTab === 'ativos' ? 'default' : 'outline'}
+            onClick={() => setActiveTab('ativos')}
           >
-            {selectedIds.size === allVisibleIds.length && allVisibleIds.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
-          </button>
+            Ativos
+          </Button>
+          <Button
+            variant={activeTab === 'encerrados' ? 'default' : 'outline'}
+            onClick={() => setActiveTab('encerrados')}
+          >
+            Encerrados
+          </Button>
         </div>
-      </div>
 
-      {/* Mensagem de Erro */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-600">{error}</p>
-        </div>
-      )}
+        {events.length > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">Feira:</label>
+            <select
+              className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+            >
+              <option value="todos">Todas as feiras</option>
+              {events.map((ev) => (
+                <option key={ev} value={ev}>{ev}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
-      
-{/* Sidebox: Resumo por Fase */}
-<Card className="mt-4">
-  <CardHeader>
-    <CardTitle className="flex items-center gap-2">
-      <BarChart3 className="h-5 w-5" />
-      Resumo por Fase (após filtros e busca)
-    </CardTitle>
-  </CardHeader>
-  <CardContent>
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div className="rounded-lg border p-3">
-        <div className="text-xs text-gray-500">Futuro</div>
-        <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
-      </div>
-      <div className="rounded-lg border p-3">
-        <div className="text-xs text-gray-500">Andamento</div>
-        <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
-      </div>
-      <div className="rounded-lg border p-3">
-        <div className="text-xs text-gray-500">Desmontagem</div>
-        <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
-      </div>
-      <div className="rounded-lg border p-3">
-        <div className="text-xs text-gray-500">Finalizado</div>
-        <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
-      </div>
-    </div>
-  </CardContent>
-</Card>
-
-{/* Content */}
-      {filteredProjects.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum projeto encontrado</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {activeTab === 'ativos' 
-              ? (['consultor','produtor'].includes(userProfile?.funcao) ? 'Você não possui projetos vinculados no momento.' : 'Tente alterar os filtros ou crie um novo projeto.')
-              : 'Projetos encerrados aparecerão aqui.'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              userRole={userProfile?.funcao}
-              onArchive={handleArchiveProject}
-              selected={selectedIds.has(project.id)}
-              onToggleSelect={toggleSelect}
-              currentSearch={currentSearch}
+        {/* Busca */}
+        <div className="w-full md:w-96">
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por nome, feira, local, consultor, produtor…"
+              className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-          ))}
+          </div>
         </div>
-      )}
+      </div>
+
+      {/* Sidebox: Resumo por Fase */}
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            Resumo por Fase (após filtros e busca)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-gray-500">Futuro</div>
+              <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-gray-500">Andamento</div>
+              <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-gray-500">Desmontagem</div>
+              <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-gray-500">Finalizado</div>
+              <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Lista de projetos */}
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredProjects.map((p) => (
+          <Card key={p.id}>
+            <CardHeader>
+              <CardTitle className="text-base">{p.nome || 'Sem nome'}</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-gray-700 space-y-1">
+              <div><span className="text-gray-500">Feira:</span> {p.feira || p.evento || '—'}</div>
+              <div><span className="text-gray-500">Local:</span> {p.local || '—'}</div>
+              <div><span className="text-gray-500">Consultor:</span> {p.consultorNome || '—'}</div>
+              <div><span className="text-gray-500">Produtor:</span> {p.produtorNome || '—'}</div>
+
+              <div className="pt-3">
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => navigate(`/projetos/${p.id}${currentSearch}`)}
+                >
+                  Detalhes
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+
+        {filteredProjects.length === 0 && (
+          <div className="text-gray-600">Nenhum projeto encontrado com os filtros aplicados.</div>
+        )}
+      </div>
     </div>
   );
 };
