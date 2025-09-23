@@ -1,15 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
-import { ArrowLeft, Search, BarChart3 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Search,
+  BarChart3,
+  Download,
+  CheckSquare,
+  Square,
+} from 'lucide-react';
 
 /* =========================================================================
-   ProjectsPage
+   ProjectsPage — com seleção em massa, exportação, busca e resumo por fase
    ========================================================================= */
 const ProjectsPage = () => {
   const navigate = useNavigate();
@@ -19,11 +26,15 @@ const ProjectsPage = () => {
   // dados
   const [allProjects, setAllProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // filtros
   const [activeTab, setActiveTab] = useState('ativos'); // 'ativos' | 'encerrados'
   const [selectedEvent, setSelectedEvent] = useState('todos'); // feira/evento
   const [searchTerm, setSearchTerm] = useState('');
+
+  // seleção em massa
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // query atual (útil p/ navegar mantendo filtros)
   const currentSearch = useMemo(() => location.search || '', [location.search]);
@@ -71,6 +82,7 @@ const ProjectsPage = () => {
 
     (async () => {
       try {
+        setLoading(true);
         let list = [];
         if (typeof projectService?.getAllProjects === 'function') {
           list = await projectService.getAllProjects();
@@ -83,6 +95,8 @@ const ProjectsPage = () => {
       } catch (err) {
         console.error('Erro ao carregar projetos:', err);
         setAllProjects([]);
+      } finally {
+        setLoading(false);
       }
     })();
   }, [authInitialized, user, navigate]);
@@ -128,6 +142,8 @@ const ProjectsPage = () => {
     }
 
     setFilteredProjects(projectsToDisplay);
+    // ao mudar filtro, limpe seleção (evita itens invisíveis marcados)
+    setSelectedIds(new Set());
   }, [allProjects, selectedEvent, activeTab, searchTerm]);
 
   /* =========================
@@ -145,17 +161,6 @@ const ProjectsPage = () => {
   /* =========================
      Helpers de data (classificação de fase)
      ========================= */
-  const isDateOnly = (value) => {
-    if (typeof value === 'string') {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
-      if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
-    }
-    if (value && typeof value === 'object' && value.seconds) {
-      const d = new Date(value.seconds * 1000);
-      return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
-    }
-    return false;
-  };
   const normalizeDateInput = (value) => {
     if (!value) return null;
     if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
@@ -221,6 +226,90 @@ const ProjectsPage = () => {
   }, [filteredProjects]);
 
   /* =========================
+     Seleção em massa
+     ========================= */
+  const isSelected = (id) => selectedIds.has(id);
+
+  const toggleOne = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      const allVisibleIds = new Set(filteredProjects.map((p) => p.id));
+      // se todos os visíveis já estão selecionados, limpa; senão, seleciona todos visíveis
+      let allSelected = true;
+      for (const id of allVisibleIds) {
+        if (!prev.has(id)) { allSelected = false; break; }
+      }
+      if (allSelected) return new Set([...prev].filter((id) => !allVisibleIds.has(id)));
+      return new Set([...prev, ...allVisibleIds]);
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const selectedList = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    const ids = new Set(selectedIds);
+    return filteredProjects.filter((p) => ids.has(p.id));
+  }, [selectedIds, filteredProjects]);
+
+  /* =========================
+     Exportação CSV (selecionados ou filtrados)
+     ========================= */
+  const toCSVRow = (obj) => {
+    const escape = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v).replace(/"/g, '""');
+      return `"${s}"`;
+    };
+    return [
+      escape(obj.id),
+      escape(obj.nome),
+      escape(obj.feira || obj.evento),
+      escape(obj.local),
+      escape(obj.pavilhao),
+      escape(obj.tipoMontagem),
+      escape(obj.metragem),
+      escape(obj.consultorNome),
+      escape(obj.produtorNome),
+      escape(obj.status),
+    ].join(',');
+  };
+
+  const downloadCSV = (rows, filename = 'projetos.csv') => {
+    const header = [
+      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
+    ].join(',');
+    const body = rows.map(toCSVRow).join('\n');
+    const csv = header + '\n' + body;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSelected = () => {
+    const rows = selectedList;
+    if (rows.length === 0) return;
+    downloadCSV(rows, 'projetos_selecionados.csv');
+  };
+
+  const exportFiltered = () => {
+    if (filteredProjects.length === 0) return;
+    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
+  };
+
+  /* =========================
      UI
      ========================= */
   return (
@@ -283,6 +372,41 @@ const ProjectsPage = () => {
         </div>
       </div>
 
+      {/* Barra de ações (seleção + exportação) */}
+      <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={toggleAllVisible} title="Selecionar / desselecionar todos os visíveis">
+            {selectedIds.size > 0 && filteredProjects.every(p => selectedIds.has(p.id))
+              ? <CheckSquare className="h-4 w-4 mr-2" />
+              : <Square className="h-4 w-4 mr-2" />}
+            Selecionar todos (visíveis)
+          </Button>
+          <Button variant="ghost" size="sm" onClick={clearSelection}>
+            Limpar seleção ({selectedIds.size})
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={exportSelected}
+            disabled={selectedIds.size === 0}
+            title="Exportar seleção (CSV)"
+          >
+            <Download className="h-4 w-4 mr-2" /> Exportar selecionados
+          </Button>
+          <Button
+            size="sm"
+            onClick={exportFiltered}
+            disabled={filteredProjects.length === 0}
+            title="Exportar listagem filtrada (CSV)"
+          >
+            <Download className="h-4 w-4 mr-2" /> Exportar filtrados
+          </Button>
+        </div>
+      </div>
+
       {/* Sidebox: Resumo por Fase */}
       <Card className="mt-4">
         <CardHeader>
@@ -313,36 +437,68 @@ const ProjectsPage = () => {
         </CardContent>
       </Card>
 
-      {/* Lista de projetos */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredProjects.map((p) => (
-          <Card key={p.id}>
-            <CardHeader>
-              <CardTitle className="text-base">{p.nome || 'Sem nome'}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-gray-700 space-y-1">
-              <div><span className="text-gray-500">Feira:</span> {p.feira || p.evento || '—'}</div>
-              <div><span className="text-gray-500">Local:</span> {p.local || '—'}</div>
-              <div><span className="text-gray-500">Consultor:</span> {p.consultorNome || '—'}</div>
-              <div><span className="text-gray-500">Produtor:</span> {p.produtorNome || '—'}</div>
+      {/* Lista de projetos (cards customizados) */}
+      {loading ? (
+        <div className="text-gray-500 mt-6">Carregando…</div>
+      ) : (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredProjects.map((p) => (
+            <Card
+              key={p.id}
+              className={`transition-shadow hover:shadow-lg ${isSelected(p.id) ? 'ring-2 ring-blue-500' : ''}`}
+            >
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base leading-tight break-words">
+                      {p.nome || 'Sem nome'}
+                    </CardTitle>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {(p.feira || p.evento || '—')} • {(p.local || '—')}
+                    </p>
+                  </div>
+                  {/* checkbox nativo para evitar dependência */}
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 accent-blue-600 cursor-pointer"
+                    checked={isSelected(p.id)}
+                    onChange={() => toggleOne(p.id)}
+                    title="Selecionar este projeto"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="text-sm text-gray-700 space-y-1">
+                <div><span className="text-gray-500">Pavilhão:</span> {p.pavilhao || '—'}</div>
+                <div><span className="text-gray-500">Tipo:</span> {p.tipoMontagem || '—'}</div>
+                <div><span className="text-gray-500">Metragem:</span> {p.metragem || '—'}</div>
+                <div><span className="text-gray-500">Consultor:</span> {p.consultorNome || '—'}</div>
+                <div><span className="text-gray-500">Produtor:</span> {p.produtorNome || '—'}</div>
 
-              <div className="pt-3">
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => navigate(`/projetos/${p.id}${currentSearch}`)}
-                >
-                  Detalhes
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <div className="pt-3 grid grid-cols-2 gap-2">
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() => navigate(`/projetos/${p.id}${currentSearch}`)}
+                  >
+                    Detalhes
+                  </Button>
+                  <Button
+                    className="w-full"
+                    variant={isSelected(p.id) ? 'default' : 'outline'}
+                    onClick={() => toggleOne(p.id)}
+                  >
+                    {isSelected(p.id) ? 'Selecionado' : 'Selecionar'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
 
-        {filteredProjects.length === 0 && (
-          <div className="text-gray-600">Nenhum projeto encontrado com os filtros aplicados.</div>
-        )}
-      </div>
+          {filteredProjects.length === 0 && (
+            <div className="text-gray-600">Nenhum projeto encontrado com os filtros aplicados.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
