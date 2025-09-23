@@ -12,30 +12,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   ArrowLeft,
   Calendar,
-  MapPin,
   Users,
   Building,
   Mail,
-  Phone,
-  FileText,
   Link2,
-  UploadCloud,
   Save,
   Loader2,
   AlertCircle,
-  Clock,
   User,
   ShieldCheck,
-  Send,
   Trash2,
   BarChart3,
   ClipboardList,
   TrendingUp,
 } from 'lucide-react';
 
-/* =========================================================================
-   Helpers de data
-   ========================================================================= */
+/* ---------- Helpers de Data ---------- */
 const isDateOnly = (value) => {
   if (typeof value === 'string') {
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
@@ -93,25 +85,22 @@ const formatDateTimeSP = (value) => {
   }
 };
 
-const startOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+/* ---------- Helpers de Drive ---------- */
+const getDriveLinkFromProject = (p) => {
+  return (
+    p?.driveLink ||
+    p?.drive ||
+    p?.driveUrl ||
+    p?.driveURL ||
+    p?.linkDrive ||
+    p?.drive_link ||
+    ''
+  );
 };
 
-const endOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(23, 59, 59, 999);
-  return copy;
-};
-
-/* =========================================================================
+/* =========================
    Página — Detalhe do Projeto
-   ========================================================================= */
+   ========================= */
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -122,20 +111,17 @@ const ProjectDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // ====== Diário
+  // Diário
   const [diaryEntries, setDiaryEntries] = useState([]);
   const [newDiaryText, setNewDiaryText] = useState('');
   const [newDiaryLink, setNewDiaryLink] = useState('');
   const [savingDiary, setSavingDiary] = useState(false);
 
-  // ====== Tickets (chamados) vinculados ao projeto
+  // Tickets do projeto
   const [tickets, setTickets] = useState([]);
   const [ticketsLoading, setTicketsLoading] = useState(true);
   const [ticketsErr, setTicketsErr] = useState('');
 
-  /* =========================
-     Carregamento inicial
-     ========================= */
   useEffect(() => {
     if (!authInitialized) return;
     if (!user) {
@@ -150,15 +136,12 @@ const ProjectDetailPage = () => {
         const proj = await projectService.getProjectById(projectId);
         setProject(proj || null);
 
-        // Responsáveis/usuários
         const listUsers = await userService.getAllUsers?.();
         setUsers(Array.isArray(listUsers) ? listUsers : []);
 
-        // Diário
         const diary = await projectService.getDiary?.(projectId);
         setDiaryEntries(Array.isArray(diary) ? diary : []);
 
-        // Tickets
         setTicketsLoading(true);
         const tk = await ticketService.getTicketsByProject?.(projectId);
         setTickets(Array.isArray(tk) ? tk : []);
@@ -172,9 +155,6 @@ const ProjectDetailPage = () => {
     })();
   }, [authInitialized, user, navigate, projectId]);
 
-  /* =========================
-     Salvar entrada do Diário
-     ========================= */
   const handleAddDiaryEntry = async () => {
     if (!newDiaryText.trim() && !newDiaryLink.trim()) return;
     try {
@@ -199,11 +179,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const canDeleteDiary = (entry) => {
-    const role = (userProfile?.funcao || '').toLowerCase();
-    return role === 'administrador';
-  };
-
+  const canDeleteDiary = () => (userProfile?.funcao || '').toLowerCase() === 'administrador';
   const handleDeleteDiary = async (entryId) => {
     if (!canDeleteDiary()) return;
     if (!window.confirm('Remover esta observação do diário?')) return;
@@ -216,25 +192,29 @@ const ProjectDetailPage = () => {
     }
   };
 
-  /* =========================
-     Métricas de chamados
-     ========================= */
+  /* ---------- Métricas de chamados ---------- */
   const ticketMetrics = useMemo(() => {
     const total = tickets.length;
-    // Considera concluído + arquivado (e variações comuns)
-    const closedStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido']);
-    const notOpenStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido','cancelado']);
 
-    const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
-    const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
+    // concluído + arquivado + variações
+    const closedStatuses = new Set(['concluido', 'concluído', 'arquivado', 'fechado', 'resolvido']);
+    const notOpenStatuses = new Set([
+      'concluido',
+      'concluído',
+      'arquivado',
+      'fechado',
+      'resolvido',
+      'cancelado',
+    ]);
+
+    const closed = tickets.filter((t) => closedStatuses.has((t.status || '').toLowerCase())).length;
+    const open = tickets.filter((t) => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
     const completion = total > 0 ? Math.round((closed / total) * 100) : 0;
 
-    // Top áreas
     const counts = {};
     for (const t of tickets) {
       const area = (t.area || t.areaAtual || 'Não informada').toString();
-      if (!counts[area]) counts[area] = 0;
-      counts[area] += 1;
+      counts[area] = (counts[area] || 0) + 1;
     }
     const topAreas = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
@@ -243,17 +223,15 @@ const ProjectDetailPage = () => {
     return { total, open, closed, completion, topAreas };
   }, [tickets]);
 
-  // Linkar para a lista filtrada (Dashboard com filtro pelo projeto)
+  /* ---------- Linkar para Dashboard com filtro ---------- */
   const goToFilteredTickets = () => {
     const params = new URLSearchParams();
     if (project?.id) params.set('projectId', project.id);
-    if (project?.nome) params.set('q', project.nome);
+    if (project?.nome) params.set('projectName', project.nome);
     navigate(`/dashboard?${params.toString()}`);
   };
 
-  /* =========================
-     Loading/Erro
-     ========================= */
+  /* ---------- Loading / Erro ---------- */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -280,8 +258,10 @@ const ProjectDetailPage = () => {
     );
   }
 
+  const driveHref = getDriveLinkFromProject(project);
+
   /* =========================
-     Layout
+     Layout (responsivo)
      ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
@@ -313,10 +293,10 @@ const ProjectDetailPage = () => {
             </div>
           </div>
 
-          {/* Drive (se houver) */}
-          {project.driveLink && (
+          {/* Acesso rápido ao Drive (se houver) */}
+          {driveHref && (
             <a
-              href={project.driveLink}
+              href={driveHref}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center text-sm text-blue-600 hover:underline"
@@ -327,9 +307,9 @@ const ProjectDetailPage = () => {
           )}
         </div>
 
-        {/* GRID RESPONSIVA: 1 col (mobile), 3 col (desktop) */}
+        {/* GRID: esquerda (conteúdo principal) / direita (sidebar) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Coluna Principal (esquerda) */}
+          {/* ESQUERDA */}
           <div className="lg:col-span-2 space-y-6">
             {/* Informações Básicas */}
             <Card>
@@ -342,38 +322,38 @@ const ProjectDetailPage = () => {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Nome do Projeto</label>
-                    <p className="text-lg font-semibold">{project.nome || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Nome do Projeto</div>
+                    <div className="text-lg font-semibold">{project.nome || '—'}</div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Feira</label>
-                    <p className="text-lg font-semibold">{project.feira || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Feira</div>
+                    <div className="text-lg font-semibold">{project.feira || '—'}</div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Localização</label>
-                    <p className="text-lg font-semibold">{project.local || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Localização</div>
+                    <div className="text-lg font-semibold">{project.local || '—'}</div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Metragem</label>
-                    <p className="text-lg font-semibold">{project.metragem || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Metragem</div>
+                    <div className="text-lg font-semibold">{project.metragem || '—'}</div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Tipo de Montagem</label>
-                    <p className="text-lg font-semibold">{project.tipoMontagem || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Tipo de Montagem</div>
+                    <div className="text-lg font-semibold">{project.tipoMontagem || '—'}</div>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">Pavilhão</label>
-                    <p className="text-lg font-semibold">{project.pavilhao || '—'}</p>
+                    <div className="text-sm font-medium text-gray-500">Pavilhão</div>
+                    <div className="text-lg font-semibold">{project.pavilhao || '—'}</div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Diário do Projeto — FORM */}
+            {/* Diário do Projeto — FORM (fica entre Info Básicas e Cronograma) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
+                  <ClipboardList className="h-5 w-5 mr-2" />
                   Diário do Projeto
                 </CardTitle>
               </CardHeader>
@@ -419,55 +399,6 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Diário do Projeto — LISTA */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
-                  Observações do Projeto
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {diaryEntries.length === 0 ? (
-                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {diaryEntries.map((e) => (
-                      <div key={e.id || e.createdAt?.seconds || Math.random()} className="border rounded-lg p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm font-medium">
-                              {e.authorName} {e.authorRole ? `(${e.authorRole})` : ''}
-                            </span>
-                          </div>
-                          <span className="text-xs text-gray-500">{formatDateTimeSP(e.createdAt)}</span>
-                        </div>
-                        {e.text && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.text}</p>}
-                        {e.driveLink && (
-                          <a
-                            href={e.driveLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
-                          >
-                            <Link2 className="h-4 w-4" /> Anexo/Link
-                          </a>
-                        )}
-                        {canDeleteDiary(e) && (
-                          <div className="mt-3 text-right">
-                            <Button variant="destructive" size="sm" onClick={() => handleDeleteDiary(e.id)}>
-                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
             {/* Cronograma */}
             <Card>
               <CardHeader>
@@ -510,7 +441,7 @@ const ProjectDetailPage = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
+                  <ClipboardList className="h-5 w-5 mr-2" />
                   Detalhes Adicionais
                 </CardTitle>
               </CardHeader>
@@ -522,7 +453,7 @@ const ProjectDetailPage = () => {
             </Card>
           </div>
 
-          {/* Coluna Lateral (direita) */}
+          {/* DIREITA (Sidebar) */}
           <div className="space-y-6">
             {/* Responsáveis */}
             <Card>
@@ -537,7 +468,10 @@ const ProjectDetailPage = () => {
                   <div className="text-xs text-gray-500">Produtor</div>
                   <div className="font-medium">{project.produtorNome || 'Não atribuído'}</div>
                   {project.produtorEmail && (
-                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.produtorEmail}`}>
+                    <a
+                      className="text-blue-600 hover:underline flex items-center gap-1"
+                      href={`mailto:${project.produtorEmail}`}
+                    >
                       <Mail className="h-3 w-3" /> {project.produtorEmail}
                     </a>
                   )}
@@ -546,7 +480,10 @@ const ProjectDetailPage = () => {
                   <div className="text-xs text-gray-500">Consultor</div>
                   <div className="font-medium">{project.consultorNome || 'Não atribuído'}</div>
                   {project.consultorEmail && (
-                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.consultorEmail}`}>
+                    <a
+                      className="text-blue-600 hover:underline flex items-center gap-1"
+                      href={`mailto:${project.consultorEmail}`}
+                    >
                       <Mail className="h-3 w-3" /> {project.consultorEmail}
                     </a>
                   )}
@@ -554,42 +491,18 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Equipes Terceirizadas */}
-            {Array.isArray(project.equipesTerceirizadas) && project.equipesTerceirizadas.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Users className="h-5 w-5 mr-2" />
-                    Equipes Terceirizadas
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="text-sm space-y-1">
-                    {project.equipesTerceirizadas.map((eq, idx) => (
-                      <li key={idx} className="flex items-center justify-between">
-                        <span>{eq?.nome || 'Equipe'}</span>
-                        {eq?.contato && (
-                          <span className="text-gray-500 text-xs">{eq.contato}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Documentos */}
+            {/* Documentos (agora com detecção de vários campos) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <UploadCloud className="h-5 w-5 mr-2" />
+                  <Link2 className="h-5 w-5 mr-2" />
                   Documentos
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {project.driveLink ? (
+                {driveHref ? (
                   <a
-                    href={project.driveLink}
+                    href={driveHref}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center text-sm text-blue-600 hover:underline"
@@ -630,22 +543,64 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Observações do Projeto — (lista vazia por padrão, mantém compatibilidade) */}
+            {/* Observações do Projeto (AGORA AQUI) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
+                  <ClipboardList className="h-5 w-5 mr-2" />
                   Observações do Projeto
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                {diaryEntries.length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {diaryEntries.map((e) => (
+                      <div key={e.id || e.createdAt?.seconds || Math.random()} className="border rounded-lg p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-gray-500" />
+                            <span className="text-sm font-medium">
+                              {e.authorName} {e.authorRole ? `(${e.authorRole})` : ''}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-500">{formatDateTimeSP(e.createdAt)}</span>
+                        </div>
+                        {e.text && (
+                          <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                            {e.text}
+                          </p>
+                        )}
+                        {e.driveLink && (
+                          <a
+                            href={e.driveLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+                          >
+                            <Link2 className="h-4 w-4" /> Anexo/Link
+                          </a>
+                        )}
+                        {canDeleteDiary(e) && (
+                          <div className="mt-3 text-right">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteDiary(e.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* =========================
-                NOVA SIDEBOX: Resumo de Chamados
-               ========================= */}
+            {/* Resumo de Chamados */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
