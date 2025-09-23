@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-import { ArrowLeft, Search, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
 
 /* =========================================================================
    Helpers de data / fuso e formatação
@@ -313,7 +313,6 @@ const ProjectsPage = () => {
     if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
     try {
       await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
-      // recarregar
       const projectsData = await projectService.getAllProjects();
       setAllProjects(projectsData);
     } catch (error) {
@@ -395,6 +394,56 @@ const ProjectsPage = () => {
     return counts;
   }, [filteredProjects]);
 
+  /* =========================
+     Exportação CSV (selecionados ou filtrados)
+     ========================= */
+  const toCSVRow = (obj) => {
+    const escape = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v).replace(/"/g, '""');
+      return `"${s}"`;
+    };
+    return [
+      escape(obj.id),
+      escape(obj.nome),
+      escape(obj.feira || obj.evento),
+      escape(obj.local),
+      escape(obj.pavilhao),
+      escape(obj.tipoMontagem),
+      escape(obj.metragem),
+      escape(obj.consultorNome),
+      escape(obj.produtorNome),
+      escape(obj.status),
+    ].join(',');
+  };
+
+  const downloadCSV = (rows, filename = 'projetos.csv') => {
+    const header = [
+      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
+    ].join(',');
+    const body = rows.map(toCSVRow).join('\n');
+    const csv = header + '\n' + body;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSelected = () => {
+    const setIds = new Set(selectedIds);
+    const rows = filteredProjects.filter(p => setIds.has(p.id));
+    if (rows.length === 0) return;
+    downloadCSV(rows, 'projetos_selecionados.csv');
+  };
+
+  const exportFiltered = () => {
+    if (filteredProjects.length === 0) return;
+    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
+  };
+
   /* UI */
   if (loading) {
     return (
@@ -437,9 +486,28 @@ const ProjectsPage = () => {
             {bulkBusy ? 'Encerrando...' : `Encerrar selecionados (${selectedIds.size})`}
           </button>
 
-          {canCreateProject && (
+          {/* Exportações */}
+          <button
+            onClick={exportSelected}
+            disabled={selectedIds.size === 0}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
+            title="Exportar projetos selecionados (CSV)"
+          >
+            <Download className="h-4 w-4" /> Exportar selecionados
+          </button>
+          <button
+            onClick={exportFiltered}
+            disabled={filteredProjects.length === 0}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
+            title="Exportar lista filtrada (CSV)"
+          >
+            <Download className="h-4 w-4" /> Exportar filtrados
+          </button>
+
+          {/* Novo Projeto */}
+          {userProfile?.funcao === 'administrador' && (
             <button
-              onClick={() => navigate(`/projetos/novo${currentSearch}`)}  // <- NOVO PROJETO
+              onClick={() => navigate(`/projetos/novo${currentSearch}`)}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
               ➕ Novo Projeto
@@ -457,7 +525,7 @@ const ProjectsPage = () => {
               onClick={() => setActiveTab('ativos')}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ativos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
             >
-              Ativos ({filteredProjects.filter(p => p.status !== 'encerrado').length})
+              Ativos ({allProjects.filter(p => p.status !== 'encerrado').length})
             </button>
             <button
               onClick={() => setActiveTab('encerrados')}
