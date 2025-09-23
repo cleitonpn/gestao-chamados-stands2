@@ -21,6 +21,9 @@ import CronogramaPage from './pages/CronogramaPage';
 import AdminPanelPage from './pages/AdminPanelPage';
 import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';// NOVA IMPORTAÇÃO
 import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
+- import TemplateManagerPage from './pages/TemplateManagerPage';
++ import TemplateManagerPage from './pages/TemplateManagerPage';
++ import GamingPage from './pages/GamingPage';
 import './App.css';
 
 function App() {
@@ -134,7 +137,14 @@ function App() {
                   </ProtectedRoute>
                 } 
               />
-
+<Route
++   path="/gaming"
++   element={
++     <ProtectedRoute>
++       <GamingPage />
++     </ProtectedRoute>
++   }
++ />
               <Route path="/admin/painel" element={
   <ProtectedRoute requiredRole="administrador">
     <AdminPanelPage />
