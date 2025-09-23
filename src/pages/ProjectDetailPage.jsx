@@ -295,13 +295,13 @@ const ProjectDetailPage = () => {
     if (project.evento?.dataInicio && project.evento?.dataFim) {
       const inicio = startOfDaySP(project.evento.dataInicio);
       const fim = endOfDaySP(project.evento.dataFim);
-      if (inicio && fim && today >= inicio && hoje <= fim) return { label: 'Em Andamento', color: 'green' };
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
     }
 
     if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
       const inicio = startOfDaySP(project.desmontagem.dataInicio);
       const fim = endOfDaySP(project.desmontagem.dataFim);
-      if (inicio && fim && hoje >= inicio && hoje <= fim) return { label: 'Desmontagem', color: 'orange' };
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
     }
 
     const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
@@ -642,7 +642,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Equipes Terceirizadas (restaurado) */}
+            {/* Equipes Terceirizadas */}
             {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
               <Card>
                 <CardHeader>
@@ -663,7 +663,7 @@ const ProjectDetailPage = () => {
               </Card>
             )}
 
-            {/* Documentos (restaurado; usa project.linkDrive) */}
+            {/* Documentos (usa project.linkDrive) */}
             {project.linkDrive && (
               <Card>
                 <CardHeader>
@@ -703,7 +703,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Diário do Projeto — LISTA (abaixo de Informações do Sistema) */}
+            {/* Diário do Projeto — LISTA */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
