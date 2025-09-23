@@ -3,14 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  ArrowLeft, 
+
+import {
+  ArrowLeft,
   Calendar,
   MapPin,
-  Users, 
+  Users,
   ExternalLink,
   Loader2,
   Clock,
@@ -19,16 +21,14 @@ import {
   Truck,
   FileText,
   Building,
-  AlertCircle
-} ,
+  AlertCircle,
   Send,
-  Trash2
+  Trash2,
 } from 'lucide-react';
 
-// =====================
-// Helpers de Data / Fuso
-// =====================
-// Detecta se o valor representa uma data SEM hora (date-only)
+/* =========================================================================
+   Helpers de data
+   ========================================================================= */
 const isDateOnly = (value) => {
   if (typeof value === 'string') {
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
@@ -41,12 +41,9 @@ const isDateOnly = (value) => {
   return false;
 };
 
-// Normaliza entradas de data em um Date válido
 const normalizeDateInput = (value) => {
   if (!value) return null;
-  if (typeof value === 'object' && value.seconds) {
-    return new Date(value.seconds * 1000);
-  }
+  if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
   if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
     const [dd, mm, yyyy] = value.split('-');
     return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
@@ -55,18 +52,13 @@ const normalizeDateInput = (value) => {
     return new Date(`${value}T00:00:00.000Z`);
   }
   const d = new Date(value);
-  if (isNaN(d.getTime())) return null;
-  return d;
+  return isNaN(d.getTime()) ? null : d;
 };
 
-// Formata SEM deslocar o dia:
-// - para "date-only": usa componentes UTC (evita cair pro dia anterior no BRT)
-// - caso contrário: usa America/Sao_Paulo
 const formatDate = (value) => {
   if (!value) return 'Não definido';
   const date = normalizeDateInput(value);
   if (!date) return 'Data inválida';
-
   try {
     if (isDateOnly(value)) {
       const dd = String(date.getUTCDate()).padStart(2, '0');
@@ -80,16 +72,14 @@ const formatDate = (value) => {
       year: '2-digit',
       timeZone: 'America/Sao_Paulo',
     });
-  } catch (e) {
-    console.error('Erro ao formatar data:', e);
+  } catch {
     return 'Data inválida';
   }
-}
+};
 
-// Data e hora no fuso de São Paulo (para o Diário)
-const formatDateTimeSP = (isoStringOrDate) => {
+const formatDateTimeSP = (isoOrDate) => {
   try {
-    const d = typeof isoStringOrDate === 'string' ? new Date(isoStringOrDate) : (isoStringOrDate || new Date());
+    const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : (isoOrDate || new Date());
     if (isNaN(d?.getTime())) return '—';
     return d.toLocaleString('pt-BR', {
       dateStyle: 'short',
@@ -100,9 +90,7 @@ const formatDateTimeSP = (isoStringOrDate) => {
     return '—';
   }
 };
-;
 
-// Limites do dia para comparações (usando o horário local do cliente)
 const startOfDaySP = (value) => {
   const d = normalizeDateInput(value);
   if (!d) return null;
@@ -110,7 +98,6 @@ const startOfDaySP = (value) => {
   copy.setHours(0, 0, 0, 0);
   return copy;
 };
-
 const endOfDaySP = (value) => {
   const d = normalizeDateInput(value);
   if (!d) return null;
@@ -119,31 +106,34 @@ const endOfDaySP = (value) => {
   return copy;
 };
 
+/* =========================================================================
+   Página
+   ========================================================================= */
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const { user, userProfile, authInitialized } = useAuth();
-  
+
   const [project, setProject] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  
-
   // ====== Diário (estado) ======
-  const [diaryEntries, setDiaryEntries] = useState([]); // [{id, text, authorName, authorRole, createdAt, linkUrl?}]
+  const [diaryEntries, setDiaryEntries] = useState([]); // {id, text, authorId, authorName, authorRole, createdAt, linkUrl?}
   const [newDiaryText, setNewDiaryText] = useState('');
   const [newDiaryLink, setNewDiaryLink] = useState('');
   const [savingDiary, setSavingDiary] = useState(false);
   const [diaryError, setDiaryError] = useState('');
-useEffect(() => {
+
+  useEffect(() => {
     if (authInitialized && user && userProfile) {
       loadProjectData();
     } else if (authInitialized && !user) {
       navigate('/login');
     }
-  }, [projectId, user, userProfile, authInitialized, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, user, userProfile, authInitialized]);
 
   const loadProjectData = async () => {
     try {
@@ -152,7 +142,7 @@ useEffect(() => {
 
       const [projectData, usersData] = await Promise.all([
         projectService.getProjectById(projectId),
-        userService.getAllUsers().catch(() => [])
+        userService.getAllUsers().catch(() => []),
       ]);
 
       if (!projectData) {
@@ -160,29 +150,31 @@ useEffect(() => {
         return;
       }
 
-      // Permissões
-      const userRole = userProfile.funcao;
-      const userId = userProfile.id || user.uid;
+      // ====== Permissões (mantenha conforme seu modelo/negócio) ======
+      const role = userProfile?.funcao;
+      const uid = userProfile?.id || user?.uid;
 
-      if (userRole === 'consultor') {
-        const hasAccess = projectData.consultorId === userId || 
-                         projectData.consultorUid === userId ||
-                         projectData.consultorEmail === userProfile.email ||
-                         projectData.consultorNome === userProfile.nome;
-        if (!hasAccess) {
+      if (role === 'consultor') {
+        const ok =
+          projectData.consultorId === uid ||
+          projectData.consultorUid === uid ||
+          projectData.consultorEmail === userProfile?.email ||
+          projectData.consultorNome === userProfile?.nome;
+        if (!ok) {
           setError('Você não tem permissão para visualizar este projeto');
           return;
         }
-      } else if (userRole === 'produtor') {
-        const hasAccess = projectData.produtorId === userId || 
-                         projectData.produtorUid === userId ||
-                         projectData.produtorEmail === userProfile.email ||
-                         projectData.produtorNome === userProfile.nome;
-        if (!hasAccess) {
+      } else if (role === 'produtor') {
+        const ok =
+          projectData.produtorId === uid ||
+          projectData.produtorUid === uid ||
+          projectData.produtorEmail === userProfile?.email ||
+          projectData.produtorNome === userProfile?.nome;
+        if (!ok) {
           setError('Você não tem permissão para visualizar este projeto');
           return;
         }
-      } else if (!['administrador','gerente','operador'].includes(userRole)) {
+      } else if (!['administrador', 'gerente', 'operador'].includes(role)) {
         setError('Você não tem permissão para visualizar projetos');
         return;
       }
@@ -190,7 +182,7 @@ useEffect(() => {
       setProject(projectData);
       setUsers(usersData || []);
 
-      // Diário: carrega do documento do projeto (se existir)
+      // ====== Diário: carregar do documento do projeto ======
       const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
       initialDiary.sort((a, b) => {
         const ta = new Date(a?.createdAt || 0).getTime();
@@ -198,8 +190,6 @@ useEffect(() => {
         return tb - ta;
       });
       setDiaryEntries(initialDiary);
-
-
     } catch (err) {
       console.error('Erro ao carregar projeto:', err);
       setError('Erro ao carregar dados do projeto');
@@ -208,7 +198,6 @@ useEffect(() => {
     }
   };
 
-  
   // ====== Diário (ações) ======
   const handleAddDiaryEntry = async () => {
     setDiaryError('');
@@ -216,9 +205,9 @@ useEffect(() => {
     const linkVal = (newDiaryLink || '').trim();
     if (!textVal) return;
 
-    // valida link simples
+    // validação simples do link (opcional)
     if (linkVal && !/^https?:\/\//i.test(linkVal)) {
-      setDiaryError('Informe um link válido (http/https)');
+      setDiaryError('Informe um link válido (http/https).');
       return;
     }
 
@@ -234,6 +223,8 @@ useEffect(() => {
 
     try {
       setSavingDiary(true);
+
+      // salva no campo "diario" do projeto (usa addDiaryEntry se existir; senão updateProject)
       const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
 
       if (typeof projectService.addDiaryEntry === 'function') {
@@ -245,15 +236,15 @@ useEffect(() => {
         });
       }
 
-      setDiaryEntries(prev => [entry, ...prev]);
-      setProject(prev => ({
+      // otimista
+      setDiaryEntries((prev) => [entry, ...prev]);
+      setProject((prev) => ({
         ...(prev || {}),
         diario: next,
         atualizadoEm: new Date().toISOString(),
       }));
       setNewDiaryText('');
       setNewDiaryLink('');
-
     } catch (e) {
       console.error('Erro ao salvar observação do diário:', e);
       setDiaryError('Não foi possível salvar a observação. Tente novamente.');
@@ -271,7 +262,7 @@ useEffect(() => {
     try {
       setSavingDiary(true);
       const current = Array.isArray(project?.diario) ? project.diario : diaryEntries;
-      const next = current.filter(e => e.id !== entryId);
+      const next = current.filter((e) => e.id !== entryId);
 
       if (typeof projectService.removeDiaryEntry === 'function') {
         await projectService.removeDiaryEntry(project.id || projectId, entryId);
@@ -282,9 +273,8 @@ useEffect(() => {
         });
       }
 
-      setDiaryEntries(prev => prev.filter(e => e.id != entryId));
-      setProject(prev => ({ ...(prev || {}), diario: next }));
-
+      setDiaryEntries((prev) => prev.filter((e) => e.id !== entryId));
+      setProject((prev) => ({ ...(prev || {}), diario: next }));
     } catch (e) {
       console.error('Erro ao excluir observação do diário:', e);
       setDiaryError('Não foi possível excluir a observação. Tente novamente.');
@@ -292,9 +282,10 @@ useEffect(() => {
       setSavingDiary(false);
     }
   };
-const getStatusInfo = () => {
+
+  const getStatusInfo = () => {
     if (!project) return { label: 'Carregando...', color: 'gray' };
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -327,6 +318,9 @@ const getStatusInfo = () => {
 
   const canEdit = userProfile?.funcao === 'administrador';
 
+  /* =========================
+     Estados de carregamento/erro
+     ========================= */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -372,6 +366,9 @@ const getStatusInfo = () => {
 
   const statusInfo = getStatusInfo();
 
+  /* =========================
+     Render
+     ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-6xl mx-auto">
@@ -392,7 +389,7 @@ const getStatusInfo = () => {
                 <h1 className="text-3xl font-bold text-gray-900">
                   {project.nome}
                 </h1>
-                <Badge 
+                <Badge
                   variant="secondary"
                   className={`${
                     statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
@@ -410,7 +407,7 @@ const getStatusInfo = () => {
               </p>
             </div>
           </div>
-          
+
           {canEdit && (
             <Button
               onClick={() => navigate(`/projetos/editar/${project.id}`)}
@@ -422,7 +419,7 @@ const getStatusInfo = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Coluna Principal */}
+          {/* Coluna Principal (esquerda) */}
           <div className="lg:col-span-2 space-y-6">
             {/* Informações Básicas */}
             <Card>
@@ -464,7 +461,6 @@ const getStatusInfo = () => {
                 </div>
               </CardContent>
             </Card>
-
 
             {/* Diário do Projeto — FORM (entre Info Básicas e Cronograma) */}
             <Card>
@@ -523,11 +519,11 @@ const getStatusInfo = () => {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.montagem.dataInicio)}</p>
+                        <p className="font-medium">{formatDate(project.montagem?.dataInicio) || '—'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.montagem.dataFim)}</p>
+                        <p className="font-medium">{formatDate(project.montagem?.dataFim) || '—'}</p>
                       </div>
                     </div>
                   </div>
@@ -543,11 +539,11 @@ const getStatusInfo = () => {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.evento.dataInicio)}</p>
+                        <p className="font-medium">{formatDate(project.evento?.dataInicio) || '—'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.evento.dataFim)}</p>
+                        <p className="font-medium">{formatDate(project.evento?.dataFim) || '—'}</p>
                       </div>
                     </div>
                   </div>
@@ -563,38 +559,40 @@ const getStatusInfo = () => {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem.dataInicio)}</p>
+                        <p className="font-medium">{formatDate(project.desmontagem?.dataInicio) || '—'}</p>
                       </div>
                       <div>
                         <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem.dataFim)}</p>
+                        <p className="font-medium">{formatDate(project.desmontagem?.dataFim) || '—'}</p>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* Período Geral */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="font-medium text-gray-800 mb-2 flex items-center">
-                    <Clock className="h-4 w-4 mr-2" />
-                    Período Geral
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-600">Início:</span>
-                      <p className="font-medium">{formatDate(project.dataInicio)}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Fim:</span>
-                      <p className="font-medium">{formatDate(project.dataFim)}</p>
+                {(project.periodoGeral?.dataInicio || project.periodoGeral?.dataFim) && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-gray-800 mb-2 flex items-center">
+                      <Clock className="h-4 w-4 mr-2" />
+                      Período Geral
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.periodoGeral?.dataInicio) || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.periodoGeral?.dataFim) || '—'}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* Descrição e Observações */}
-            {(project.descricao || project.observacoes) && (
+            {/* Detalhes Adicionais */}
+            {project.descricao && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -602,25 +600,14 @@ const getStatusInfo = () => {
                     Detalhes Adicionais
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {project.descricao && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">Descrição</label>
-                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.descricao}</p>
-                    </div>
-                  )}
-                  {project.observacoes && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">Observações</label>
-                      <p className="mt-1 text-gray-900 whitespace-pre-wrap">{project.observacoes}</p>
-                    </div>
-                  )}
+                <CardContent>
+                  <pre className="whitespace-pre-wrap text-sm">{project.descricao}</pre>
                 </CardContent>
               </Card>
             )}
           </div>
 
-          {/* Coluna Lateral */}
+          {/* Coluna Lateral (direita) */}
           <div className="space-y-6">
             {/* Responsáveis */}
             <Card>
@@ -630,65 +617,52 @@ const getStatusInfo = () => {
                   Responsáveis
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-2">
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Produtor</label>
-                  <p className="text-blue-600 font-medium">
-                    {project.produtorNome || 'Não atribuído'}
-                  </p>
+                  <span className="font-medium">Produtor:</span>
+                  <p>{project.produtorNome || 'Não atribuído'}</p>
                   {project.produtorEmail && (
-                    <p className="text-sm text-gray-500">{project.produtorEmail}</p>
+                    <a
+                      href={`mailto:${project.produtorEmail}`}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      {project.produtorEmail}
+                    </a>
                   )}
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Consultor</label>
-                  <p className="text-green-600 font-medium">
-                    {project.consultorNome || 'Não atribuído'}
-                  </p>
+                <div className="pt-2">
+                  <span className="font-medium">Consultor:</span>
+                  <p>{project.consultorNome || 'Não atribuído'}</p>
                   {project.consultorEmail && (
-                    <p className="text-sm text-gray-500">{project.consultorEmail}</p>
+                    <a
+                      href={`mailto:${project.consultorEmail}`}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      {project.consultorEmail}
+                    </a>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Equipes Terceirizadas */}
-            {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
+            {/* Documentos */}
+            {(project.driveLink || project.documentosLink) && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Equipes Terceirizadas</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {Object.entries(project.equipesEmpreiteiras).map(([area, empresa]) => (
-                    empresa && (
-                      <div key={area}>
-                        <label className="text-sm font-medium text-gray-500 capitalize">
-                          {area}
-                        </label>
-                        <p className="text-gray-900">{empresa}</p>
-                      </div>
-                    )
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Link do Drive */}
-            {project.linkDrive && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Documentos</CardTitle>
+                  <CardTitle className="flex items-center">
+                    <ExternalLink className="h-5 w-5 mr-2" />
+                    Documentos
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <a
-                    href={project.linkDrive}
+                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                    href={project.driveLink || project.documentosLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center text-blue-600 hover:text-blue-800"
                   >
-                    <FileText className="h-4 w-4 mr-2" />
+                    <ExternalLink className="h-4 w-4" />
                     Acessar Drive
-                    <ExternalLink className="h-3 w-3 ml-1" />
                   </a>
                 </CardContent>
               </Card>
@@ -697,26 +671,20 @@ const getStatusInfo = () => {
             {/* Informações do Sistema */}
             <Card>
               <CardHeader>
-                <CardTitle>Informações do Sistema</CardTitle>
+                <CardTitle className="flex items-center">
+                  <AlertCircle className="h-5 w-5 mr-2" />
+                  Informações do Sistema
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm text-gray-600">
-                <div>
-                  <span className="font-medium">Criado em:</span>
-                  <p>{formatDate(project.criadoEm)}</p>
-                </div>
-                {project.atualizadoEm && (
-                  <div>
-                    <span className="font-medium">Atualizado em:</span>
-                    <p>{formatDate(project.atualizadoEm)}</p>
-                  </div>
-                )}
-                <div>
-                  <span className="font-medium">Status:</span>
-                  <p className="capitalize">{project.status || 'ativo'}</p>
-                </div>
+              <CardContent className="space-y-2 text-sm">
+                <div> Criado em: <span className="font-medium">{formatDateTimeSP(project.criadoEm || project.criadoem)}</span></div>
+                <div> Atualizado em: <span className="font-medium">{formatDateTimeSP(project.atualizadoEm || project.atualizadoem)}</span></div>
+                <div> Status: <span className="font-medium capitalize">{project.status || 'ativo'}</span></div>
+                <div> Ativo: <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span></div>
               </CardContent>
             </Card>
-            {/* Diário do Projeto — ENTRADAS (abaixo de Informações do Sistema) */}
+
+            {/* Diário do Projeto — LISTA (abaixo de Informações do Sistema) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -769,7 +737,6 @@ const getStatusInfo = () => {
                 )}
               </CardContent>
             </Card>
-
           </div>
         </div>
       </div>
