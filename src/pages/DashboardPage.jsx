@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { projectService } from '../services/projectService';
 import { ticketService } from '../services/ticketService';
 import { userService } from '../services/userService';
@@ -54,6 +54,7 @@ const DashboardPage = () => {
   const [selectedPriorities, setSelectedPriorities] = useState(new Set());
   const [viewMode, setViewMode] = useState('list'); // mobile = list; desktop pode alternar
   const [savedFilters, setSavedFilters] = useState([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState([]);
 
   // controle de filtros: no desktop é Dialog; no mobile é painel expansível
   const [filtersOpen, setFiltersOpen] = useState(false);            // desktop Dialog
@@ -61,16 +62,32 @@ const DashboardPage = () => {
 
   // breakpoint
   const [isMobile, setIsMobile] = useState(false);
+  const location = useLocation();
   useEffect(() => {
     const apply = () => {
       const m = window.innerWidth < 1024; // <lg
       setIsMobile(m);
-      if (m) setViewMode('list'); // mobile começa em lista
+      if (m) setViewMode('cards'); // mobile começa em CARDS
     };
     apply();
     window.addEventListener('resize', apply);
     return () => window.removeEventListener('resize', apply);
   }, []);
+
+  // Aplicar filtros vindos por parâmetros da URL (ex.: ?projectId=123&projectName=ABC)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || '');
+    const pid = params.get('projectId') || params.get('projetoId') || params.get('project') || params.get('projeto');
+    const pname = params.get('projectName') || params.get('nome') || params.get('name');
+    if (pid) {
+      setSelectedProjectIds([pid]);
+    } else {
+      setSelectedProjectIds([]);
+    }
+    if (pname && !pid) {
+      setSearchTerm(pname);
+    }
+  }, [location.search]);
 
   // --------- Utilidades (regras de negócio intactas) ---------
   const isActiveTicket = (t) => !['concluido','cancelado','arquivado'].includes(t.status);
@@ -396,6 +413,15 @@ const DashboardPage = () => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
         if (!ids.length) return false;
         return ids.some(id => (projectMeta[id]?.feira || '') === selectedEvent);
+      });
+    }
+
+    // Filtro por projeto específico (via URL ?projectId=... ou escolhido em UI futura)
+    if (selectedProjectIds && selectedProjectIds.length > 0) {
+      base = base.filter(t => {
+        const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
+        if (!ids.length) return false;
+        return ids.some(id => selectedProjectIds.includes(id));
       });
     }
 
@@ -947,7 +973,7 @@ const DashboardPage = () => {
                     className="flex-1 h-9"
                     placeholder="Buscar por título ou descrição..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => setSearchTerm(e.target.value)} // fixedrchTerm(e.target.value)}
                   />
                   <Button
                     variant="outline"
