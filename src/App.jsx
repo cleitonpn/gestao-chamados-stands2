@@ -22,7 +22,6 @@ import AdminPanelPage from './pages/AdminPanelPage';
 import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';// NOVA IMPORTAÇÃO
 import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
 import TemplateManagerPage from './pages/TemplateManagerPage';
-import TemplateManagerPage from './pages/TemplateManagerPage';
 import GamingPage from './pages/GamingPage';
 import './App.css';
 
