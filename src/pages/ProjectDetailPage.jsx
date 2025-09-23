@@ -1,4 +1,3 @@
-// src/pages/ProjectDetailPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,27 +5,70 @@ import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
 import { ticketService } from '../services/ticketService';
 
-// 🔽 use o mesmo db que você já usa no projeto
-import { db } from '../services/firebase';
-import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  arrayUnion,
+} from 'firebase/firestore';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  ArrowLeft, Calendar, Users, Building, Mail, Link2, Save, Loader2,
-  AlertCircle, User, ShieldCheck, Trash2, BarChart3, ClipboardList, TrendingUp
+  ArrowLeft,
+  Calendar,
+  Users,
+  Building,
+  Mail,
+  Link2,
+  Save,
+  Loader2,
+  AlertCircle,
+  User,
+  ShieldCheck,
+  Trash2,
+  BarChart3,
+  ClipboardList,
+  TrendingUp,
 } from 'lucide-react';
 
-/* ---------- Helpers de data ---------- */
+/* ============== Helpers de carregamento do db (evita erro de caminho) ============== */
+async function loadDb() {
+  const candidates = [
+    '../services/firebase',
+    '../lib/firebase',
+    '../firebase',
+    '@/services/firebase',
+    '@/lib/firebase',
+    '@/firebase',
+  ];
+  for (const p of candidates) {
+    try {
+      // Vite não vai tentar resolver em build por causa do @vite-ignore
+      const mod = await import(/* @vite-ignore */ p);
+      if (mod?.db) return mod.db;
+      if (mod?.default?.db) return mod.default.db;
+    } catch (_e) {
+      /* tenta o próximo */
+    }
+  }
+  throw new Error('Não foi possível encontrar o módulo de Firebase (db). Ajuste o caminho no loadDb().');
+}
+
+/* ---------- Helpers de Data ---------- */
 const isDateOnly = (value) => {
-  if (typeof value === 'string') return /^\d{4}-\d{2}-\d{2}$/.test(value) || /^\d{2}-\d{2}-\d{4}$/.test(value);
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
+    if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
+  }
   if (value && typeof value === 'object' && value.seconds) {
     const d = new Date(value.seconds * 1000);
     return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
   }
   return false;
 };
+
 const normalizeDateInput = (value) => {
   if (!value) return null;
   if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
@@ -34,10 +76,13 @@ const normalizeDateInput = (value) => {
     const [dd, mm, yyyy] = value.split('-');
     return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
   }
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T00:00:00.000Z`);
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
   const d = new Date(value);
   return isNaN(d.getTime()) ? null : d;
 };
+
 const formatDate = (value) => {
   if (!value) return 'Não definido';
   const date = normalizeDateInput(value);
@@ -57,30 +102,39 @@ const formatDate = (value) => {
     return 'Não definido';
   }
 };
+
 const formatDateTimeSP = (value) => {
   if (!value) return '—';
   const date = normalizeDateInput(value);
   if (!date) return '—';
-  try { return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }); }
-  catch { return date.toLocaleString('pt-BR'); }
+  try {
+    return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  } catch {
+    return date.toLocaleString('pt-BR');
+  }
 };
 
-/* ---------- Helpers do Drive ---------- */
+/* ---------- Helpers de Drive ---------- */
 const getDriveLinkFromProject = (p) =>
   p?.driveLink || p?.drive || p?.driveUrl || p?.driveURL || p?.linkDrive || p?.drive_link || '';
 
-/* ---------- Utils diário (array no doc) ---------- */
+/* ---------- Utils do diário armazenado como ARRAY no doc do projeto ---------- */
 const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
 const normalizeDiaryItem = (it) => ({
   id: it.id || makeId(),
   authorId: it.authorId || it.userId || '',
   authorName: it.authorName || it.nome || 'Usuário',
   authorRole: it.authorRole || it.funcao || '',
   text: it.text || it.obs || it.observacao || it.observação || '',
+  // No seu dado existe "linkUrl" (print). Mantemos isso:
   linkUrl: it.linkUrl || it.driveLink || it.link || '',
   createdAt: it.createdAt || new Date().toISOString(),
 });
 
+/* =========================
+   Página — Detalhe do Projeto
+   ========================= */
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -97,7 +151,7 @@ const ProjectDetailPage = () => {
   const [newDiaryLink, setNewDiaryLink] = useState('');
   const [savingDiary, setSavingDiary] = useState(false);
 
-  // Tickets
+  // Tickets do projeto
   const [tickets, setTickets] = useState([]);
   const [ticketsLoading, setTicketsLoading] = useState(true);
   const [ticketsErr, setTicketsErr] = useState('');
@@ -107,23 +161,27 @@ const ProjectDetailPage = () => {
 
   useEffect(() => {
     if (!authInitialized) return;
-    if (!user) { navigate('/login'); return; }
+    if (!user) {
+      navigate('/login');
+      return;
+    }
 
     (async () => {
       try {
         setLoading(true);
         setError('');
 
-        // Projeto
+        // Carrega projeto
         const proj = await projectService.getProjectById(projectId);
         setProject(proj || null);
 
-        // Usuarios (se necessário em algum lugar)
+        // Usuários (caso use em alguma parte)
         const listUsers = await userService.getAllUsers?.();
         setUsers(Array.isArray(listUsers) ? listUsers : []);
 
         // Diário: ler do array "diario" dentro do doc
         try {
+          const db = await loadDb();
           const ref = doc(db, 'projects', projectId);
           const snap = await getDoc(ref);
           const data = snap.exists() ? snap.data() : {};
@@ -166,8 +224,9 @@ const ProjectDetailPage = () => {
         createdAt: new Date().toISOString(),
       });
 
+      const db = await loadDb();
       const ref = doc(db, 'projects', projectId);
-      // adiciona sem precisar regravar o array inteiro
+      // Adiciona sem precisar regravar o array inteiro
       await updateDoc(ref, { diario: arrayUnion(entry) });
 
       setDiaryEntries((prev) => [entry, ...prev]);
@@ -186,6 +245,7 @@ const ProjectDetailPage = () => {
     if (!canDeleteDiary()) return;
     if (!window.confirm('Remover esta observação do diário?')) return;
     try {
+      const db = await loadDb();
       const ref = doc(db, 'projects', projectId);
       const snap = await getDoc(ref);
       const data = snap.exists() ? snap.data() : {};
@@ -203,8 +263,18 @@ const ProjectDetailPage = () => {
   /* ---------- Métricas de chamados ---------- */
   const ticketMetrics = useMemo(() => {
     const total = tickets.length;
+
+    // concluído + arquivado + variações
     const closedStatuses = new Set(['concluido', 'concluído', 'arquivado', 'fechado', 'resolvido']);
-    const notOpenStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido','cancelado']);
+    const notOpenStatuses = new Set([
+      'concluido',
+      'concluído',
+      'arquivado',
+      'fechado',
+      'resolvido',
+      'cancelado',
+    ]);
+
     const closed = tickets.filter((t) => closedStatuses.has((t.status || '').toLowerCase())).length;
     const open = tickets.filter((t) => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
     const completion = total > 0 ? Math.round((closed / total) * 100) : 0;
@@ -214,7 +284,9 @@ const ProjectDetailPage = () => {
       const area = (t.area || t.areaAtual || 'Não informada').toString();
       counts[area] = (counts[area] || 0) + 1;
     }
-    const topAreas = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+    const topAreas = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
 
     return { total, open, closed, completion, topAreas };
   }, [tickets]);
@@ -226,6 +298,7 @@ const ProjectDetailPage = () => {
     navigate(`/dashboard?${params.toString()}`);
   };
 
+  /* ---------- Loading / Erro ---------- */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -236,6 +309,7 @@ const ProjectDetailPage = () => {
       </div>
     );
   }
+
   if (error || !project) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -253,56 +327,108 @@ const ProjectDetailPage = () => {
 
   const driveHref = getDriveLinkFromProject(project);
 
+  /* =========================
+     Layout (responsivo)
+     ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center">
-            <Button variant="outline" size="sm" onClick={() => navigate('/projetos')} className="mr-4">
-              <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/projetos')}
+              className="mr-4"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Voltar
             </Button>
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-gray-900">{project.nome || 'Projeto'}</h1>
-                <Badge variant="secondary" className="text-xs">{project.status || 'Ativo'}</Badge>
+                <h1 className="text-3xl font-bold text-gray-900">
+                  {project.nome || 'Projeto'}
+                </h1>
+                <Badge variant="secondary" className="text-xs">
+                  {project.status || 'Ativo'}
+                </Badge>
               </div>
-              <p className="text-gray-600">{project.feira} • {project.local}</p>
+              <p className="text-gray-600">
+                {project.feira} • {project.local}
+              </p>
             </div>
           </div>
 
+          {/* Acesso rápido ao Drive (se houver) */}
           {driveHref && (
-            <a href={driveHref} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm text-blue-600 hover:underline" title="Acessar Drive do Projeto">
+            <a
+              href={driveHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center text-sm text-blue-600 hover:underline"
+              title="Acessar Drive do Projeto"
+            >
               <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
             </a>
           )}
         </div>
 
-        {/* GRID: esquerda (conteúdo) / direita (sidebar) */}
+        {/* GRID: esquerda (conteúdo principal) / direita (sidebar) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ESQUERDA */}
           <div className="lg:col-span-2 space-y-6">
             {/* Informações Básicas */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><Building className="h-5 w-5 mr-2" />Informações Básicas</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Building className="h-5 w-5 mr-2" />
+                  Informações Básicas
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><div className="text-sm font-medium text-gray-500">Nome do Projeto</div><div className="text-lg font-semibold">{project.nome || '—'}</div></div>
-                  <div><div className="text-sm font-medium text-gray-500">Feira</div><div className="text-lg font-semibold">{project.feira || '—'}</div></div>
-                  <div><div className="text-sm font-medium text-gray-500">Localização</div><div className="text-lg font-semibold">{project.local || '—'}</div></div>
-                  <div><div className="text-sm font-medium text-gray-500">Metragem</div><div className="text-lg font-semibold">{project.metragem || '—'}</div></div>
-                  <div><div className="text-sm font-medium text-gray-500">Tipo de Montagem</div><div className="text-lg font-semibold">{project.tipoMontagem || '—'}</div></div>
-                  <div><div className="text-sm font-medium text-gray-500">Pavilhão</div><div className="text-lg font-semibold">{project.pavilhao || '—'}</div></div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Nome do Projeto</div>
+                    <div className="text-lg font-semibold">{project.nome || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Feira</div>
+                    <div className="text-lg font-semibold">{project.feira || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Localização</div>
+                    <div className="text-lg font-semibold">{project.local || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Metragem</div>
+                    <div className="text-lg font-semibold">{project.metragem || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Tipo de Montagem</div>
+                    <div className="text-lg font-semibold">{project.tipoMontagem || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-500">Pavilhão</div>
+                    <div className="text-lg font-semibold">{project.pavilhao || '—'}</div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Diário – FORM */}
+            {/* Diário do Projeto — FORM (fica entre Info Básicas e Cronograma) */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><ClipboardList className="h-5 w-5 mr-2" />Diário do Projeto</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <ClipboardList className="h-5 w-5 mr-2" />
+                  Diário do Projeto
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Adicione uma observação</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Adicione uma observação
+                  </label>
                   <textarea
                     rows={3}
                     value={newDiaryText}
@@ -311,8 +437,11 @@ const ProjectDetailPage = () => {
                     className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Link do Drive (opcional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Link do Drive (opcional)
+                  </label>
                   <div className="flex gap-2">
                     <input
                       type="url"
@@ -322,7 +451,15 @@ const ProjectDetailPage = () => {
                       className="flex-1 border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <Button onClick={handleAddDiaryEntry} disabled={savingDiary}>
-                      {savingDiary ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>) : (<><Save className="h-4 w-4 mr-2" /> Salvar no diário</>)}
+                      {savingDiary ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4 mr-2" /> Salvar no diário
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -331,24 +468,37 @@ const ProjectDetailPage = () => {
 
             {/* Cronograma */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><Calendar className="h-5 w-5 mr-2" />Cronograma</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Calendar className="h-5 w-5 mr-2" />
+                  Cronograma
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-lg border p-4 bg-blue-50/50">
                     <div className="text-sm text-gray-500">Montagem</div>
-                    <div className="mt-1 font-medium">Início: {formatDate(project.montagem?.dataInicio)} • Fim: {formatDate(project.montagem?.dataFim)}</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.montagem?.dataInicio)} • Fim: {formatDate(project.montagem?.dataFim)}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-green-50/50">
                     <div className="text-sm text-gray-500">Evento</div>
-                    <div className="mt-1 font-medium">Início: {formatDate(project.evento?.dataInicio)} • Fim: {formatDate(project.evento?.dataFim)}</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.evento?.dataInicio)} • Fim: {formatDate(project.evento?.dataFim)}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-orange-50/50">
                     <div className="text-sm text-gray-500">Desmontagem</div>
-                    <div className="mt-1 font-medium">Início: {formatDate(project.desmontagem?.dataInicio)} • Fim: {formatDate(project.desmontagem?.dataFim)}</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.desmontagem?.dataInicio)} • Fim: {formatDate(project.desmontagem?.dataFim)}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-gray-50">
                     <div className="text-sm text-gray-500">Período Geral</div>
-                    <div className="mt-1 font-medium">Início: {formatDate(project.dataInicio)} • Fim: {formatDate(project.dataFim)}</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.dataInicio)} • Fim: {formatDate(project.dataFim)}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -359,27 +509,56 @@ const ProjectDetailPage = () => {
           <div className="space-y-6">
             {/* Responsáveis */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><Users className="h-5 w-5 mr-2" />Responsáveis</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Users className="h-5 w-5 mr-2" />
+                  Responsáveis
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div>
                   <div className="text-xs text-gray-500">Produtor</div>
                   <div className="font-medium">{project.produtorNome || 'Não atribuído'}</div>
-                  {project.produtorEmail && <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.produtorEmail}`}><Mail className="h-3 w-3" /> {project.produtorEmail}</a>}
+                  {project.produtorEmail && (
+                    <a
+                      className="text-blue-600 hover:underline flex items-center gap-1"
+                      href={`mailto:${project.produtorEmail}`}
+                    >
+                      <Mail className="h-3 w-3" /> {project.produtorEmail}
+                    </a>
+                  )}
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Consultor</div>
                   <div className="font-medium">{project.consultorNome || 'Não atribuído'}</div>
-                  {project.consultorEmail && <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.consultorEmail}`}><Mail className="h-3 w-3" /> {project.consultorEmail}</a>}
+                  {project.consultorEmail && (
+                    <a
+                      className="text-blue-600 hover:underline flex items-center gap-1"
+                      href={`mailto:${project.consultorEmail}`}
+                    >
+                      <Mail className="h-3 w-3" /> {project.consultorEmail}
+                    </a>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Documentos */}
+            {/* Documentos (Drive) */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><Link2 className="h-5 w-5 mr-2" />Documentos</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Link2 className="h-5 w-5 mr-2" />
+                  Documentos
+                </CardTitle>
+              </CardHeader>
               <CardContent>
                 {driveHref ? (
-                  <a href={driveHref} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm text-blue-600 hover:underline">
+                  <a
+                    href={driveHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center text-sm text-blue-600 hover:underline"
+                  >
                     <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
                   </a>
                 ) : (
@@ -390,18 +569,40 @@ const ProjectDetailPage = () => {
 
             {/* Informações do Sistema */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><ShieldCheck className="h-5 w-5 mr-2" />Informações do Sistema</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <ShieldCheck className="h-5 w-5 mr-2" />
+                  Informações do Sistema
+                </CardTitle>
+              </CardHeader>
               <CardContent className="text-sm space-y-1">
-                <div className="flex items-center justify-between"><span className="text-gray-500">Criado em:</span><span>{formatDateTimeSP(project.createdAt)}</span></div>
-                <div className="flex items-center justify-between"><span className="text-gray-500">Atualizado em:</span><span>{formatDateTimeSP(project.updatedAt)}</span></div>
-                <div className="flex items-center justify-between"><span className="text-gray-500">Status:</span><span className="font-medium">{project.status || 'Ativo'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-gray-500">Ativo:</span><span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span></div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Criado em:</span>
+                  <span>{formatDateTimeSP(project.createdAt)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Atualizado em:</span>
+                  <span>{formatDateTimeSP(project.updatedAt)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Status:</span>
+                  <span className="font-medium">{project.status || 'Ativo'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Ativo:</span>
+                  <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span>
+                </div>
               </CardContent>
             </Card>
 
             {/* Observações do Projeto (lista do diário) */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><ClipboardList className="h-5 w-5 mr-2" />Observações do Projeto</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <ClipboardList className="h-5 w-5 mr-2" />
+                  Observações do Projeto
+                </CardTitle>
+              </CardHeader>
               <CardContent>
                 {diaryEntries.length === 0 ? (
                   <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
@@ -416,17 +617,32 @@ const ProjectDetailPage = () => {
                               {e.authorName} {e.authorRole ? `(${e.authorRole})` : ''}
                             </span>
                           </div>
-                          <span className="text-xs text-gray-500">{formatDateTimeSP(e.createdAt)}</span>
+                          <span className="text-xs text-gray-500">
+                            {formatDateTimeSP(e.createdAt)}
+                          </span>
                         </div>
-                        {e.text && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.text}</p>}
+                        {e.text && (
+                          <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                            {e.text}
+                          </p>
+                        )}
                         {e.linkUrl && (
-                          <a href={e.linkUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2">
+                          <a
+                            href={e.linkUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+                          >
                             <Link2 className="h-4 w-4" /> Anexo/Link
                           </a>
                         )}
                         {canDeleteDiary() && (
                           <div className="mt-3 text-right">
-                            <Button variant="destructive" size="sm" onClick={() => handleDeleteDiary(e.id)}>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteDiary(e.id)}
+                            >
                               <Trash2 className="h-4 w-4 mr-2" /> Excluir
                             </Button>
                           </div>
@@ -440,7 +656,12 @@ const ProjectDetailPage = () => {
 
             {/* Resumo de Chamados */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center"><BarChart3 className="h-5 w-5 mr-2" />Resumo de Chamados</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <BarChart3 className="h-5 w-5 mr-2" />
+                  Resumo de Chamados
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-3">
                 {ticketsLoading ? (
                   <div className="text-center">
@@ -452,24 +673,45 @@ const ProjectDetailPage = () => {
                 ) : (
                   <>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2"><ClipboardList className="h-4 w-4" /><span>Total de chamados</span></div>
+                      <div className="flex items-center gap-2">
+                        <ClipboardList className="h-4 w-4" />
+                        <span>Total de chamados</span>
+                      </div>
                       <span className="font-semibold">{ticketMetrics.total}</span>
                     </div>
+
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2"><AlertCircle className="h-4 w-4" /><span>Abertos</span></div>
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>Abertos</span>
+                      </div>
                       <span className="font-semibold">{ticketMetrics.open}</span>
                     </div>
+
                     <div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-2"><TrendingUp className="h-4 w-4" />Taxa de conclusão</span>
+                        <span className="flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4" />
+                          Taxa de conclusão
+                        </span>
                         <span className="font-semibold">{ticketMetrics.completion}%</span>
                       </div>
                       <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500" style={{ width: `${ticketMetrics.completion}%` }} />
+                        <div
+                          className="h-full bg-green-500"
+                          style={{ width: `${ticketMetrics.completion}%` }}
+                        />
                       </div>
                     </div>
+
                     <div className="pt-2">
-                      <Button onClick={goToFilteredTickets} className="w-full" variant="outline" disabled={tickets.length === 0} title="Ver lista de chamados do projeto">
+                      <Button
+                        onClick={goToFilteredTickets}
+                        className="w-full"
+                        variant="outline"
+                        disabled={tickets.length === 0}
+                        title="Ver lista de chamados do projeto"
+                      >
                         Ver todos os chamados
                       </Button>
                     </div>
