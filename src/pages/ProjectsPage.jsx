@@ -238,14 +238,14 @@ const [loading, setLoading] = useState(true);
     const params = new URLSearchParams(location.search);
     params.set('evento', selectedEvent);
     params.set('tab', activeTab);
+    params.set('q', searchTerm);
     const newSearch = `?${params.toString()}`;
     if (newSearch !== location.search) {
       navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
     }
-  }, [selectedEvent, activeTab, location.pathname, location.search, navigate]);
+  }, [selectedEvent, activeTab, searchTerm, location.pathname, location.search, navigate]);
 
   // String de query atual pra repassar ao navegar
-  const currentSearch = useMemo(() => location.search || '', [location.search]);
 
   // =====================
   // Carregamento
@@ -477,7 +477,23 @@ setFilteredProjects(projectsToDisplay);
                 ))}
               </select>
             </div>
-          )}
+          )
+
+{/* Busca */}
+<div className="w-full max-w-md">
+  <div className="relative">
+    <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+    <input
+      type="text"
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+      placeholder="Buscar por nome, feira, local, consultor, produtor…"
+      className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    />
+  </div>
+</div>
+
+}
 
           {/* Selecionar todos */}
           <button
@@ -496,7 +512,38 @@ setFilteredProjects(projectsToDisplay);
         </div>
       )}
 
-      {/* Content */}
+      
+{/* Sidebox: Resumo por Fase */}
+<Card className="mt-4">
+  <CardHeader>
+    <CardTitle className="flex items-center gap-2">
+      <BarChart3 className="h-5 w-5" />
+      Resumo por Fase (após filtros e busca)
+    </CardTitle>
+  </CardHeader>
+  <CardContent>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="rounded-lg border p-3">
+        <div className="text-xs text-gray-500">Futuro</div>
+        <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
+      </div>
+      <div className="rounded-lg border p-3">
+        <div className="text-xs text-gray-500">Andamento</div>
+        <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
+      </div>
+      <div className="rounded-lg border p-3">
+        <div className="text-xs text-gray-500">Desmontagem</div>
+        <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
+      </div>
+      <div className="rounded-lg border p-3">
+        <div className="text-xs text-gray-500">Finalizado</div>
+        <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
+      </div>
+    </div>
+  </CardContent>
+</Card>
+
+{/* Content */}
       {filteredProjects.length === 0 ? (
         <div className="text-center py-16">
           <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
