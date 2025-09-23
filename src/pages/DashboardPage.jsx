@@ -22,7 +22,7 @@ import {
   LogOut, Plus, AlertCircle, Clock, CheckCircle, Users, FolderOpen, BarChart3,
   Menu, X, Calendar, ChevronDown, ChevronRight, BellRing, ArrowUp, Hourglass,
   User as UserIcon, FileText, Eye, Filter, Archive, List as ListIcon, LayoutGrid, Lock,
-  SlidersHorizontal
+  SlidersHorizontal, Trophy
 } from 'lucide-react';
 
 const LOCAL_STORAGE_FILTERS_KEY = 'dashboard_saved_filters_v2';
@@ -853,6 +853,11 @@ const DashboardPage = () => {
               <Calendar className="h-4 w-4 mr-3" />
               Cronograma
             </Button>
+
+            <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+  <Trophy className="h-4 w-4 mr-3" />
+  Gamificação
+</Button>
 
             {userProfile?.funcao === 'administrador' && (
               <>
