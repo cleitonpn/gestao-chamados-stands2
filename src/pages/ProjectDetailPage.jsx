@@ -14,15 +14,18 @@ import {
   Calendar,
   MapPin,
   Users,
-  ExternalLink,
-  Loader2,
-  Clock,
-  Wrench,
-  PartyPopper,
-  Truck,
-  FileText,
   Building,
+  Mail,
+  Phone,
+  FileText,
+  Link2,
+  UploadCloud,
+  Save,
+  Loader2,
   AlertCircle,
+  Clock,
+  User,
+  ShieldCheck,
   Send,
   Trash2,
   BarChart3,
@@ -62,36 +65,31 @@ const normalizeDateInput = (value) => {
 const formatDate = (value) => {
   if (!value) return 'Não definido';
   const date = normalizeDateInput(value);
-  if (!date) return 'Data inválida';
+  if (!date) return 'Não definido';
   try {
     if (isDateOnly(value)) {
       const dd = String(date.getUTCDate()).padStart(2, '0');
       const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const yy = String(date.getUTCFullYear()).slice(-2);
-      return `${dd}/${mm}/${yy}`;
+      const yyyy = String(date.getUTCFullYear());
+      return `${dd}-${mm}-${yyyy}`;
     }
-    return date.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: '2-digit',
-      timeZone: 'America/Sao_Paulo',
-    });
+    const dd = date.toLocaleString('pt-BR', { day: '2-digit', timeZone: 'America/Sao_Paulo' });
+    const mm = date.toLocaleString('pt-BR', { month: '2-digit', timeZone: 'America/Sao_Paulo' });
+    const yyyy = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
+    return `${dd}-${mm}-${yyyy}`;
   } catch {
-    return 'Data inválida';
+    return 'Não definido';
   }
 };
 
-const formatDateTimeSP = (isoOrDate) => {
+const formatDateTimeSP = (value) => {
+  if (!value) return '—';
+  const date = normalizeDateInput(value);
+  if (!date) return '—';
   try {
-    const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : (isoOrDate || new Date());
-    if (isNaN(d?.getTime())) return '—';
-    return d.toLocaleString('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-      timeZone: 'America/Sao_Paulo',
-    });
+    return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   } catch {
-    return '—';
+    return date.toLocaleString('pt-BR');
   }
 };
 
@@ -102,6 +100,7 @@ const startOfDaySP = (value) => {
   copy.setHours(0, 0, 0, 0);
   return copy;
 };
+
 const endOfDaySP = (value) => {
   const d = normalizeDateInput(value);
   if (!d) return null;
@@ -111,7 +110,7 @@ const endOfDaySP = (value) => {
 };
 
 /* =========================================================================
-   Página
+   Página — Detalhe do Projeto
    ========================================================================= */
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
@@ -128,233 +127,103 @@ const ProjectDetailPage = () => {
   const [newDiaryText, setNewDiaryText] = useState('');
   const [newDiaryLink, setNewDiaryLink] = useState('');
   const [savingDiary, setSavingDiary] = useState(false);
-  const [diaryError, setDiaryError] = useState('');
 
-  // ====== Chamados (para o resumo da sidebox)
+  // ====== Tickets (chamados) vinculados ao projeto
   const [tickets, setTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [ticketsLoading, setTicketsLoading] = useState(true);
   const [ticketsErr, setTicketsErr] = useState('');
 
+  /* =========================
+     Carregamento inicial
+     ========================= */
   useEffect(() => {
-    if (authInitialized && user && userProfile) {
-      loadProjectData();
-    } else if (authInitialized && !user) {
+    if (!authInitialized) return;
+    if (!user) {
       navigate('/login');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, user, userProfile, authInitialized]);
-
-  const loadProjectData = async () => {
-    try {
-      setLoading(true);
-      setError('');
-
-      const [projectData, usersData] = await Promise.all([
-        projectService.getProjectById(projectId),
-        userService.getAllUsers().catch(() => []),
-      ]);
-
-      if (!projectData) {
-        setError('Projeto não encontrado');
-        return;
-      }
-
-      // ====== Permissões ======
-      const role = userProfile?.funcao;
-      const uid = userProfile?.id || user?.uid;
-
-      if (role === 'consultor') {
-        const ok =
-          projectData.consultorId === uid ||
-          projectData.consultorUid === uid ||
-          projectData.consultorEmail === userProfile?.email ||
-          projectData.consultorNome === userProfile?.nome;
-        if (!ok) {
-          setError('Você não tem permissão para visualizar este projeto');
-          return;
-        }
-      } else if (role === 'produtor') {
-        const ok =
-          projectData.produtorId === uid ||
-          projectData.produtorUid === uid ||
-          projectData.produtorEmail === userProfile?.email ||
-          projectData.produtorNome === userProfile?.nome;
-        if (!ok) {
-          setError('Você não tem permissão para visualizar este projeto');
-          return;
-        }
-      } else if (!['administrador', 'gerente', 'operador'].includes(role)) {
-        setError('Você não tem permissão para visualizar projetos');
-        return;
-      }
-
-      setProject(projectData);
-      setUsers(usersData || []);
-
-      // ====== Diário
-      const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
-      initialDiary.sort((a, b) => {
-        const ta = new Date(a?.createdAt || 0).getTime();
-        const tb = new Date(b?.createdAt || 0).getTime();
-        return tb - ta;
-      });
-      setDiaryEntries(initialDiary);
-
-      // ====== Chamados do projeto (para resumo)
-      await loadTicketsForProject(projectData.id || projectId);
-    } catch (err) {
-      console.error('Erro ao carregar projeto:', err);
-      setError('Erro ao carregar dados do projeto');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadTicketsForProject = async (pid) => {
-    try {
-      setLoadingTickets(true);
-      setTicketsErr('');
-      if (!pid) {
-        setTickets([]);
-        return;
-      }
-      if (typeof ticketService?.getTicketsByProject !== 'function') {
-        setTickets([]);
-        return;
-      }
-      const list = await ticketService.getTicketsByProject(pid);
-      setTickets(Array.isArray(list) ? list : []);
-    } catch (e) {
-      console.error('Erro ao carregar chamados do projeto:', e);
-      setTicketsErr('Não foi possível carregar o resumo de chamados.');
-      setTickets([]);
-    } finally {
-      setLoadingTickets(false);
-    }
-  };
-
-  // ====== Diário (ações)
-  const handleAddDiaryEntry = async () => {
-    setDiaryError('');
-    const textVal = (newDiaryText || '').trim();
-    const linkVal = (newDiaryLink || '').trim();
-    if (!textVal) return;
-
-    if (linkVal && !/^https?:\/\//i.test(linkVal)) {
-      setDiaryError('Informe um link válido (http/https).');
       return;
     }
 
-    const entry = {
-      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
-      text: textVal,
-      authorId: userProfile?.id || user?.uid || '',
-      authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
-      authorRole: userProfile?.funcao || 'usuário',
-      createdAt: new Date().toISOString(),
-      ...(linkVal ? { linkUrl: linkVal } : {}),
-    };
+    (async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const proj = await projectService.getProjectById(projectId);
+        setProject(proj || null);
 
+        // Responsáveis/usuários
+        const listUsers = await userService.getAllUsers?.();
+        setUsers(Array.isArray(listUsers) ? listUsers : []);
+
+        // Diário
+        const diary = await projectService.getDiary?.(projectId);
+        setDiaryEntries(Array.isArray(diary) ? diary : []);
+
+        // Tickets
+        setTicketsLoading(true);
+        const tk = await ticketService.getTicketsByProject?.(projectId);
+        setTickets(Array.isArray(tk) ? tk : []);
+      } catch (err) {
+        console.error(err);
+        setError('Não foi possível carregar o projeto.');
+      } finally {
+        setTicketsLoading(false);
+        setLoading(false);
+      }
+    })();
+  }, [authInitialized, user, navigate, projectId]);
+
+  /* =========================
+     Salvar entrada do Diário
+     ========================= */
+  const handleAddDiaryEntry = async () => {
+    if (!newDiaryText.trim() && !newDiaryLink.trim()) return;
     try {
       setSavingDiary(true);
-
-      const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
-
-      if (typeof projectService.addDiaryEntry === 'function') {
-        await projectService.addDiaryEntry(project.id || projectId, entry);
-      } else if (typeof projectService.updateProject === 'function') {
-        await projectService.updateProject(project.id || projectId, {
-          diario: next,
-          atualizadoEm: new Date().toISOString(),
-        });
-      }
-
-      setDiaryEntries((prev) => [entry, ...prev]);
-      setProject((prev) => ({
-        ...(prev || {}),
-        diario: next,
-        atualizadoEm: new Date().toISOString(),
-      }));
+      const entry = {
+        authorId: userProfile?.id || user?.uid,
+        authorName: userProfile?.nome || user?.displayName || 'Usuário',
+        authorRole: userProfile?.funcao || '',
+        text: newDiaryText.trim(),
+        driveLink: newDiaryLink.trim(),
+        createdAt: new Date(),
+      };
+      const saved = await projectService.addDiaryEntry?.(projectId, entry);
+      setDiaryEntries((prev) => [saved || entry, ...prev]);
       setNewDiaryText('');
       setNewDiaryLink('');
     } catch (e) {
       console.error('Erro ao salvar observação do diário:', e);
-      setDiaryError('Não foi possível salvar a observação. Tente novamente.');
+      alert('Não foi possível salvar sua observação.');
     } finally {
       setSavingDiary(false);
     }
   };
 
-  const handleDeleteDiaryEntry = async (entryId) => {
-    setDiaryError('');
-    if (userProfile?.funcao !== 'administrador') {
-      setDiaryError('Apenas administradores podem excluir observações.');
-      return;
-    }
+  const canDeleteDiary = (entry) => {
+    const role = (userProfile?.funcao || '').toLowerCase();
+    return role === 'administrador';
+  };
+
+  const handleDeleteDiary = async (entryId) => {
+    if (!canDeleteDiary()) return;
+    if (!window.confirm('Remover esta observação do diário?')) return;
     try {
-      setSavingDiary(true);
-      const current = Array.isArray(project?.diario) ? project.diario : diaryEntries;
-      const next = current.filter((e) => e.id !== entryId);
-
-      if (typeof projectService.removeDiaryEntry === 'function') {
-        await projectService.removeDiaryEntry(project.id || projectId, entryId);
-      } else if (typeof projectService.updateProject === 'function') {
-        await projectService.updateProject(project.id || projectId, {
-          diario: next,
-          atualizadoEm: new Date().toISOString(),
-        });
-      }
-
+      await projectService.deleteDiaryEntry?.(projectId, entryId);
       setDiaryEntries((prev) => prev.filter((e) => e.id !== entryId));
-      setProject((prev) => ({ ...(prev || {}), diario: next }));
     } catch (e) {
-      console.error('Erro ao excluir observação do diário:', e);
-      setDiaryError('Não foi possível excluir a observação. Tente novamente.');
-    } finally {
-      setSavingDiary(false);
+      console.error('Falha ao excluir observação:', e);
+      alert('Não foi possível excluir.');
     }
   };
 
-  const getStatusInfo = () => {
-    if (!project) return { label: 'Carregando...', color: 'gray' };
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (project.montagem?.dataInicio && project.montagem?.dataFim) {
-      const inicio = startOfDaySP(project.montagem.dataInicio);
-      const fim = endOfDaySP(project.montagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Montagem', color: 'blue' };
-    }
-
-    if (project.evento?.dataInicio && project.evento?.dataFim) {
-      const inicio = startOfDaySP(project.evento.dataInicio);
-      const fim = endOfDaySP(project.evento.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
-    }
-
-    if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
-      const inicio = startOfDaySP(project.desmontagem.dataInicio);
-      const fim = endOfDaySP(project.desmontagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
-    }
-
-    const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
-    if (dataInicio) {
-      const inicio = startOfDaySP(dataInicio);
-      if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
-    }
-
-    return { label: 'Finalizado', color: 'gray' };
-  };
-
-  const canEdit = userProfile?.funcao === 'administrador';
-
-  // ====== Métricas de chamados (memo)
+  /* =========================
+     Métricas de chamados
+     ========================= */
   const ticketMetrics = useMemo(() => {
     const total = tickets.length;
-    const closedStatuses = new Set(['concluido']); // considerados conclusão
-    const notOpenStatuses = new Set(['concluido', 'cancelado', 'arquivado']);
+    // Considera concluído + arquivado (e variações comuns)
+    const closedStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido']);
+    const notOpenStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido','cancelado']);
 
     const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
     const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
@@ -374,50 +243,12 @@ const ProjectDetailPage = () => {
     return { total, open, closed, completion, topAreas };
   }, [tickets]);
 
-  // ====== Permissão para ver lista de chamados (segue TicketDetailPage)
-  const canUserAccessTicketsList = useMemo(() => {
-    if (!user || !userProfile) return false;
-    const role = (userProfile.funcao || '').toLowerCase();
-
-    // admins/gerentes sempre podem
-    if (role === 'administrador' || role === 'gerente') return true;
-    if (!tickets || tickets.length === 0) return false;
-
-    const areaOp = userProfile.area;
-
-    // se existe pelo menos 1 chamado que o usuário poderia abrir no TicketDetailPage
-    return tickets.some((t) => {
-      const isConf = !!(t?.confidencial || t?.isConfidential);
-      const isCreator = t?.criadoPor && t.criadoPor === user.uid;
-
-      if (!isConf) return true;             // não-confidencial → ok
-      if (isCreator) return true;           // criador → ok
-
-      if (role === 'operador') {            // operador precisa ter área envolvida
-        const involved =
-          [t?.area, t?.areaDeOrigem, t?.areaDestino, t?.areaQueRejeitou].includes(areaOp) ||
-          (Array.isArray(t?.areasEnvolvidas) && t.areasEnvolvidas.includes(areaOp));
-        if (involved) return true;
-      }
-      return false;
-    });
-  }, [tickets, user, userProfile]);
-
-  // Linkar para a lista filtrada (usa página /admin/chamados-filtrados)
+  // Linkar para a lista filtrada (Dashboard com filtro pelo projeto)
   const goToFilteredTickets = () => {
-    try {
-      const payload = {
-        chamados: tickets,
-        titulo: `Chamados do projeto: ${project?.nome || projectId}`,
-        filtro: `Projeto: ${project?.nome || projectId}`,
-      };
-      localStorage.setItem('chamadosFiltrados', JSON.stringify(payload));
-      navigate('/admin/chamados-filtrados');
-    } catch (e) {
-      console.error('Falha ao preparar a lista filtrada:', e);
-      // fallback: vai para dashboard
-      navigate('/dashboard');
-    }
+    const params = new URLSearchParams();
+    if (project?.id) params.set('projectId', project.id);
+    if (project?.nome) params.set('q', project.nome);
+    navigate(`/dashboard?${params.toString()}`);
   };
 
   /* =========================
@@ -434,42 +265,23 @@ const ProjectDetailPage = () => {
     );
   }
 
-  if (error) {
+  if (error || !project) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <Button onClick={() => navigate('/projetos')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar para Projetos
+          <p className="text-gray-600 mb-4">{error || 'Projeto não encontrado.'}</p>
+          <Button variant="outline" onClick={() => navigate('/projetos')}>
+            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
           </Button>
         </div>
       </div>
     );
   }
-
-  if (!project) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Projeto não encontrado</h2>
-          <p className="text-gray-600 mb-4">O projeto solicitado não existe ou foi removido.</p>
-          <Button onClick={() => navigate('/projetos')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar para Projetos
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const statusInfo = getStatusInfo();
 
   /* =========================
-     Render
+     Layout
      ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
@@ -489,19 +301,10 @@ const ProjectDetailPage = () => {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold text-gray-900">
-                  {project.nome}
+                  {project.nome || 'Projeto'}
                 </h1>
-                <Badge
-                  variant="secondary"
-                  className={`${
-                    statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-                    statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
-                    statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
-                    statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}
-                >
-                  {statusInfo.label}
+                <Badge variant="secondary" className="text-xs">
+                  {project.status || 'Ativo'}
                 </Badge>
               </div>
               <p className="text-gray-600">
@@ -510,16 +313,21 @@ const ProjectDetailPage = () => {
             </div>
           </div>
 
-          {canEdit && (
-            <Button
-              onClick={() => navigate(`/projetos/editar/${project.id}`)}
-              className="bg-blue-600 hover:bg-blue-700"
+          {/* Drive (se houver) */}
+          {project.driveLink && (
+            <a
+              href={project.driveLink}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center text-sm text-blue-600 hover:underline"
+              title="Acessar Drive do Projeto"
             >
-              Editar Projeto
-            </Button>
+              <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
+            </a>
           )}
         </div>
 
+        {/* GRID RESPONSIVA: 1 col (mobile), 3 col (desktop) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Coluna Principal (esquerda) */}
           <div className="lg:col-span-2 space-y-6">
@@ -535,30 +343,27 @@ const ProjectDetailPage = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium text-gray-500">Nome do Projeto</label>
-                    <p className="text-lg font-semibold">{project.nome}</p>
+                    <p className="text-lg font-semibold">{project.nome || '—'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Feira</label>
-                    <p className="text-lg">{project.feira}</p>
+                    <p className="text-lg font-semibold">{project.feira || '—'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Localização</label>
-                    <p className="flex items-center">
-                      <MapPin className="h-4 w-4 mr-1" />
-                      {project.local}
-                    </p>
+                    <p className="text-lg font-semibold">{project.local || '—'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Metragem</label>
-                    <p>{project.metragem}</p>
+                    <p className="text-lg font-semibold">{project.metragem || '—'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Tipo de Montagem</label>
-                    <p>{project.tipoMontagem}</p>
+                    <p className="text-lg font-semibold">{project.tipoMontagem || '—'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Pavilhão</label>
-                    <p>{project.pavilhao || 'Não especificado'}</p>
+                    <p className="text-lg font-semibold">{project.pavilhao || '—'}</p>
                   </div>
                 </div>
               </CardContent>
@@ -574,31 +379,92 @@ const ProjectDetailPage = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-600">Adicionar observação</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Adicione uma observação
+                  </label>
                   <textarea
-                    className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={3}
                     value={newDiaryText}
                     onChange={(e) => setNewDiaryText(e.target.value)}
-                    placeholder="Ex.: Rita (consultora) definiu as cores do bagum: grafite e preto."
+                    placeholder="Ex: Rita (consultora) definiu as cores do bagum: grafite e preto."
+                    className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <div className="mt-2">
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Link do Drive (opcional)
+                  </label>
+                  <div className="flex gap-2">
                     <input
                       type="url"
-                      className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Link do Drive (opcional): https://drive.google.com/…"
                       value={newDiaryLink}
                       onChange={(e) => setNewDiaryLink(e.target.value)}
+                      placeholder="https://drive.google.com/..."
+                      className="flex-1 border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                  </div>
-                  {diaryError && <p className="text-sm text-red-600 mt-2">{diaryError}</p>}
-                  <div className="mt-3 flex justify-end">
-                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary || !newDiaryText.trim()}>
-                      {savingDiary ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                      Salvar no diário
+                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary}>
+                      {savingDiary ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4 mr-2" /> Salvar no diário
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Diário do Projeto — LISTA */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Observações do Projeto
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {diaryEntries.length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {diaryEntries.map((e) => (
+                      <div key={e.id || e.createdAt?.seconds || Math.random()} className="border rounded-lg p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-gray-500" />
+                            <span className="text-sm font-medium">
+                              {e.authorName} {e.authorRole ? `(${e.authorRole})` : ''}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-500">{formatDateTimeSP(e.createdAt)}</span>
+                        </div>
+                        {e.text && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.text}</p>}
+                        {e.driveLink && (
+                          <a
+                            href={e.driveLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+                          >
+                            <Link2 className="h-4 w-4" /> Anexo/Link
+                          </a>
+                        )}
+                        {canDeleteDiary(e) && (
+                          <div className="mt-3 text-right">
+                            <Button variant="destructive" size="sm" onClick={() => handleDeleteDiary(e.id)}>
+                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -610,99 +476,50 @@ const ProjectDetailPage = () => {
                   Cronograma
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {(project.montagem?.dataInicio || project.montagem?.dataFim) && (
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-blue-800 mb-2 flex items-center">
-                      <Wrench className="h-4 w-4 mr-2" />
-                      Montagem
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.montagem?.dataInicio) || '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.montagem?.dataFim) || '—'}</p>
-                      </div>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-lg border p-4 bg-blue-50/50">
+                    <div className="text-sm text-gray-500">Montagem</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.montagem?.dataInicio)} • Fim: {formatDate(project.montagem?.dataFim)}
                     </div>
                   </div>
-                )}
-
-                {(project.evento?.dataInicio || project.evento?.dataFim) && (
-                  <div className="bg-green-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-green-800 mb-2 flex items-center">
-                      <PartyPopper className="h-4 w-4 mr-2" />
-                      Evento
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.evento?.dataInicio) || '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.evento?.dataFim) || '—'}</p>
-                      </div>
+                  <div className="rounded-lg border p-4 bg-green-50/50">
+                    <div className="text-sm text-gray-500">Evento</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.evento?.dataInicio)} • Fim: {formatDate(project.evento?.dataFim)}
                     </div>
                   </div>
-                )}
-
-                {(project.desmontagem?.dataInicio || project.desmontagem?.dataFim) && (
-                  <div className="bg-orange-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-orange-800 mb-2 flex items-center">
-                      <Truck className="h-4 w-4 mr-2" />
-                      Desmontagem
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem?.dataInicio) || '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.desmontagem?.dataFim) || '—'}</p>
-                      </div>
+                  <div className="rounded-lg border p-4 bg-orange-50/50">
+                    <div className="text-sm text-gray-500">Desmontagem</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.desmontagem?.dataInicio)} • Fim: {formatDate(project.desmontagem?.dataFim)}
                     </div>
                   </div>
-                )}
-
-                {(project.periodoGeral?.dataInicio || project.periodoGeral?.dataFim) && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-gray-800 mb-2 flex items-center">
-                      <Clock className="h-4 w-4 mr-2" />
-                      Período Geral
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Início:</span>
-                        <p className="font-medium">{formatDate(project.periodoGeral?.dataInicio) || '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Fim:</span>
-                        <p className="font-medium">{formatDate(project.periodoGeral?.dataFim) || '—'}</p>
-                      </div>
+                  <div className="rounded-lg border p-4 bg-gray-50">
+                    <div className="text-sm text-gray-500">Período Geral</div>
+                    <div className="mt-1 font-medium">
+                      Início: {formatDate(project.dataInicio)} • Fim: {formatDate(project.dataFim)}
                     </div>
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
 
             {/* Detalhes Adicionais */}
-            {project.descricao && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <FileText className="h-5 w-5 mr-2" />
-                    Detalhes Adicionais
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="whitespace-pre-wrap text-sm">{project.descricao}</pre>
-                </CardContent>
-              </Card>
-            )}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Detalhes Adicionais
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="prose max-w-none text-sm text-gray-700 whitespace-pre-wrap break-words">
+                  {project.descricao || 'Sem descrição.'}
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Coluna Lateral (direita) */}
@@ -715,28 +532,22 @@ const ProjectDetailPage = () => {
                   Responsáveis
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-4 text-sm">
                 <div>
-                  <span className="font-medium">Produtor:</span>
-                  <p>{project.produtorNome || 'Não atribuído'}</p>
+                  <div className="text-xs text-gray-500">Produtor</div>
+                  <div className="font-medium">{project.produtorNome || 'Não atribuído'}</div>
                   {project.produtorEmail && (
-                    <a
-                      href={`mailto:${project.produtorEmail}`}
-                      className="text-blue-600 hover:underline text-sm"
-                    >
-                      {project.produtorEmail}
+                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.produtorEmail}`}>
+                      <Mail className="h-3 w-3" /> {project.produtorEmail}
                     </a>
                   )}
                 </div>
-                <div className="pt-2">
-                  <span className="font-medium">Consultor:</span>
-                  <p>{project.consultorNome || 'Não atribuído'}</p>
+                <div>
+                  <div className="text-xs text-gray-500">Consultor</div>
+                  <div className="font-medium">{project.consultorNome || 'Não atribuído'}</div>
                   {project.consultorEmail && (
-                    <a
-                      href={`mailto:${project.consultorEmail}`}
-                      className="text-blue-600 hover:underline text-sm"
-                    >
-                      {project.consultorEmail}
+                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.consultorEmail}`}>
+                      <Mail className="h-3 w-3" /> {project.consultorEmail}
                     </a>
                   )}
                 </div>
@@ -744,67 +555,82 @@ const ProjectDetailPage = () => {
             </Card>
 
             {/* Equipes Terceirizadas */}
-            {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
+            {Array.isArray(project.equipesTerceirizadas) && project.equipesTerceirizadas.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Equipes Terceirizadas</CardTitle>
+                  <CardTitle className="flex items-center">
+                    <Users className="h-5 w-5 mr-2" />
+                    Equipes Terceirizadas
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {Object.entries(project.equipesEmpreiteiras).map(([area, empresa]) => (
-                    empresa && (
-                      <div key={area}>
-                        <label className="text-sm font-medium text-gray-500 capitalize">
-                          {area}
-                        </label>
-                        <p className="text-gray-900">{empresa}</p>
-                      </div>
-                    )
-                  ))}
+                <CardContent>
+                  <ul className="text-sm space-y-1">
+                    {project.equipesTerceirizadas.map((eq, idx) => (
+                      <li key={idx} className="flex items-center justify-between">
+                        <span>{eq?.nome || 'Equipe'}</span>
+                        {eq?.contato && (
+                          <span className="text-gray-500 text-xs">{eq.contato}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
             )}
 
             {/* Documentos */}
-            {project.linkDrive && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <ExternalLink className="h-5 w-5 mr-2" />
-                    Documentos
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <UploadCloud className="h-5 w-5 mr-2" />
+                  Documentos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {project.driveLink ? (
                   <a
-                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
-                    href={project.linkDrive}
+                    href={project.driveLink}
                     target="_blank"
-                    rel="noopener noreferrer"
+                    rel="noreferrer"
+                    className="inline-flex items-center text-sm text-blue-600 hover:underline"
                   >
-                    <FileText className="h-4 w-4" />
-                    Acessar Drive
-                    <ExternalLink className="h-3 w-3 ml-1" />
+                    <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
                   </a>
-                </CardContent>
-              </Card>
-            )}
+                ) : (
+                  <p className="text-sm text-gray-500">Nenhum link de Drive informado.</p>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Informações do Sistema */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <AlertCircle className="h-5 w-5 mr-2" />
+                  <ShieldCheck className="h-5 w-5 mr-2" />
                   Informações do Sistema
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div> Criado em: <span className="font-medium">{formatDateTimeSP(project.criadoEm || project.criadoem)}</span></div>
-                <div> Atualizado em: <span className="font-medium">{formatDateTimeSP(project.atualizadoEm || project.atualizadoem)}</span></div>
-                <div> Status: <span className="font-medium capitalize">{project.status || 'ativo'}</span></div>
-                <div> Ativo: <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span></div>
+              <CardContent className="text-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Criado em:</span>
+                  <span>{formatDateTimeSP(project.createdAt)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Atualizado em:</span>
+                  <span>{formatDateTimeSP(project.updatedAt)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Status:</span>
+                  <span className="font-medium">{project.status || 'Ativo'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">Ativo:</span>
+                  <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span>
+                </div>
               </CardContent>
             </Card>
 
-            {/* Observações do Projeto (Diário - lista) */}
+            {/* Observações do Projeto — (lista vazia por padrão, mantém compatibilidade) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -812,49 +638,8 @@ const ProjectDetailPage = () => {
                   Observações do Projeto
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {Array.isArray(diaryEntries) && diaryEntries.length === 0 ? (
-                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
-                ) : (
-                  (diaryEntries || []).map((e) => (
-                    <div key={e.id} className="rounded-lg border p-3 bg-gray-50">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">{e.authorName}</span> ({e.authorRole}) deixou a seguinte observação:
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap text-gray-900 break-words">{e.text}</p>
-                          {e.linkUrl && (
-                            <div className="mt-2 text-sm">
-                              <a
-                                href={e.linkUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                                Abrir link
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                        {userProfile?.funcao === 'administrador' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteDiaryEntry(e.id)}
-                            title="Excluir observação"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                      <div className="mt-2 text-xs text-gray-500">
-                        {formatDateTimeSP(e.createdAt)}
-                      </div>
-                    </div>
-                  ))
-                )}
+              <CardContent>
+                <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
               </CardContent>
             </Card>
 
@@ -868,10 +653,11 @@ const ProjectDetailPage = () => {
                   Resumo de Chamados
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                {loadingTickets ? (
-                  <div className="text-gray-500 flex items-center">
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando...
+              <CardContent className="space-y-3">
+                {ticketsLoading ? (
+                  <div className="text-center">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Carregando…</p>
                   </div>
                 ) : ticketsErr ? (
                   <p className="text-red-600">{ticketsErr}</p>
@@ -894,56 +680,48 @@ const ProjectDetailPage = () => {
                     </div>
 
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-2">
                           <TrendingUp className="h-4 w-4" />
-                          <span>Taxa de conclusão</span>
-                        </div>
+                          Taxa de conclusão
+                        </span>
                         <span className="font-semibold">{ticketMetrics.completion}%</span>
                       </div>
-                      <div className="w-full h-2 bg-gray-200 rounded">
+                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                         <div
-                          className="h-2 bg-green-500 rounded"
+                          className="h-full bg-green-500"
                           style={{ width: `${ticketMetrics.completion}%` }}
                         />
                       </div>
                     </div>
 
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Top áreas envolvidas</p>
+                      <div className="text-xs text-gray-500 mb-1">Top áreas envolvidas</div>
                       {ticketMetrics.topAreas.length === 0 ? (
-                        <p className="text-gray-500">—</p>
+                        <p className="text-sm text-gray-500">Sem dados suficientes.</p>
                       ) : (
-                        <ul className="space-y-1">
-                          {ticketMetrics.topAreas.map(([area, qty]) => (
+                        <ul className="text-sm">
+                          {ticketMetrics.topAreas.map(([area, count]) => (
                             <li key={area} className="flex items-center justify-between">
-                              <span className="capitalize">{area}</span>
-                              <span className="font-medium">{qty}</span>
+                              <span>{area}</span>
+                              <span className="font-medium">{count}</span>
                             </li>
                           ))}
                         </ul>
                       )}
                     </div>
 
-                    {/* Botão condicionado às regras de acesso (TicketDetailPage) */}
-                    {canUserAccessTicketsList && (
-                      <div className="pt-2">
-                        <Button
-                          onClick={goToFilteredTickets}
-                          className="w-full"
-                          variant="outline"
-                          disabled={tickets.length === 0}
-                          title="Ver lista de chamados do projeto"
-                        >
-                          Ver todos os chamados
-                        </Button>
-                      </div>
-                    )}
-                    {!canUserAccessTicketsList && (
-                      <p className="text-xs text-gray-500 pt-1">
-                        Você não tem permissão para visualizar a lista de chamados deste projeto.
-                      </p>
-                    )}
+                    <div className="pt-2">
+                      <Button
+                        onClick={goToFilteredTickets}
+                        className="w-full"
+                        variant="outline"
+                        disabled={tickets.length === 0}
+                        title="Ver lista de chamados do projeto"
+                      >
+                        Ver todos os chamados
+                      </Button>
+                    </div>
                   </>
                 )}
               </CardContent>
