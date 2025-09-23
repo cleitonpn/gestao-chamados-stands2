@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ArrowLeft , Search, BarChart3} from 'lucide-react';
 
 // =====================
