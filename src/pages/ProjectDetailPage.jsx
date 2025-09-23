@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
-import { ticketService } from '../services/ticketService';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,9 +24,6 @@ import {
   AlertCircle,
   Send,
   Trash2,
-  BarChart3,
-  ClipboardList,
-  TrendingUp,
 } from 'lucide-react';
 
 /* =========================================================================
@@ -123,17 +119,12 @@ const ProjectDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // ====== Diário
-  const [diaryEntries, setDiaryEntries] = useState([]);
+  // ====== Diário (estado) ======
+  const [diaryEntries, setDiaryEntries] = useState([]); // {id, text, authorId, authorName, authorRole, createdAt, linkUrl?}
   const [newDiaryText, setNewDiaryText] = useState('');
   const [newDiaryLink, setNewDiaryLink] = useState('');
   const [savingDiary, setSavingDiary] = useState(false);
   const [diaryError, setDiaryError] = useState('');
-
-  // ====== Chamados (para o resumo da sidebox)
-  const [tickets, setTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(false);
-  const [ticketsErr, setTicketsErr] = useState('');
 
   useEffect(() => {
     if (authInitialized && user && userProfile) {
@@ -191,7 +182,7 @@ const ProjectDetailPage = () => {
       setProject(projectData);
       setUsers(usersData || []);
 
-      // ====== Diário
+      // ====== Diário: carregar do documento do projeto ======
       const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
       initialDiary.sort((a, b) => {
         const ta = new Date(a?.createdAt || 0).getTime();
@@ -199,9 +190,6 @@ const ProjectDetailPage = () => {
         return tb - ta;
       });
       setDiaryEntries(initialDiary);
-
-      // ====== Chamados do projeto (para resumo)
-      await loadTicketsForProject(projectData.id || projectId);
     } catch (err) {
       console.error('Erro ao carregar projeto:', err);
       setError('Erro ao carregar dados do projeto');
@@ -210,30 +198,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const loadTicketsForProject = async (pid) => {
-    try {
-      setLoadingTickets(true);
-      setTicketsErr('');
-      if (!pid) {
-        setTickets([]);
-        return;
-      }
-      if (typeof ticketService?.getTicketsByProject !== 'function') {
-        setTickets([]);
-        return;
-      }
-      const list = await ticketService.getTicketsByProject(pid);
-      setTickets(Array.isArray(list) ? list : []);
-    } catch (e) {
-      console.error('Erro ao carregar chamados do projeto:', e);
-      setTicketsErr('Não foi possível carregar o resumo de chamados.');
-      setTickets([]);
-    } finally {
-      setLoadingTickets(false);
-    }
-  };
-
-  // ====== Diário (ações)
+  // ====== Diário (ações) ======
   const handleAddDiaryEntry = async () => {
     setDiaryError('');
     const textVal = (newDiaryText || '').trim();
@@ -349,47 +314,6 @@ const ProjectDetailPage = () => {
   };
 
   const canEdit = userProfile?.funcao === 'administrador';
-
-  // ====== Métricas de chamados (memo)
-  const ticketMetrics = useMemo(() => {
-    const total = tickets.length;
-    const closedStatuses = new Set(['concluido']); // considerados conclusão
-    const notOpenStatuses = new Set(['concluido', 'cancelado', 'arquivado']);
-
-    const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
-    const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
-    const completion = total > 0 ? Math.round((closed / total) * 100) : 0;
-
-    // Top áreas
-    const counts = {};
-    for (const t of tickets) {
-      const area = (t.area || t.areaAtual || 'Não informada').toString();
-      if (!counts[area]) counts[area] = 0;
-      counts[area] += 1;
-    }
-    const topAreas = Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-
-    return { total, open, closed, completion, topAreas };
-  }, [tickets]);
-
-  // Linkar para a lista filtrada (usa página /admin/chamados-filtrados)
-  const goToFilteredTickets = () => {
-    try {
-      const payload = {
-        chamados: tickets,
-        titulo: `Chamados do projeto: ${project?.nome || projectId}`,
-        filtro: `Projeto: ${project?.nome || projectId}`,
-      };
-      localStorage.setItem('chamadosFiltrados', JSON.stringify(payload));
-      navigate('/admin/chamados-filtrados');
-    } catch (e) {
-      console.error('Falha ao preparar a lista filtrada:', e);
-      // fallback: vai para dashboard
-      navigate('/dashboard');
-    }
-  };
 
   /* =========================
      Loading/Erro
@@ -535,7 +459,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Diário do Projeto — FORM */}
+            {/* Diário do Projeto — FORM (entre Info Básicas e Cronograma) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -582,6 +506,7 @@ const ProjectDetailPage = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* Montagem */}
                 {(project.montagem?.dataInicio || project.montagem?.dataFim) && (
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <h4 className="font-medium text-blue-800 mb-2 flex items-center">
@@ -601,6 +526,7 @@ const ProjectDetailPage = () => {
                   </div>
                 )}
 
+                {/* Evento */}
                 {(project.evento?.dataInicio || project.evento?.dataFim) && (
                   <div className="bg-green-50 p-4 rounded-lg">
                     <h4 className="font-medium text-green-800 mb-2 flex items-center">
@@ -620,6 +546,7 @@ const ProjectDetailPage = () => {
                   </div>
                 )}
 
+                {/* Desmontagem */}
                 {(project.desmontagem?.dataInicio || project.desmontagem?.dataFim) && (
                   <div className="bg-orange-50 p-4 rounded-lg">
                     <h4 className="font-medium text-orange-800 mb-2 flex items-center">
@@ -639,6 +566,7 @@ const ProjectDetailPage = () => {
                   </div>
                 )}
 
+                {/* Período Geral */}
                 {(project.periodoGeral?.dataInicio || project.periodoGeral?.dataFim) && (
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h4 className="font-medium text-gray-800 mb-2 flex items-center">
@@ -735,7 +663,7 @@ const ProjectDetailPage = () => {
               </Card>
             )}
 
-            {/* Documentos */}
+            {/* Documentos (usa project.linkDrive) */}
             {project.linkDrive && (
               <Card>
                 <CardHeader>
@@ -775,7 +703,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Observações do Projeto (Diário - lista) */}
+            {/* Diário do Projeto — LISTA */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -825,89 +753,6 @@ const ProjectDetailPage = () => {
                       </div>
                     </div>
                   ))
-                )}
-              </CardContent>
-            </Card>
-
-            {/* =========================
-                NOVA SIDEBOX: Resumo de Chamados
-               ========================= */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2" />
-                  Resumo de Chamados
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                {loadingTickets ? (
-                  <div className="text-gray-500 flex items-center">
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando...
-                  </div>
-                ) : ticketsErr ? (
-                  <p className="text-red-600">{ticketsErr}</p>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <ClipboardList className="h-4 w-4" />
-                        <span>Total de chamados</span>
-                      </div>
-                      <span className="font-semibold">{ticketMetrics.total}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />
-                        <span>Abertos</span>
-                      </div>
-                      <span className="font-semibold">{ticketMetrics.open}</span>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <TrendingUp className="h-4 w-4" />
-                          <span>Taxa de conclusão</span>
-                        </div>
-                        <span className="font-semibold">{ticketMetrics.completion}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-200 rounded">
-                        <div
-                          className="h-2 bg-green-500 rounded"
-                          style={{ width: `${ticketMetrics.completion}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Top áreas envolvidas</p>
-                      {ticketMetrics.topAreas.length === 0 ? (
-                        <p className="text-gray-500">—</p>
-                      ) : (
-                        <ul className="space-y-1">
-                          {ticketMetrics.topAreas.map(([area, qty]) => (
-                            <li key={area} className="flex items-center justify-between">
-                              <span className="capitalize">{area}</span>
-                              <span className="font-medium">{qty}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-
-                    <div className="pt-2">
-                      <Button
-                        onClick={goToFilteredTickets}
-                        className="w-full"
-                        variant="outline"
-                        disabled={tickets.length === 0}
-                        title="Ver lista de chamados do projeto"
-                      >
-                        Ver todos os chamados
-                      </Button>
-                    </div>
-                  </>
                 )}
               </CardContent>
             </Card>
