@@ -55,6 +55,16 @@ const DashboardPage = () => {
   const [viewMode, setViewMode] = useState('list'); // mobile = list; desktop pode alternar
   const [savedFilters, setSavedFilters] = useState([]);
   const [selectedProjectIds, setSelectedProjectIds] = useState([]);
+  const clearAllFilters = () => {
+    setActiveFilter('todos');
+    setSelectedEvent('todos');
+    setSelectedStatuses(new Set());
+    setSelectedAreas(new Set());
+    setSelectedPriorities(new Set());
+    setSearchTerm('');
+    setSelectedProjectIds([]);
+    try { navigate({ pathname: location.pathname, search: '' }, { replace: true }); } catch {}
+  };
 
   // controle de filtros: no desktop é Dialog; no mobile é painel expansível
   const [filtersOpen, setFiltersOpen] = useState(false);            // desktop Dialog
@@ -398,12 +408,27 @@ const DashboardPage = () => {
     }
 
     // Busca por título/descrição
-    const term = (searchTerm || '').trim().toLowerCase();
+    const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const term = norm(searchTerm || '');
     if (term) {
       base = base.filter(t => {
-        const titulo = (t.titulo || '').toLowerCase();
-        const descricao = (t.descricao || '').toLowerCase();
-        return titulo.includes(term) || descricao.includes(term);
+        const titulo = norm(t.titulo);
+        const descricao = norm(t.descricao);
+        const area = norm(t.area);
+        const status = norm(t.status);
+        const prioridade = norm(t.prioridade);
+        const directProjectName = norm(t.projetoNome || t.projectName || t.nomeProjeto || t.projeto || t.eventoNome || t.feira);
+        const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
+        const projLabels = ids.map(id => norm(`${(projectMeta[id]?.nome || '')} ${(projectMeta[id]?.feira || '')}`)).join(' ');
+        return (
+          titulo.includes(term) ||
+          descricao.includes(term) ||
+          area.includes(term) ||
+          status.includes(term) ||
+          prioridade.includes(term) ||
+          directProjectName.includes(term) ||
+          projLabels.includes(term)
+        );
       });
     }
 
@@ -630,6 +655,7 @@ const DashboardPage = () => {
         {/* Filtros salvos */}
         <div className="flex items-center gap-2 mt-3">
           <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+          <Button variant="ghost" onClick={clearAllFilters}>Limpar filtros</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline">Filtros salvos</Button>
@@ -971,9 +997,9 @@ const DashboardPage = () => {
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
                   <Input
                     className="flex-1 h-9"
-                    placeholder="Buscar por título ou descrição..."
+                    placeholder="Buscar por título, descrição ou projeto..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)} // fixedrchTerm(e.target.value)}
+                    onChange={(e) => setSearchTerm(e.target.value)}
                   />
                   <Button
                     variant="outline"
@@ -1023,6 +1049,7 @@ const DashboardPage = () => {
 
                   <div className="ml-auto flex items-center gap-2">
                     <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
+          <Button variant="ghost" onClick={clearAllFilters}>Limpar filtros</Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="outline">Filtros salvos</Button>
