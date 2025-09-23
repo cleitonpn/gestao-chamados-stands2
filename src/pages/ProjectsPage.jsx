@@ -1,40 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-import { userService } from '../services/userService';
-import { ticketService } from '../services/ticketService';
-
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-
-import {
-  ArrowLeft,
-  Calendar,
-  MapPin,
-  Users,
-  Building,
-  Mail,
-  Phone,
-  FileText,
-  Link2,
-  UploadCloud,
-  Save,
-  Loader2,
-  AlertCircle,
-  Clock,
-  User,
-  ShieldCheck,
-  Send,
-  Trash2,
-  BarChart3,
-  ClipboardList,
-  TrendingUp,
-} from 'lucide-react';
+import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
 
 /* =========================================================================
-   Helpers de data
+   Helpers de data / fuso e formatação
    ========================================================================= */
 const isDateOnly = (value) => {
   if (typeof value === 'string') {
@@ -63,9 +34,9 @@ const normalizeDateInput = (value) => {
 };
 
 const formatDate = (value) => {
-  if (!value) return 'Não definido';
+  if (!value) return 'N/A';
   const date = normalizeDateInput(value);
-  if (!date) return 'Não definido';
+  if (!date) return 'N/A';
   try {
     if (isDateOnly(value)) {
       const dd = String(date.getUTCDate()).padStart(2, '0');
@@ -78,18 +49,7 @@ const formatDate = (value) => {
     const yyyy = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
     return `${dd}-${mm}-${yyyy}`;
   } catch {
-    return 'Não definido';
-  }
-};
-
-const formatDateTimeSP = (value) => {
-  if (!value) return '—';
-  const date = normalizeDateInput(value);
-  if (!date) return '—';
-  try {
-    return date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  } catch {
-    return date.toLocaleString('pt-BR');
+    return 'N/A';
   }
 };
 
@@ -110,32 +70,160 @@ const endOfDaySP = (value) => {
 };
 
 /* =========================================================================
-   Página — Detalhe do Projeto
+   Card do Projeto (custom)
    ========================================================================= */
-const ProjectDetailPage = () => {
-  const { projectId } = useParams();
+const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
   const navigate = useNavigate();
+
+  const getStatusInfo = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (project.montagem?.dataInicio && project.montagem?.dataFim) {
+      const inicio = startOfDaySP(project.montagem.dataInicio);
+      const fim = endOfDaySP(project.montagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Montagem', color: 'blue' };
+    }
+
+    if (project.evento?.dataInicio && project.evento?.dataFim) {
+      const inicio = startOfDaySP(project.evento.dataInicio);
+      const fim = endOfDaySP(project.evento.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
+    }
+
+    if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
+      const inicio = startOfDaySP(project.desmontagem.dataInicio);
+      const fim = endOfDaySP(project.desmontagem.dataFim);
+      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
+    }
+
+    const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
+    if (dataInicio) {
+      const inicio = startOfDaySP(dataInicio);
+      if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
+    }
+    return { label: 'Finalizado', color: 'gray' };
+  };
+
+  const statusInfo = getStatusInfo();
+
+  return (
+    <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect(project.id)}
+            className="h-4 w-4"
+            aria-label="Selecionar projeto"
+          />
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-1 break-words">{project.nome}</h3>
+            <p className="text-sm text-gray-600">{project.feira} • {project.local}</p>
+          </div>
+        </div>
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+          statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+          statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
+          statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
+          statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+          'bg-gray-100 text-gray-800'
+        }`}>
+          {statusInfo.label}
+        </span>
+      </div>
+
+      <div className="space-y-2 mb-4 text-sm text-gray-600">
+        <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
+        <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
+        <div className="text-xs text-gray-500">
+          <div>Início: {formatDate(project.dataInicio)}</div>
+          <div>Fim: {formatDate(project.dataFim)}</div>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)} // <- DETALHES (rota singular)
+          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          👁️ Ver
+        </button>
+
+        {userRole === 'administrador' && (
+          <>
+            <button
+              onClick={() => navigate(`/projetos/editar/${project.id}${currentSearch}`)}
+              className="bg-gray-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition-colors"
+              title="Editar"
+            >
+              ✏️
+            </button>
+            <button
+              onClick={() => onArchive(project.id)}
+              className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+              title="Encerrar"
+            >
+              🗑️
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* =========================================================================
+   Página
+   ========================================================================= */
+const ProjectsPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { user, userProfile, authInitialized } = useAuth();
 
-  const [project, setProject] = useState(null);
-  const [users, setUsers] = useState([]);
+  const [allProjects, setAllProjects] = useState([]);
+  const [filteredProjects, setFilteredProjects] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [selectedEvent, setSelectedEvent] = useState('todos');
+  const [activeTab, setActiveTab] = useState('ativos');
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // ====== Diário
-  const [diaryEntries, setDiaryEntries] = useState([]);
-  const [newDiaryText, setNewDiaryText] = useState('');
-  const [newDiaryLink, setNewDiaryLink] = useState('');
-  const [savingDiary, setSavingDiary] = useState(false);
+  // seleção em massa
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  // ====== Tickets (chamados) vinculados ao projeto
-  const [tickets, setTickets] = useState([]);
-  const [ticketsLoading, setTicketsLoading] = useState(true);
-  const [ticketsErr, setTicketsErr] = useState('');
+  // query atual para repassar na navegação
+  const currentSearch = useMemo(() => location.search || '', [location.search]);
 
-  /* =========================
-     Carregamento inicial
-     ========================= */
+  /* Persistência de filtros na URL (carregar) */
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const eventFromUrl = params.get('evento');
+    const tabFromUrl = params.get('tab');
+    const qFromUrl = params.get('q') || '';
+    if (eventFromUrl) setSelectedEvent(eventFromUrl);
+    if (tabFromUrl) setActiveTab(tabFromUrl);
+    setSearchTerm(qFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Persistência de filtros na URL (salvar) */
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    params.set('evento', selectedEvent);
+    params.set('tab', activeTab);
+    params.set('q', searchTerm); // <- mantém a busca na URL
+    const newSearch = `?${params.toString()}`;
+    if (newSearch !== location.search) {
+      navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEvent, activeTab, searchTerm]);
+
+  /* Carregar projetos */
   useEffect(() => {
     if (!authInitialized) return;
     if (!user) {
@@ -147,590 +235,408 @@ const ProjectDetailPage = () => {
       try {
         setLoading(true);
         setError('');
-        const proj = await projectService.getProjectById(projectId);
-        setProject(proj || null);
-
-        // Responsáveis/usuários
-        const listUsers = await userService.getAllUsers?.();
-        setUsers(Array.isArray(listUsers) ? listUsers : []);
-
-        // Diário
-        const diary = await projectService.getDiary?.(projectId);
-        setDiaryEntries(Array.isArray(diary) ? diary : []);
-
-        // Tickets
-        setTicketsLoading(true);
-        const tk = await ticketService.getTicketsByProject?.(projectId);
-        setTickets(Array.isArray(tk) ? tk : []);
+        const projectsData = await projectService.getAllProjects();
+        const sortedProjects = projectsData.sort((a, b) => {
+          const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
+          const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
+          return bDate - aDate;
+        });
+        setAllProjects(sortedProjects);
+        const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
+        setEvents(uniqueEvents);
       } catch (err) {
-        console.error(err);
-        setError('Não foi possível carregar o projeto.');
+        console.error('Erro ao carregar projetos:', err);
+        setError('Não foi possível carregar os projetos.');
       } finally {
-        setTicketsLoading(false);
         setLoading(false);
       }
     })();
-  }, [authInitialized, user, navigate, projectId]);
+  }, [authInitialized, user, navigate]);
 
-  /* =========================
-     Salvar entrada do Diário
-     ========================= */
-  const handleAddDiaryEntry = async () => {
-    if (!newDiaryText.trim() && !newDiaryLink.trim()) return;
+  /* Filtragem por papéis + tabs + evento + busca */
+  useEffect(() => {
+    if (!userProfile) return;
+
+    let projectsToDisplay = [...allProjects];
+    const userRole = userProfile.funcao;
+    const userId = userProfile.id || user?.uid;
+
+    if (userRole === 'consultor') {
+      projectsToDisplay = projectsToDisplay.filter(project => (
+        project.consultorId === userId ||
+        project.consultorUid === userId ||
+        project.consultorEmail === userProfile.email ||
+        project.consultorNome === userProfile.nome
+      ));
+    } else if (userRole === 'produtor') {
+      projectsToDisplay = projectsToDisplay.filter(project => (
+        project.produtorId === userId ||
+        project.produtorUid === userId ||
+        project.produtorEmail === userProfile.email ||
+        project.produtorNome === userProfile.nome
+      ));
+    } else if (!['administrador', 'gerente', 'operador'].includes(userRole)) {
+      projectsToDisplay = [];
+    }
+
+    if (activeTab === 'ativos') {
+      projectsToDisplay = projectsToDisplay.filter(p => p.status !== 'encerrado');
+    } else {
+      projectsToDisplay = projectsToDisplay.filter(p => p.status === 'encerrado');
+    }
+
+    if (selectedEvent && selectedEvent !== 'todos') {
+      projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
+    }
+
+    // Busca
+    const term = (searchTerm || '').trim().toLowerCase();
+    if (term) {
+      const hit = (v) => (v || '').toString().toLowerCase().includes(term);
+      projectsToDisplay = projectsToDisplay.filter(p =>
+        hit(p.nome) ||
+        hit(p.feira || p.evento) ||
+        hit(p.local) ||
+        hit(p.consultorNome) ||
+        hit(p.produtorNome) ||
+        hit(p.pavilhao) ||
+        hit(p.tipoMontagem)
+      );
+    }
+
+    setFilteredProjects(projectsToDisplay);
+    setSelectedIds(new Set()); // limpa seleção ao mudar filtros
+  }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
+
+  /* Encerrar individual e em massa */
+  const handleArchiveProject = async (projectId) => {
+    if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
     try {
-      setSavingDiary(true);
-      const entry = {
-        authorId: userProfile?.id || user?.uid,
-        authorName: userProfile?.nome || user?.displayName || 'Usuário',
-        authorRole: userProfile?.funcao || '',
-        text: newDiaryText.trim(),
-        driveLink: newDiaryLink.trim(),
-        createdAt: new Date(),
-      };
-      const saved = await projectService.addDiaryEntry?.(projectId, entry);
-      setDiaryEntries((prev) => [saved || entry, ...prev]);
-      setNewDiaryText('');
-      setNewDiaryLink('');
+      await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
+      const projectsData = await projectService.getAllProjects();
+      setAllProjects(projectsData);
+    } catch (error) {
+      console.error('Erro ao encerrar projeto:', error);
+      setError('Erro ao encerrar projeto. Tente novamente.');
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleIds = useMemo(() => filteredProjects.map(p => p.id), [filteredProjects]);
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      if (prev.size === allVisibleIds.length) return new Set();
+      return new Set(allVisibleIds);
+    });
+  };
+
+  const handleBulkArchive = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Encerrar ${selectedIds.size} projeto(s)?`)) return;
+    setBulkBusy(true);
+    try {
+      await Promise.all(Array.from(selectedIds).map(id =>
+        projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
+      ));
+      const projectsData = await projectService.getAllProjects();
+      setAllProjects(projectsData);
+      setSelectedIds(new Set());
     } catch (e) {
-      console.error('Erro ao salvar observação do diário:', e);
-      alert('Não foi possível salvar sua observação.');
+      console.error('Erro no encerramento em massa:', e);
+      setError('Alguns projetos podem não ter sido encerrados. Tente novamente.');
     } finally {
-      setSavingDiary(false);
+      setBulkBusy(false);
     }
   };
 
-  const canDeleteDiary = (entry) => {
-    const role = (userProfile?.funcao || '').toLowerCase();
-    return role === 'administrador';
-  };
+  const canCreateProject = userProfile?.funcao === 'administrador';
 
-  const handleDeleteDiary = async (entryId) => {
-    if (!canDeleteDiary()) return;
-    if (!window.confirm('Remover esta observação do diário?')) return;
-    try {
-      await projectService.deleteDiaryEntry?.(projectId, entryId);
-      setDiaryEntries((prev) => prev.filter((e) => e.id !== entryId));
-    } catch (e) {
-      console.error('Falha ao excluir observação:', e);
-      alert('Não foi possível excluir.');
+  /* Resumo por fase (com filteredProjects já filtrados) */
+  const phaseCounts = useMemo(() => {
+    const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    const inRange = (s, e) => {
+      const S = startOfDaySP(s), E = endOfDaySP(e);
+      return S && E && today >= S && today <= E;
+    };
+
+    for (const p of filteredProjects) {
+      let phase = 'finalizado';
+      const statusLower = (p.status || '').toLowerCase();
+
+      if (statusLower === 'encerrado' || statusLower === 'finalizado' || statusLower === 'arquivado') {
+        phase = 'finalizado';
+      } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
+        phase = 'desmontagem';
+      } else if (
+        inRange(p.montagem?.dataInicio, p.montagem?.dataFim) ||
+        inRange(p.evento?.dataInicio, p.evento?.dataFim)
+      ) {
+        phase = 'andamento';
+      } else {
+        const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
+        const S = startOfDaySP(start);
+        phase = (S && today < S) ? 'futuro' : 'finalizado';
+      }
+
+      counts[phase] = (counts[phase] || 0) + 1;
     }
-  };
+    return counts;
+  }, [filteredProjects]);
 
   /* =========================
-     Métricas de chamados
+     Exportação CSV (selecionados ou filtrados)
      ========================= */
-  const ticketMetrics = useMemo(() => {
-    const total = tickets.length;
-    // Considera concluído + arquivado (e variações comuns)
-    const closedStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido']);
-    const notOpenStatuses = new Set(['concluido','concluído','arquivado','fechado','resolvido','cancelado']);
-
-    const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
-    const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
-    const completion = total > 0 ? Math.round((closed / total) * 100) : 0;
-
-    // Top áreas
-    const counts = {};
-    for (const t of tickets) {
-      const area = (t.area || t.areaAtual || 'Não informada').toString();
-      if (!counts[area]) counts[area] = 0;
-      counts[area] += 1;
-    }
-    const topAreas = Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-
-    return { total, open, closed, completion, topAreas };
-  }, [tickets]);
-
-  // Linkar para a lista filtrada (Dashboard com filtro pelo projeto)
-  const goToFilteredTickets = () => {
-    const params = new URLSearchParams();
-    if (project?.id) params.set('projectId', project.id);
-    if (project?.nome) params.set('q', project.nome);
-    navigate(`/dashboard?${params.toString()}`);
+  const toCSVRow = (obj) => {
+    const escape = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v).replace(/"/g, '""');
+      return `"${s}"`;
+    };
+    return [
+      escape(obj.id),
+      escape(obj.nome),
+      escape(obj.feira || obj.evento),
+      escape(obj.local),
+      escape(obj.pavilhao),
+      escape(obj.tipoMontagem),
+      escape(obj.metragem),
+      escape(obj.consultorNome),
+      escape(obj.produtorNome),
+      escape(obj.status),
+    ].join(',');
   };
 
-  /* =========================
-     Loading/Erro
-     ========================= */
+  const downloadCSV = (rows, filename = 'projetos.csv') => {
+    const header = [
+      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
+    ].join(',');
+    const body = rows.map(toCSVRow).join('\n');
+    const csv = header + '\n' + body;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSelected = () => {
+    const setIds = new Set(selectedIds);
+    const rows = filteredProjects.filter(p => setIds.has(p.id));
+    if (rows.length === 0) return;
+    downloadCSV(rows, 'projetos_selecionados.csv');
+  };
+
+  const exportFiltered = () => {
+    if (filteredProjects.length === 0) return;
+    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
+  };
+
+  /* UI */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Carregando projeto...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Carregando projetos...</p>
         </div>
       </div>
     );
   }
 
-  if (error || !project) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro</h2>
-          <p className="text-gray-600 mb-4">{error || 'Projeto não encontrado.'}</p>
-          <Button variant="outline" onClick={() => navigate('/projetos')}>
-            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  /* =========================
-     Layout
-     ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/projetos')}
-              className="mr-4"
+      <button
+        onClick={() => navigate('/dashboard')}
+        className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        Voltar ao Dashboard
+      </button>
+
+      {/* Header */}
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Projetos</h1>
+          <p className="text-gray-600 mt-1">
+            {['administrador','gerente','operador'].includes(userProfile?.funcao)
+              ? 'Gerencie todos os projetos do sistema'
+              : 'Seus projetos vinculados'}
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={handleBulkArchive}
+            disabled={selectedIds.size === 0 || bulkBusy}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${selectedIds.size === 0 || bulkBusy ? 'bg-gray-200 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
+            title={selectedIds.size ? `Encerrar ${selectedIds.size} selecionado(s)` : 'Selecione projetos para encerrar'}
+          >
+            {bulkBusy ? 'Encerrando...' : `Encerrar selecionados (${selectedIds.size})`}
+          </button>
+
+          {/* Exportações */}
+          <button
+            onClick={exportSelected}
+            disabled={selectedIds.size === 0}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
+            title="Exportar projetos selecionados (CSV)"
+          >
+            <Download className="h-4 w-4" /> Exportar selecionados
+          </button>
+          <button
+            onClick={exportFiltered}
+            disabled={filteredProjects.length === 0}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
+            title="Exportar lista filtrada (CSV)"
+          >
+            <Download className="h-4 w-4" /> Exportar filtrados
+          </button>
+
+          {/* Novo Projeto */}
+          {userProfile?.funcao === 'administrador' && (
+            <button
+              onClick={() => navigate(`/projetos/novo${currentSearch}`)}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Voltar
-            </Button>
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-gray-900">
-                  {project.nome || 'Projeto'}
-                </h1>
-                <Badge variant="secondary" className="text-xs">
-                  {project.status || 'Ativo'}
-                </Badge>
-              </div>
-              <p className="text-gray-600">
-                {project.feira} • {project.local}
-              </p>
+              ➕ Novo Projeto
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="flex flex-wrap gap-4 items-center">
+          {/* Tabs de Status */}
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setActiveTab('ativos')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ativos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              Ativos ({allProjects.filter(p => p.status !== 'encerrado').length})
+            </button>
+            <button
+              onClick={() => setActiveTab('encerrados')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'encerrados' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              Encerrados ({allProjects.filter(p => p.status === 'encerrado').length})
+            </button>
+          </div>
+
+          {/* Filtro por Evento */}
+          {events.length > 0 && (
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">Feira:</label>
+              <select
+                value={selectedEvent}
+                onChange={(e) => setSelectedEvent(e.target.value)}
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="todos">Todas as feiras</option>
+                {events.map(event => (
+                  <option key={event} value={event}>{event}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Busca */}
+          <div className="w-full md:w-96 ml-auto">
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por nome, feira, local, consultor, produtor…"
+                className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
           </div>
 
-          {/* Drive (se houver) */}
-          {project.driveLink && (
-            <a
-              href={project.driveLink}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center text-sm text-blue-600 hover:underline"
-              title="Acessar Drive do Projeto"
-            >
-              <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
-            </a>
-          )}
+          {/* Selecionar todos */}
+          <button
+            onClick={toggleSelectAll}
+            className="text-sm px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200"
+          >
+            {selectedIds.size === allVisibleIds.length && allVisibleIds.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
+          </button>
         </div>
+      </div>
 
-        {/* GRID RESPONSIVA: 1 col (mobile), 3 col (desktop) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Coluna Principal (esquerda) */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Informações Básicas */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Building className="h-5 w-5 mr-2" />
-                  Informações Básicas
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Nome do Projeto</label>
-                    <p className="text-lg font-semibold">{project.nome || '—'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Feira</label>
-                    <p className="text-lg font-semibold">{project.feira || '—'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Localização</label>
-                    <p className="text-lg font-semibold">{project.local || '—'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Metragem</label>
-                    <p className="text-lg font-semibold">{project.metragem || '—'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Tipo de Montagem</label>
-                    <p className="text-lg font-semibold">{project.tipoMontagem || '—'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Pavilhão</label>
-                    <p className="text-lg font-semibold">{project.pavilhao || '—'}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Diário do Projeto — FORM */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
-                  Diário do Projeto
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Adicione uma observação
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={newDiaryText}
-                    onChange={(e) => setNewDiaryText(e.target.value)}
-                    placeholder="Ex: Rita (consultora) definiu as cores do bagum: grafite e preto."
-                    className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Link do Drive (opcional)
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={newDiaryLink}
-                      onChange={(e) => setNewDiaryLink(e.target.value)}
-                      placeholder="https://drive.google.com/..."
-                      className="flex-1 border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary}>
-                      {savingDiary ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="h-4 w-4 mr-2" /> Salvar no diário
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Diário do Projeto — LISTA */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
-                  Observações do Projeto
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {diaryEntries.length === 0 ? (
-                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {diaryEntries.map((e) => (
-                      <div key={e.id || e.createdAt?.seconds || Math.random()} className="border rounded-lg p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm font-medium">
-                              {e.authorName} {e.authorRole ? `(${e.authorRole})` : ''}
-                            </span>
-                          </div>
-                          <span className="text-xs text-gray-500">{formatDateTimeSP(e.createdAt)}</span>
-                        </div>
-                        {e.text && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.text}</p>}
-                        {e.driveLink && (
-                          <a
-                            href={e.driveLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
-                          >
-                            <Link2 className="h-4 w-4" /> Anexo/Link
-                          </a>
-                        )}
-                        {canDeleteDiary(e) && (
-                          <div className="mt-3 text-right">
-                            <Button variant="destructive" size="sm" onClick={() => handleDeleteDiary(e.id)}>
-                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Cronograma */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Calendar className="h-5 w-5 mr-2" />
-                  Cronograma
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="rounded-lg border p-4 bg-blue-50/50">
-                    <div className="text-sm text-gray-500">Montagem</div>
-                    <div className="mt-1 font-medium">
-                      Início: {formatDate(project.montagem?.dataInicio)} • Fim: {formatDate(project.montagem?.dataFim)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border p-4 bg-green-50/50">
-                    <div className="text-sm text-gray-500">Evento</div>
-                    <div className="mt-1 font-medium">
-                      Início: {formatDate(project.evento?.dataInicio)} • Fim: {formatDate(project.evento?.dataFim)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border p-4 bg-orange-50/50">
-                    <div className="text-sm text-gray-500">Desmontagem</div>
-                    <div className="mt-1 font-medium">
-                      Início: {formatDate(project.desmontagem?.dataInicio)} • Fim: {formatDate(project.desmontagem?.dataFim)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border p-4 bg-gray-50">
-                    <div className="text-sm text-gray-500">Período Geral</div>
-                    <div className="mt-1 font-medium">
-                      Início: {formatDate(project.dataInicio)} • Fim: {formatDate(project.dataFim)}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Detalhes Adicionais */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
-                  Detalhes Adicionais
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="prose max-w-none text-sm text-gray-700 whitespace-pre-wrap break-words">
-                  {project.descricao || 'Sem descrição.'}
-                </div>
-              </CardContent>
-            </Card>
+      {/* Sidebox: Resumo por Fase */}
+      <div className="bg-white rounded-lg shadow-sm p-5 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="h-5 w-5 text-gray-700" />
+          <h3 className="font-semibold text-gray-800">Resumo por Fase (após filtros e busca)</h3>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-gray-500">Futuro</div>
+            <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
           </div>
-
-          {/* Coluna Lateral (direita) */}
-          <div className="space-y-6">
-            {/* Responsáveis */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Users className="h-5 w-5 mr-2" />
-                  Responsáveis
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div>
-                  <div className="text-xs text-gray-500">Produtor</div>
-                  <div className="font-medium">{project.produtorNome || 'Não atribuído'}</div>
-                  {project.produtorEmail && (
-                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.produtorEmail}`}>
-                      <Mail className="h-3 w-3" /> {project.produtorEmail}
-                    </a>
-                  )}
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Consultor</div>
-                  <div className="font-medium">{project.consultorNome || 'Não atribuído'}</div>
-                  {project.consultorEmail && (
-                    <a className="text-blue-600 hover:underline flex items-center gap-1" href={`mailto:${project.consultorEmail}`}>
-                      <Mail className="h-3 w-3" /> {project.consultorEmail}
-                    </a>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Equipes Terceirizadas */}
-            {Array.isArray(project.equipesTerceirizadas) && project.equipesTerceirizadas.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Users className="h-5 w-5 mr-2" />
-                    Equipes Terceirizadas
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="text-sm space-y-1">
-                    {project.equipesTerceirizadas.map((eq, idx) => (
-                      <li key={idx} className="flex items-center justify-between">
-                        <span>{eq?.nome || 'Equipe'}</span>
-                        {eq?.contato && (
-                          <span className="text-gray-500 text-xs">{eq.contato}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Documentos */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <UploadCloud className="h-5 w-5 mr-2" />
-                  Documentos
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {project.driveLink ? (
-                  <a
-                    href={project.driveLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center text-sm text-blue-600 hover:underline"
-                  >
-                    <Link2 className="h-4 w-4 mr-1" /> Acessar Drive
-                  </a>
-                ) : (
-                  <p className="text-sm text-gray-500">Nenhum link de Drive informado.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Informações do Sistema */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <ShieldCheck className="h-5 w-5 mr-2" />
-                  Informações do Sistema
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Criado em:</span>
-                  <span>{formatDateTimeSP(project.createdAt)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Atualizado em:</span>
-                  <span>{formatDateTimeSP(project.updatedAt)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Status:</span>
-                  <span className="font-medium">{project.status || 'Ativo'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Ativo:</span>
-                  <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Observações do Projeto — (lista vazia por padrão, mantém compatibilidade) */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2" />
-                  Observações do Projeto
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
-              </CardContent>
-            </Card>
-
-            {/* =========================
-                NOVA SIDEBOX: Resumo de Chamados
-               ========================= */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2" />
-                  Resumo de Chamados
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {ticketsLoading ? (
-                  <div className="text-center">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">Carregando…</p>
-                  </div>
-                ) : ticketsErr ? (
-                  <p className="text-red-600">{ticketsErr}</p>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <ClipboardList className="h-4 w-4" />
-                        <span>Total de chamados</span>
-                      </div>
-                      <span className="font-semibold">{ticketMetrics.total}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />
-                        <span>Abertos</span>
-                      </div>
-                      <span className="font-semibold">{ticketMetrics.open}</span>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="flex items-center gap-2">
-                          <TrendingUp className="h-4 w-4" />
-                          Taxa de conclusão
-                        </span>
-                        <span className="font-semibold">{ticketMetrics.completion}%</span>
-                      </div>
-                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-green-500"
-                          style={{ width: `${ticketMetrics.completion}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Top áreas envolvidas</div>
-                      {ticketMetrics.topAreas.length === 0 ? (
-                        <p className="text-sm text-gray-500">Sem dados suficientes.</p>
-                      ) : (
-                        <ul className="text-sm">
-                          {ticketMetrics.topAreas.map(([area, count]) => (
-                            <li key={area} className="flex items-center justify-between">
-                              <span>{area}</span>
-                              <span className="font-medium">{count}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-
-                    <div className="pt-2">
-                      <Button
-                        onClick={goToFilteredTickets}
-                        className="w-full"
-                        variant="outline"
-                        disabled={tickets.length === 0}
-                        title="Ver lista de chamados do projeto"
-                      >
-                        Ver todos os chamados
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-gray-500">Andamento</div>
+            <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-gray-500">Desmontagem</div>
+            <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-gray-500">Finalizado</div>
+            <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
           </div>
         </div>
       </div>
+
+      {/* Mensagem de Erro */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-600">{error}</p>
+        </div>
+      )}
+
+      {/* Lista */}
+      {filteredProjects.length === 0 ? (
+        <div className="text-center py-16">
+          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum projeto encontrado</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {activeTab === 'ativos'
+              ? (['consultor','produtor'].includes(userProfile?.funcao) ? 'Você não possui projetos vinculados no momento.' : 'Tente alterar os filtros ou crie um novo projeto.')
+              : 'Projetos encerrados aparecerão aqui.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredProjects.map(project => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              userRole={userProfile?.funcao}
+              onArchive={handleArchiveProject}
+              selected={selectedIds.has(project.id)}
+              onToggleSelect={toggleSelect}
+              currentSearch={currentSearch}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
 
-export default ProjectDetailPage;
+export default ProjectsPage;
