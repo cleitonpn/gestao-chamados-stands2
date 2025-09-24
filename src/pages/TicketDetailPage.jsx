@@ -843,26 +843,104 @@ const TicketDetailPage = () => {
   };
 
   const getAvailableStatuses = () => {
-    if (!ticket || !userProfile || !user) return [];
-    const currentStatus = ticket.status;
-    const userRole = userProfile.funcao;
-    const isCreator = ticket.criadoPor === user.uid;
+  if (!ticket || !userProfile || !user) return [];
+  const currentStatus = ticket.status;
+  const userRole = userProfile.funcao;
+  const isCreator = ticket.criadoPor === user.uid;
 
-    if (isCreator && (currentStatus === 'executado_aguardando_validacao' || currentStatus === 'executado_aguardando_validacao_operador')) {
-        return [ { value: 'concluido', label: 'Validar e Concluir' }, { value: 'enviado_para_area', label: 'Rejeitar / Devolver' } ];
+  // Ações do criador
+  if (
+    isCreator &&
+    (currentStatus === 'executado_aguardando_validacao' ||
+     currentStatus === 'executado_aguardando_validacao_operador')
+  ) {
+    return [
+      { value: 'concluido', label: 'Validar e Concluir' },
+      { value: 'enviado_para_area', label: 'Rejeitar / Devolver' },
+    ];
+  }
+
+  if (isCreator && currentStatus === 'enviado_para_area') {
+    return [{ value: 'cancelado', label: 'Cancelar Chamado' }];
+  }
+
+  // Ações da gerência
+  if (
+    userRole === 'gerente' &&
+    currentStatus === 'aguardando_aprovacao' &&
+    ticket.responsavelAtual === user.uid
+  ) {
+    return [
+      { value: 'aprovado', label: 'Aprovar' },
+      { value: 'reprovado', label: 'Reprovar' },
+    ];
+  }
+
+  // Ações do produtor (consolidado)
+  if (userRole === 'produtor') {
+    const normalizeArea = (area) =>
+      (area || '')
+        .toString()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    const areaHistory = [
+      ticket.area,
+      ticket.areaOriginal,
+      ticket.areaInicial,
+      ticket.areaDeOrigem,
+    ].filter(Boolean);
+
+    const isProductionTicket = areaHistory.some(
+      (area) => normalizeArea(area) === 'producao'
+    );
+
+    const possibleProducerIds = [
+      ticket.produtorResponsavelId,
+      ticket.produtorResponsavelUid,
+      ticket.produtorId,
+      ticket.produtorUid,
+      project?.produtorId,
+      project?.produtorUid,
+    ].filter(Boolean);
+
+    const possibleProducerEmails = [
+      ticket.produtorResponsavelEmail,
+      ticket.produtorEmail,
+      project?.produtorEmail,
+    ].filter(Boolean);
+
+    const possibleProducerNames = [
+      ticket.produtorResponsavelNome,
+      ticket.produtorNome,
+      project?.produtorNome,
+    ].filter(Boolean);
+
+    const isProducerResponsible =
+      possibleProducerIds.includes(user.uid) ||
+      (userProfile?.email && possibleProducerEmails.includes(userProfile.email)) ||
+      (userProfile?.nome && possibleProducerNames.includes(userProfile.nome));
+
+    const actions = [];
+
+    if (currentStatus === 'transferido_para_produtor' && isProducerResponsible) {
+      actions.push({ value: 'executado_aguardando_validacao', label: 'Executar' });
     }
 
-    if (isCreator && currentStatus === 'enviado_para_area') {
-        return [{ value: 'cancelado', label: 'Cancelar Chamado' }];
+    if (isProductionTicket && isProducerResponsible) {
+      if (['aberto', 'escalado_para_outra_area', 'enviado_para_area'].includes(currentStatus)) {
+        actions.push({ value: 'em_tratativa', label: 'Iniciar Tratativa (Produção)' });
+      } else if (currentStatus === 'em_tratativa') {
+        actions.push({ value: 'executado_aguardando_validacao', label: 'Executado' });
+      }
     }
 
-    if (userRole === 'gerente' && currentStatus === 'aguardando_aprovacao' && ticket.responsavelAtual === user.uid) {
-      return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'reprovado', label: 'Reprovar' } ];
-    }
-    
-    if (userRole === 'produtor' && currentStatus === 'transferido_para_produtor' && ticket.produtorResponsavelId === user.uid) {
-      return [{ value: 'executado_aguardando_validacao', label: 'Executar' }];
-    }
+    if (actions.length) return actions;
+  }
+
+  // Sem ações específicas
+  return [];
 
     if (userRole === 'administrador') {
       if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
