@@ -64,6 +64,7 @@ const EventsPage = () => {
     dataInicioDesmontagem: '',
     dataFimDesmontagem: '',
     linkManual: '',
+    linkPlanta: '',     // ✅ NOVO CAMPO
     observacoes: ''
   });
 
@@ -72,60 +73,35 @@ const EventsPage = () => {
   // 🔧 CORREÇÃO: Função para converter data string para Date sem problema de fuso horário
   const createDateFromString = (dateString) => {
     if (!dateString) return null;
-    
-    console.log('🕐 Convertendo data:', dateString);
-    
-    // Criar data no fuso horário local (não UTC)
     const [year, month, day] = dateString.split('-').map(Number);
-    const date = new Date(year, month - 1, day, 12, 0, 0); // Meio-dia para evitar problemas de fuso
-    
-    console.log('🕐 Data criada:', date);
-    console.log('🕐 Timestamp:', date.getTime());
-    console.log('🕐 Data formatada:', date.toLocaleDateString('pt-BR'));
-    
-    return date;
+    // Cria a data no horário local (meio-dia para evitar problemas de fuso)
+    return new Date(year, month - 1, day, 12, 0, 0);
   };
 
   // 🔧 CORREÇÃO: Função para converter Date para string sem problema de fuso horário
   const formatDateForInput = (date) => {
     if (!date) return '';
-    
     try {
       let dateObj;
-      
-      // Se é um timestamp do Firestore
-      if (date.seconds) {
+      if (date?.seconds) {
         dateObj = new Date(date.seconds * 1000);
-      }
-      // Se é uma string de data
-      else if (typeof date === 'string') {
+      } else if (typeof date === 'string') {
         dateObj = new Date(date);
-      }
-      // Se já é um objeto Date
-      else if (date instanceof Date) {
+      } else if (date instanceof Date) {
         dateObj = date;
-      }
-      else {
-        console.warn('Formato de data não reconhecido:', date);
+      } else {
         return '';
       }
-      
-      // 🔧 CORREÇÃO: Usar getFullYear, getMonth, getDate para evitar problemas de fuso
       const year = dateObj.getFullYear();
       const month = String(dateObj.getMonth() + 1).padStart(2, '0');
       const day = String(dateObj.getDate()).padStart(2, '0');
-      
-      const formatted = `${year}-${month}-${day}`;
-      console.log('📅 Data formatada para input:', date, '→', formatted);
-      return formatted;
-    } catch (error) {
-      console.error('Erro ao formatar data para edição:', error, date);
+      return `${year}-${month}-${day}`;
+    } catch {
       return '';
     }
   };
 
   useEffect(() => {
-    // 🔧 CORREÇÃO: Verificar tanto 'funcao' quanto 'papel' para administrador
     if (userProfile?.funcao === 'administrador' || userProfile?.papel === 'administrador') {
       loadEvents(true); // Forçar refresh inicial
       loadStats();
@@ -136,25 +112,10 @@ const EventsPage = () => {
   const loadEvents = async (forceServerFetch = false) => {
     try {
       setLoading(true);
-      console.log('🔄 Carregando eventos...', { forceServerFetch });
-      
-      // 🚀 FORÇAR BUSCA NO SERVIDOR
       const eventsData = await eventService.getAllEvents(forceServerFetch);
-      console.log('✅ Eventos carregados:', eventsData.length);
-      
       setEvents(eventsData);
       setCacheStatus(forceServerFetch ? 'server' : 'cache');
       setLastRefresh(new Date().toLocaleTimeString());
-      
-      // 🔧 DEBUG: Log específico do FENABRAVE 2025
-      const fenabrave = eventsData.find(e => e.nome === 'FENABRAVE 2025');
-      if (fenabrave) {
-        console.log('🔍 FENABRAVE 2025 carregado na interface:');
-        console.log('  dataInicioEvento:', fenabrave.dataInicioEvento);
-        console.log('  dataFimEvento:', fenabrave.dataFimEvento);
-        console.log('  updatedAt:', fenabrave.updatedAt);
-      }
-      
     } catch (error) {
       console.error('❌ Erro ao carregar eventos:', error);
       setError('Erro ao carregar eventos');
@@ -175,7 +136,6 @@ const EventsPage = () => {
 
   // 🔧 ADIÇÃO: Função para recarregar manualmente
   const handleManualRefresh = async () => {
-    console.log('🔄 Recarregamento manual solicitado');
     await loadEvents(true); // Forçar servidor
     await loadStats();
   };
@@ -198,6 +158,7 @@ const EventsPage = () => {
       dataInicioDesmontagem: '',
       dataFimDesmontagem: '',
       linkManual: '',
+      linkPlanta: '',   // ✅ RESETA NOVO CAMPO
       observacoes: ''
     });
     setError('');
@@ -205,8 +166,6 @@ const EventsPage = () => {
 
   // 🔧 CORREÇÃO: Função de edição com formatação corrigida
   const handleEdit = (event) => {
-    console.log('🔧 Editando evento:', event);
-
     const formattedData = {
       nome: event.nome || '',
       pavilhao: event.pavilhao || '',
@@ -217,50 +176,24 @@ const EventsPage = () => {
       dataInicioDesmontagem: formatDateForInput(event.dataInicioDesmontagem),
       dataFimDesmontagem: formatDateForInput(event.dataFimDesmontagem),
       linkManual: event.linkManual || '',
+      linkPlanta: event.linkPlanta || '',   // ✅ POPULA EM EDIÇÃO
       observacoes: event.observacoes || ''
     };
-
-    console.log('📝 Dados formatados para edição:', formattedData);
     setFormData(formattedData);
     setEditingEvent(event);
     setShowForm(true);
   };
 
   const validateForm = () => {
-    if (!formData.nome.trim()) {
-      setError('Nome do evento é obrigatório');
-      return false;
-    }
-    if (!formData.pavilhao.trim()) {
-      setError('Pavilhão é obrigatório');
-      return false;
-    }
-    if (!formData.dataInicioMontagem) {
-      setError('Data de início da montagem é obrigatória');
-      return false;
-    }
-    if (!formData.dataFimMontagem) {
-      setError('Data de fim da montagem é obrigatória');
-      return false;
-    }
-    if (!formData.dataInicioEvento) {
-      setError('Data de início do evento é obrigatória');
-      return false;
-    }
-    if (!formData.dataFimEvento) {
-      setError('Data de fim do evento é obrigatória');
-      return false;
-    }
-    if (!formData.dataInicioDesmontagem) {
-      setError('Data de início da desmontagem é obrigatória');
-      return false;
-    }
-    if (!formData.dataFimDesmontagem) {
-      setError('Data de fim da desmontagem é obrigatória');
-      return false;
-    }
+    if (!formData.nome.trim()) { setError('Nome do evento é obrigatório'); return false; }
+    if (!formData.pavilhao.trim()) { setError('Pavilhão é obrigatório'); return false; }
+    if (!formData.dataInicioMontagem) { setError('Data de início da montagem é obrigatória'); return false; }
+    if (!formData.dataFimMontagem) { setError('Data de fim da montagem é obrigatória'); return false; }
+    if (!formData.dataInicioEvento) { setError('Data de início do evento é obrigatória'); return false; }
+    if (!formData.dataFimEvento) { setError('Data de fim do evento é obrigatória'); return false; }
+    if (!formData.dataInicioDesmontagem) { setError('Data de início da desmontagem é obrigatória'); return false; }
+    if (!formData.dataFimDesmontagem) { setError('Data de fim da desmontagem é obrigatória'); return false; }
 
-    // 🔧 CORREÇÃO: Validar sequência de datas usando createDateFromString
     const dates = {
       inicioMontagem: createDateFromString(formData.dataInicioMontagem),
       fimMontagem: createDateFromString(formData.dataFimMontagem),
@@ -270,26 +203,11 @@ const EventsPage = () => {
       fimDesmontagem: createDateFromString(formData.dataFimDesmontagem)
     };
 
-    if (dates.inicioMontagem >= dates.fimMontagem) {
-      setError('Data de fim da montagem deve ser posterior ao início');
-      return false;
-    }
-    if (dates.fimMontagem > dates.inicioEvento) {
-      setError('Data de início do evento deve ser posterior ao fim da montagem');
-      return false;
-    }
-    if (dates.inicioEvento >= dates.fimEvento) {
-      setError('Data de fim do evento deve ser posterior ao início');
-      return false;
-    }
-    if (dates.fimEvento > dates.inicioDesmontagem) {
-      setError('Data de início da desmontagem deve ser posterior ao fim do evento');
-      return false;
-    }
-    if (dates.inicioDesmontagem >= dates.fimDesmontagem) {
-      setError('Data de fim da desmontagem deve ser posterior ao início');
-      return false;
-    }
+    if (dates.inicioMontagem >= dates.fimMontagem) { setError('Data de fim da montagem deve ser posterior ao início'); return false; }
+    if (dates.fimMontagem > dates.inicioEvento) { setError('Data de início do evento deve ser posterior ao fim da montagem'); return false; }
+    if (dates.inicioEvento >= dates.fimEvento) { setError('Data de fim do evento deve ser posterior ao início'); return false; }
+    if (dates.fimEvento > dates.inicioDesmontagem) { setError('Data de início da desmontagem deve ser posterior ao fim do evento'); return false; }
+    if (dates.inicioDesmontagem >= dates.fimDesmontagem) { setError('Data de fim da desmontagem deve ser posterior ao início'); return false; }
 
     return true;
   };
@@ -297,16 +215,12 @@ const EventsPage = () => {
   // 🔧 CORREÇÃO: handleSubmit com conversão de datas corrigida
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     try {
       setFormLoading(true);
       setError('');
 
-      // 🔧 CORREÇÃO: Usar createDateFromString para evitar problemas de fuso horário
       const eventData = {
         nome: formData.nome.trim(),
         pavilhao: formData.pavilhao.trim(),
@@ -317,37 +231,13 @@ const EventsPage = () => {
         dataInicioDesmontagem: createDateFromString(formData.dataInicioDesmontagem),
         dataFimDesmontagem: createDateFromString(formData.dataFimDesmontagem),
         linkManual: formData.linkManual.trim(),
+        linkPlanta: formData.linkPlanta.trim(),   // ✅ INCLUI NO PAYLOAD
         observacoes: formData.observacoes.trim()
       };
 
-      console.log('🚀 INICIANDO PROCESSO DE SALVAMENTO COM FUSO HORÁRIO CORRIGIDO');
-      console.log('📊 Dados do formulário (strings):', formData);
-      console.log('📊 Dados convertidos (objetos Date):', eventData);
-      
-      // 🔧 DEBUG: Mostrar timestamps das datas convertidas
-      Object.keys(eventData).forEach(key => {
-        if (key.includes('data') && eventData[key]) {
-          console.log(`🕐 ${key}:`, {
-            date: eventData[key],
-            timestamp: eventData[key].getTime(),
-            formatted: eventData[key].toLocaleDateString('pt-BR'),
-            iso: eventData[key].toISOString()
-          });
-        }
-      });
-
       if (editingEvent) {
-        console.log('✏️ MODO EDIÇÃO - Evento ID:', editingEvent.id);
-        
-        // Salvar usando eventService
-        console.log('💾 Salvando via eventService...');
-        const result = await eventService.updateEvent(editingEvent.id, eventData);
-        console.log('✅ EventService retornou:', result);
-        
-        console.log('✅ EVENTO ATUALIZADO COM SUCESSO');
-        
+        await eventService.updateEvent(editingEvent.id, eventData);
       } else {
-        console.log('➕ MODO CRIAÇÃO - Novo evento');
         const newEvent = await eventService.createEvent({
           ...eventData,
           createdAt: new Date(),
@@ -355,48 +245,27 @@ const EventsPage = () => {
           ativo: true,
           arquivado: false
         });
-        console.log('✅ NOVO EVENTO CRIADO:', newEvent.id);
-
         // 🔔 NOTIFICAÇÃO DE NOVO EVENTO CADASTRADO
         try {
-          console.log('🔔 Enviando notificação de novo evento cadastrado...');
-          await notificationService.notifyNewEvent(newEvent.id, {
-            ...eventData,
-            id: newEvent.id
-          }, user.uid);
-          console.log('✅ Notificação de novo evento enviada com sucesso');
+          await notificationService.notifyNewEvent(newEvent.id, { ...eventData, id: newEvent.id }, user.uid);
         } catch (notificationError) {
-          console.error('❌ Erro ao enviar notificação de novo evento:', notificationError);
-          // Não bloquear o fluxo se a notificação falhar
+          console.error('Erro ao enviar notificação de novo evento:', notificationError);
         }
       }
 
       // 🚀 RECARREGAMENTO FORÇADO MÚLTIPLO
-      console.log('🔄 Iniciando recarregamento forçado...');
-      
-      // Aguardar propagação
-      console.log('⏳ Aguardando propagação (3s)...');
       await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Recarregar múltiplas vezes forçando servidor
       for (let i = 1; i <= 3; i++) {
-        console.log(`🔄 Recarregamento ${i}/3 (forçando servidor)...`);
-        await loadEvents(true); // Sempre forçar servidor
+        await loadEvents(true);
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
       await loadStats();
-      
-      // Fechar modal
+
       setShowForm(false);
       setEditingEvent(null);
       resetForm();
-      
-      console.log('🎉 PROCESSO CONCLUÍDO COM SUCESSO!');
-      
     } catch (error) {
       console.error('💥 ERRO CRÍTICO NO SALVAMENTO:', error);
-      console.error('📊 Stack trace:', error.stack);
       setError(`Erro crítico ao salvar evento: ${error.message || 'Erro desconhecido'}`);
     } finally {
       setFormLoading(false);
@@ -410,8 +279,6 @@ const EventsPage = () => {
       } else {
         await eventService.reactivateEvent(event.id);
       }
-      
-      // 🚀 RECARREGAMENTO FORÇADO
       await loadEvents(true);
       await loadStats();
     } catch (error) {
@@ -424,8 +291,6 @@ const EventsPage = () => {
     if (window.confirm('Tem certeza que deseja deletar este evento permanentemente?')) {
       try {
         await eventService.deleteEvent(eventId);
-        
-        // 🚀 RECARREGAMENTO FORÇADO
         await loadEvents(true);
         await loadStats();
       } catch (error) {
@@ -440,17 +305,11 @@ const EventsPage = () => {
     const action = event.arquivado ? 'desarquivar' : 'arquivar';
     if (window.confirm(`Tem certeza que deseja ${action} este evento?`)) {
       try {
-        console.log(`🔧 ${action} evento:`, event.id);
-        
         await eventService.updateEvent(event.id, {
           arquivado: !event.arquivado,
           updatedAt: new Date(),
           updatedBy: user.uid
         });
-        
-        console.log(`✅ Evento ${action}do com sucesso`);
-        
-        // 🚀 RECARREGAMENTO FORÇADO
         await loadEvents(true);
         await loadStats();
       } catch (error) {
@@ -462,33 +321,18 @@ const EventsPage = () => {
 
   const formatDate = (date) => {
     if (!date) return '-';
-    
-    // Se é um timestamp do Firestore
-    if (date.seconds) {
+    if (date?.seconds) {
       const dateObj = new Date(date.seconds * 1000);
-      return dateObj.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit', 
-        year: '2-digit'
-      });
+      return dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
     }
-    
-    // Se é uma string de data (YYYY-MM-DD), formatar diretamente
-    if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       const [year, month, day] = date.split('-');
       return `${day}/${month}/${year.slice(-2)}`;
     }
-    
-    // Para outros casos
     try {
       const dateObj = new Date(date);
-      return dateObj.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: '2-digit'
-      });
-    } catch (error) {
-      console.error('Erro ao formatar data:', error, date);
+      return dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+    } catch {
       return '-';
     }
   };
@@ -496,42 +340,18 @@ const EventsPage = () => {
   const getEventStatus = (event) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    if (!event.ativo) {
-      return { label: 'Inativo', color: 'bg-gray-100 text-gray-800' };
-    }
-    
-    if (event.arquivado) {
-      return { label: 'Arquivado', color: 'bg-purple-100 text-purple-800' };
-    }
-
-    // 🔧 CORREÇÃO: Verificar se as datas existem antes de usar
-    if (!event.dataInicioEvento || !event.dataFimEvento) {
-      return { label: 'Sem Data', color: 'bg-gray-100 text-gray-800' };
-    }
-    
+    if (!event.ativo) return { label: 'Inativo', color: 'bg-gray-100 text-gray-800' };
+    if (event.arquivado) return { label: 'Arquivado', color: 'bg-purple-100 text-purple-800' };
+    if (!event.dataInicioEvento || !event.dataFimEvento) return { label: 'Sem Data', color: 'bg-gray-100 text-gray-800' };
     const startDate = new Date(event.dataInicioEvento.seconds * 1000);
     const endDate = new Date(event.dataFimEvento.seconds * 1000);
-    
-    if (endDate < today) {
-      return { label: 'Finalizado', color: 'bg-blue-100 text-blue-800' };
-    }
-    
-    if (startDate <= today && endDate >= today) {
-      return { label: 'Em Andamento', color: 'bg-green-100 text-green-800' };
-    }
-    
+    if (endDate < today) return { label: 'Finalizado', color: 'bg-blue-100 text-blue-800' };
+    if (startDate <= today && endDate >= today) return { label: 'Em Andamento', color: 'bg-green-100 text-green-800' };
     return { label: 'Futuro', color: 'bg-yellow-100 text-yellow-800' };
   };
 
   // 🔧 FILTRO: Aplicar filtro de arquivados
-  const filteredEvents = events.filter(event => {
-    if (showArchived) {
-      return true; // Mostrar todos
-    } else {
-      return !event.arquivado; // Mostrar apenas não arquivados
-    }
-  });
+  const filteredEvents = events.filter(event => showArchived ? true : !event.arquivado);
 
   // 🔧 CORREÇÃO: Verificar se usuário é administrador (funcao OU papel)
   if (userProfile?.funcao !== 'administrador' && userProfile?.papel !== 'administrador') {
@@ -570,12 +390,8 @@ const EventsPage = () => {
               ) : (
                 <XCircle className="h-4 w-4 text-red-500" />
               )}
-              <span className={`${
-                cacheStatus === 'server' ? 'text-green-600' : 
-                cacheStatus === 'cache' ? 'text-yellow-600' : 'text-red-600'
-              }`}>
-                {cacheStatus === 'server' ? 'Dados do Servidor' : 
-                 cacheStatus === 'cache' ? 'Dados em Cache' : 'Erro de Conexão'}
+              <span className={`${cacheStatus === 'server' ? 'text-green-600' : cacheStatus === 'cache' ? 'text-yellow-600' : 'text-red-600'}`}>
+                {cacheStatus === 'server' ? 'Dados do Servidor' : cacheStatus === 'cache' ? 'Dados em Cache' : 'Erro de Conexão'}
               </span>
             </div>
             {lastRefresh && (
@@ -746,8 +562,10 @@ const EventsPage = () => {
                             <p>{formatDate(event.dataInicioDesmontagem)} - {formatDate(event.dataFimDesmontagem)}</p>
                           </div>
                         </div>
-                        {event.linkManual && (
-                          <div className="mt-3">
+
+                        {/* Links da feira */}
+                        <div className="mt-3 flex flex-col gap-2">
+                          {event.linkManual && (
                             <a 
                               href={event.linkManual} 
                               target="_blank" 
@@ -758,9 +576,22 @@ const EventsPage = () => {
                               Manual da Feira
                               <ExternalLink className="h-3 w-3 ml-1" />
                             </a>
-                          </div>
-                        )}
+                          )}
+                          {event.linkPlanta && (
+                            <a 
+                              href={event.linkPlanta} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                            >
+                              <MapPin className="h-4 w-4 mr-1" />
+                              Planta da Feira
+                              <ExternalLink className="h-3 w-3 ml-1" />
+                            </a>
+                          )}
+                        </div>
                       </div>
+
                       <div className="flex items-center gap-2 ml-4">
                         <Button
                           variant="outline"
@@ -968,6 +799,18 @@ const EventsPage = () => {
                   placeholder="https://drive.google.com/file/d/..."
                 />
               </div>
+
+              {/* ✅ NOVO CAMPO: Link da Planta da Feira */}
+              <div className="space-y-2">
+                <Label htmlFor="linkPlanta">Link da Planta da Feira (Drive)</Label>
+                <Input
+                  id="linkPlanta"
+                  type="url"
+                  value={formData.linkPlanta}
+                  onChange={(e) => handleInputChange('linkPlanta', e.target.value)}
+                  placeholder="https://drive.google.com/file/d/... ou https://drive.google.com/drive/folders/..."
+                />
+              </div>
               
               <div className="space-y-2">
                 <Label htmlFor="observacoes">Observações</Label>
@@ -1013,4 +856,3 @@ const EventsPage = () => {
 };
 
 export default EventsPage;
-
