@@ -2,23 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { 
-  Calendar, 
-  Clock, 
-  Wrench, 
-  PartyPopper, 
-  Truck, 
-  Archive, 
-  Loader2, 
-  AlertCircle, 
-  CalendarDays, 
-  Eye, 
-  ArrowLeft 
+import {
+  CalendarDays,
+  Wrench,
+  PartyPopper,
+  Truck,
+  Archive,
+  Loader2,
+  AlertCircle,
+  Eye,
+  ArrowLeft,
+  FileText,
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  writeBatch
+} from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 // Componente para o Cronograma de Eventos
@@ -31,54 +37,78 @@ const CronogramaPage = () => {
   const [error, setError] = useState('');
   const [archivingEvent, setArchivingEvent] = useState(null);
 
-  // Efeito para carregar os eventos quando o componente montar
+  // 🔗 Mapa com os links (manual/planta) do evento cadastrado
+  const [eventLinksMap, setEventLinksMap] = useState({}); // { [nomeEvento]: { linkManual, linkPlanta } }
+
   useEffect(() => {
-    // Só carrega os dados se a autenticação já foi checada e o usuário está logado
     if (authInitialized && user) {
       loadEventos();
     } else if (authInitialized && !user) {
-      // Se não estiver logado, redireciona para a página de login
       navigate('/login');
     }
   }, [user, authInitialized, navigate]);
+
+  // Busca todos os eventos cadastrados (coleções "eventos" e "events") e cria um mapa por nome
+  const loadEventLinksMap = async () => {
+    const map = {};
+
+    // Função auxiliar que lê uma coleção e popula o mapa
+    const readCollectionIntoMap = async (colName) => {
+      try {
+        const colRef = collection(db, colName);
+        const snap = await getDocs(colRef);
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          const nome = (data.nome || '').trim();
+          if (!nome) return;
+          // Último write vence em caso de duplicata entre coleções
+          map[nome] = {
+            linkManual: (data.linkManual || '').trim(),
+            linkPlanta: (data.linkPlanta || '').trim()
+          };
+        });
+      } catch {
+        // Ignora se a coleção não existir nesse projeto
+      }
+    };
+
+    // Tenta nas duas convenções mais comuns do seu código
+    await readCollectionIntoMap('eventos');
+    await readCollectionIntoMap('events');
+
+    setEventLinksMap(map);
+  };
 
   // Função para carregar e agrupar os projetos em eventos
   const loadEventos = async () => {
     try {
       setLoading(true);
       setError('');
-      console.log('🔍 Iniciando carregamento de eventos...');
 
       // Busca todos os documentos da coleção 'projetos'
       const projectsRef = collection(db, 'projetos');
       const snapshot = await getDocs(projectsRef);
-      console.log('📊 Total de projetos no banco:', snapshot.size);
 
       const projetos = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        // Filtra apenas os projetos que não estão arquivados ou encerrados
         const isArquivado = data.eventoArquivado === true;
         const isEncerrado = data.status === 'encerrado';
-        
         if (!isArquivado && !isEncerrado) {
           projetos.push({ id: doc.id, ...data });
         }
       });
 
-      console.log('✅ Projetos filtrados para eventos:', projetos.length);
-
       if (projetos.length === 0) {
-        console.log('⚠️ Nenhum projeto encontrado após filtros');
         setEventos([]);
-        setLoading(false);
+        // Mesmo sem projetos, ainda vale montar o mapa de links
+        await loadEventLinksMap();
         return;
       }
 
       // Agrupa os projetos por nome do evento
       const eventosMap = {};
-      projetos.forEach(projeto => {
-        // Usa o campo 'feira' ou 'evento' como nome do evento. Se não houver, usa um nome padrão.
+      projetos.forEach((projeto) => {
         const nomeEvento = projeto.feira || projeto.evento || 'Evento Geral';
 
         if (!eventosMap[nomeEvento]) {
@@ -93,16 +123,13 @@ const CronogramaPage = () => {
 
         eventosMap[nomeEvento].projetos.push(projeto);
 
-        // Função auxiliar para converter datas do Firebase para objeto Date
         const toDate = (timestamp) => {
           if (!timestamp) return null;
           return timestamp.seconds ? new Date(timestamp.seconds * 1000) : new Date(timestamp);
         };
 
-        // Coleta e armazena as datas de cada fase
         const dataMontagemInicio = toDate(projeto.montagem?.dataInicio);
         const dataMontagemFim = toDate(projeto.montagem?.dataFim);
-        // CORREÇÃO: Alterado de 'evento_datas' para 'evento' para corresponder à estrutura de dados
         const dataEventoInicio = toDate(projeto.evento?.dataInicio);
         const dataEventoFim = toDate(projeto.evento?.dataFim);
         const dataDesmontagemInicio = toDate(projeto.desmontagem?.dataInicio);
@@ -116,14 +143,12 @@ const CronogramaPage = () => {
         if (dataDesmontagemFim) eventosMap[nomeEvento].datasDesmontagem.push(dataDesmontagemFim);
       });
 
-      // Processa os eventos agrupados para formatação final
-      const eventosProcessados = Object.values(eventosMap).map(evento => {
-        // Encontra a menor e a maior data para cada fase
+      // Processa e ordena
+      const eventosProcessados = Object.values(eventosMap).map((evento) => {
         const getMinMaxDate = (dates) => {
           if (dates.length === 0) return 'N/A';
           const min = new Date(Math.min(...dates));
           const max = new Date(Math.max(...dates));
-          // CORREÇÃO: Adicionado timeZone: 'UTC' para evitar problemas de fuso horário
           const options = { day: '2-digit', month: '2-digit', timeZone: 'UTC' };
           if (min.getTime() === max.getTime()) {
             return min.toLocaleDateString('pt-BR', options);
@@ -136,20 +161,21 @@ const CronogramaPage = () => {
           periodoMontagem: getMinMaxDate(evento.datasMontagem),
           periodoEvento: getMinMaxDate(evento.datasEvento),
           periodoDesmontagem: getMinMaxDate(evento.datasDesmontagem),
-          // Usa a data de início do evento para ordenação
-          dataOrdenacao: evento.datasMontagem.length > 0 ? new Date(Math.min(...evento.datasMontagem)) : new Date(),
+          dataOrdenacao:
+            evento.datasMontagem.length > 0
+              ? new Date(Math.min(...evento.datasMontagem))
+              : new Date()
         };
       });
 
-      // Ordena os eventos pela data de início da MONTAGEM mais próxima
       eventosProcessados.sort((a, b) => a.dataOrdenacao - b.dataOrdenacao);
-
-      console.log('🎉 Eventos processados e ordenados:', eventosProcessados);
       setEventos(eventosProcessados);
 
+      // Carrega o mapa de links após descobrir os nomes de eventos
+      await loadEventLinksMap();
     } catch (err) {
-      console.error("Erro ao carregar eventos:", err);
-      setError("Não foi possível carregar o cronograma. Tente novamente mais tarde.");
+      console.error('Erro ao carregar eventos:', err);
+      setError('Não foi possível carregar o cronograma. Tente novamente mais tarde.');
     } finally {
       setLoading(false);
     }
@@ -157,30 +183,29 @@ const CronogramaPage = () => {
 
   // Função para arquivar todos os projetos de um evento
   const handleArchiveEvent = async (nomeEvento) => {
-    if (!window.confirm(`Tem certeza que deseja arquivar o evento "${nomeEvento}"? Todos os projetos relacionados serão arquivados.`)) {
+    if (
+      !window.confirm(
+        `Tem certeza que deseja arquivar o evento "${nomeEvento}"? Todos os projetos relacionados serão arquivados.`
+      )
+    ) {
       return;
     }
-    
+
     setArchivingEvent(nomeEvento);
     try {
-      // Encontra todos os projetos que pertencem ao evento
-      const q = query(collection(db, 'projetos'), where('feira', '==', nomeEvento)); // Assumindo que 'feira' é o campo principal do evento
+      const q = query(collection(db, 'projetos'), where('feira', '==', nomeEvento));
       const snapshot = await getDocs(q);
-      
-      // Cria um batch para atualizar todos os documentos de uma vez
+
       const batch = writeBatch(db);
-      snapshot.forEach(doc => {
+      snapshot.forEach((doc) => {
         batch.update(doc.ref, { eventoArquivado: true });
       });
-      
-      await batch.commit();
-      
-      // Recarrega a lista de eventos para refletir a mudança
-      loadEventos();
 
+      await batch.commit();
+      loadEventos();
     } catch (err) {
-      console.error("Erro ao arquivar evento:", err);
-      setError("Falha ao arquivar o evento.");
+      console.error('Erro ao arquivar evento:', err);
+      setError('Falha ao arquivar o evento.');
     } finally {
       setArchivingEvent(null);
     }
@@ -202,7 +227,9 @@ const CronogramaPage = () => {
           <Button variant="outline" size="icon" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Cronograma de Eventos</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+            Cronograma de Eventos
+          </h1>
         </div>
       </header>
 
@@ -217,69 +244,122 @@ const CronogramaPage = () => {
         <div className="text-center py-16">
           <CalendarDays className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum evento ativo</h3>
-          <p className="mt-1 text-sm text-gray-500">Não há eventos no cronograma no momento.</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Não há eventos no cronograma no momento.
+          </p>
         </div>
       ) : (
         <div className="flex overflow-x-auto space-x-6 pb-4">
-          {eventos.map((evento) => (
-            <div key={evento.nome} className="flex-shrink-0 w-80">
-              <Card className="h-full flex flex-col shadow-md hover:shadow-xl transition-shadow duration-300">
-                <CardHeader>
-                  <CardTitle className="text-blue-700">{evento.nome}</CardTitle>
-                  <CardDescription>{evento.projetos.length} projeto(s) neste evento</CardDescription>
-                </CardHeader>
-                <CardContent className="flex-grow space-y-4">
-                  <div className="flex items-center">
-                    <Wrench className="h-5 w-5 mr-3 text-yellow-600" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Montagem</p>
-                      <p className="text-sm text-gray-800 font-semibold">{evento.periodoMontagem}</p>
+          {eventos.map((evento) => {
+            const links = eventLinksMap[evento.nome] || {};
+            const hasManual = !!links.linkManual;
+            const hasPlanta = !!links.linkPlanta;
+
+            return (
+              <div key={evento.nome} className="flex-shrink-0 w-80">
+                <Card className="h-full flex flex-col shadow-md hover:shadow-xl transition-shadow duration-300">
+                  <CardHeader>
+                    <CardTitle className="text-blue-700">{evento.nome}</CardTitle>
+                    <CardDescription>
+                      {evento.projetos.length} projeto(s) neste evento
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="flex-grow space-y-4">
+                    <div className="flex items-center">
+                      <Wrench className="h-5 w-5 mr-3 text-yellow-600" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Montagem</p>
+                        <p className="text-sm text-gray-800 font-semibold">
+                          {evento.periodoMontagem}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center">
-                    <PartyPopper className="h-5 w-5 mr-3 text-green-600" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Evento</p>
-                      <p className="text-sm text-gray-800 font-semibold">{evento.periodoEvento}</p>
+
+                    <div className="flex items-center">
+                      <PartyPopper className="h-5 w-5 mr-3 text-green-600" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Evento</p>
+                        <p className="text-sm text-gray-800 font-semibold">
+                          {evento.periodoEvento}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center">
-                    <Truck className="h-5 w-5 mr-3 text-red-600" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Desmontagem</p>
-                      <p className="text-sm text-gray-800 font-semibold">{evento.periodoDesmontagem}</p>
+
+                    <div className="flex items-center">
+                      <Truck className="h-5 w-5 mr-3 text-red-600" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Desmontagem</p>
+                        <p className="text-sm text-gray-800 font-semibold">
+                          {evento.periodoDesmontagem}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-                <div className="p-4 border-t space-y-2">
-                  {/* MELHORIA: Botão para ver os projetos */}
-                  <Button 
-                    variant="default" 
-                    size="sm" 
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                    onClick={() => navigate(`/projetos?evento=${encodeURIComponent(evento.nome)}`)}
-                  >
-                    <Eye className="mr-2 h-4 w-4" />
-                    Ver Projetos
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="w-full"
-                    onClick={() => handleArchiveEvent(evento.nome)}
-                    disabled={archivingEvent === evento.nome}
-                  >
-                    {archivingEvent === evento.nome ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Archive className="mr-2 h-4 w-4" />
+                  </CardContent>
+
+                  <div className="p-4 border-t space-y-2">
+                    {/* 🔗 Botões com links externos para Manual e Planta, quando disponíveis */}
+                    {hasManual && (
+                      <Button variant="secondary" size="sm" className="w-full" asChild>
+                        <a
+                          href={links.linkManual}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Abrir Manual da Feira (Drive)"
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          Manual da Feira
+                          <ExternalLink className="ml-1 h-3 w-3" />
+                        </a>
+                      </Button>
                     )}
-                    Arquivar Evento
-                  </Button>
-                </div>
-              </Card>
-            </div>
-          ))}
+                    {hasPlanta && (
+                      <Button variant="secondary" size="sm" className="w-full" asChild>
+                        <a
+                          href={links.linkPlanta}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Abrir Planta da Feira (Drive)"
+                        >
+                          <MapPin className="mr-2 h-4 w-4" />
+                          Planta da Feira
+                          <ExternalLink className="ml-1 h-3 w-3" />
+                        </a>
+                      </Button>
+                    )}
+
+                    {/* Botão para ver os projetos do evento */}
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                      onClick={() =>
+                        navigate(`/projetos?evento=${encodeURIComponent(evento.nome)}`)
+                      }
+                    >
+                      <Eye className="mr-2 h-4 w-4" />
+                      Ver Projetos
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => handleArchiveEvent(evento.nome)}
+                      disabled={archivingEvent === evento.nome}
+                    >
+                      {archivingEvent === evento.nome ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Archive className="mr-2 h-4 w-4" />
+                      )}
+                      Arquivar Evento
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
