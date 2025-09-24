@@ -848,73 +848,41 @@ const TicketDetailPage = () => {
   const userRole = userProfile.funcao;
   const isCreator = ticket.criadoPor === user.uid;
 
-  // Ações do criador
-  if (
-    isCreator &&
-    (currentStatus === 'executado_aguardando_validacao' ||
-     currentStatus === 'executado_aguardando_validacao_operador')
-  ) {
+  // Criador
+  if (isCreator && (currentStatus === 'executado_aguardando_validacao' || currentStatus === 'executado_aguardando_validacao_operador')) {
     return [
       { value: 'concluido', label: 'Validar e Concluir' },
       { value: 'enviado_para_area', label: 'Rejeitar / Devolver' },
     ];
   }
-
   if (isCreator && currentStatus === 'enviado_para_area') {
     return [{ value: 'cancelado', label: 'Cancelar Chamado' }];
   }
 
-  // Ações da gerência
-  if (
-    userRole === 'gerente' &&
-    currentStatus === 'aguardando_aprovacao' &&
-    ticket.responsavelAtual === user.uid
-  ) {
-    return [
-      { value: 'aprovado', label: 'Aprovar' },
-      { value: 'reprovado', label: 'Reprovar' },
-    ];
+  // Gerente
+  if (userRole === 'gerente' && currentStatus === 'aguardando_aprovacao' && ticket.responsavelAtual === user.uid) {
+    return [{ value: 'aprovado', label: 'Aprovar' }, { value: 'reprovado', label: 'Reprovar' }];
   }
 
-  // Ações do produtor (consolidado)
+  // Produtor (mantém sua lógica nova, mas sem encerrar a função antes do restante)
   if (userRole === 'produtor') {
     const normalizeArea = (area) =>
-      (area || '')
-        .toString()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
+      (area || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-    const areaHistory = [
-      ticket.area,
-      ticket.areaOriginal,
-      ticket.areaInicial,
-      ticket.areaDeOrigem,
-    ].filter(Boolean);
-
-    const isProductionTicket = areaHistory.some(
-      (area) => normalizeArea(area) === 'producao'
-    );
+    const areaHistory = [ticket.area, ticket.areaOriginal, ticket.areaInicial, ticket.areaDeOrigem].filter(Boolean);
+    const isProductionTicket = areaHistory.some((area) => normalizeArea(area) === 'producao');
 
     const possibleProducerIds = [
-      ticket.produtorResponsavelId,
-      ticket.produtorResponsavelUid,
-      ticket.produtorId,
-      ticket.produtorUid,
-      project?.produtorId,
-      project?.produtorUid,
+      ticket.produtorResponsavelId, ticket.produtorResponsavelUid, ticket.produtorId, ticket.produtorUid,
+      project?.produtorId, project?.produtorUid,
     ].filter(Boolean);
 
     const possibleProducerEmails = [
-      ticket.produtorResponsavelEmail,
-      ticket.produtorEmail,
-      project?.produtorEmail,
+      ticket.produtorResponsavelEmail, ticket.produtorEmail, project?.produtorEmail,
     ].filter(Boolean);
 
     const possibleProducerNames = [
-      ticket.produtorResponsavelNome,
-      ticket.produtorNome,
-      project?.produtorNome,
+      ticket.produtorResponsavelNome, ticket.produtorNome, project?.produtorNome,
     ].filter(Boolean);
 
     const isProducerResponsible =
@@ -923,11 +891,9 @@ const TicketDetailPage = () => {
       (userProfile?.nome && possibleProducerNames.includes(userProfile.nome));
 
     const actions = [];
-
     if (currentStatus === 'transferido_para_produtor' && isProducerResponsible) {
       actions.push({ value: 'executado_aguardando_validacao', label: 'Executar' });
     }
-
     if (isProductionTicket && isProducerResponsible) {
       if (['aberto', 'escalado_para_outra_area', 'enviado_para_area'].includes(currentStatus)) {
         actions.push({ value: 'em_tratativa', label: 'Iniciar Tratativa (Produção)' });
@@ -935,51 +901,50 @@ const TicketDetailPage = () => {
         actions.push({ value: 'executado_aguardando_validacao', label: 'Executado' });
       }
     }
-
     if (actions.length) return actions;
   }
 
-  // Sem ações específicas
-  return [];
-
-    if (userRole === 'administrador') {
-      if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') return [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
-      if (currentStatus === 'em_tratativa') return [ { value: 'executado_aguardando_validacao', label: 'Executado' } ];
-      if (currentStatus === 'executado_aguardando_validacao' && !isCreator) return [ { value: 'concluido', label: 'Forçar Conclusão (Admin)' } ];
-      if (currentStatus === 'aguardando_aprovacao') return [ { value: 'aprovado', label: 'Aprovar' }, { value: 'rejeitado', label: 'Reprovar' } ];
+  // Administrador (igual ao original)
+  if (userRole === 'administrador') {
+    if (['aberto','escalado_para_outra_area','enviado_para_area'].includes(currentStatus)) {
+      return [{ value: 'em_tratativa', label: 'Iniciar Tratativa' }];
     }
-    
-    if (userRole === 'operador') {
-      if ((ticket.area === userProfile.area || ticket.atribuidoA === user.uid) || (userRole === 'produtor' && currentStatus === 'transferido_para_produtor')) {
-        if (currentStatus === 'aberto' || currentStatus === 'escalado_para_outra_area' || currentStatus === 'enviado_para_area') {
-            const actions = currentStatus === 'transferido_para_produtor'
-              ? [ { value: 'em_tratativa', label: 'Iniciar Tratativa (Produção)' }, { value: 'aberto', label: 'Transferir para Área Selecionada' } ]
-              : [ { value: 'em_tratativa', label: 'Iniciar Tratativa' } ];
-            if (ticket.areaDeOrigem) {
-                actions.push({ value: 'enviado_para_area', label: 'Rejeitar / Devolver' });
-            }
-            return actions;
+    if (currentStatus === 'em_tratativa') return [{ value: 'executado_aguardando_validacao', label: 'Executado' }];
+    if (currentStatus === 'executado_aguardando_validacao' && !isCreator) return [{ value: 'concluido', label: 'Forçar Conclusão (Admin)' }];
+    if (currentStatus === 'aguardando_aprovacao') return [{ value: 'aprovado', label: 'Aprovar' }, { value: 'rejeitado', label: 'Reprovar' }];
+  }
+
+  // Operador (igual ao original; volta a aparecer “Iniciar Tratativa”)
+  if (userRole === 'operador') {
+    if (ticket.area === userProfile.area || ticket.atribuidoA === user.uid) {
+      if (['aberto','escalado_para_outra_area','enviado_para_area'].includes(currentStatus)) {
+        const actions = [{ value: 'em_tratativa', label: 'Iniciar Tratativa' }];
+        if (ticket.areaDeOrigem) {
+          actions.push({ value: 'enviado_para_area', label: 'Rejeitar / Devolver' });
         }
-        if (currentStatus === 'em_tratativa') {
-            return [ { value: 'executado_aguardando_validacao_operador', label: 'Executado' } ];
-        }
-        if (currentStatus === 'executado_pelo_consultor') {
-            return [
-                { value: 'em_tratativa', label: 'Continuar Tratativa' },
-                { value: 'executado_aguardando_validacao', label: 'Finalizar Execução' }
-            ];
-        }
+        return actions;
+      }
+      if (currentStatus === 'em_tratativa') {
+        return [{ value: 'executado_aguardando_validacao_operador', label: 'Executado' }];
+      }
+      if (currentStatus === 'executado_pelo_consultor') {
+        return [
+          { value: 'em_tratativa', label: 'Continuar Tratativa' },
+          { value: 'executado_aguardando_validacao', label: 'Finalizar Execução' },
+        ];
       }
     }
+  }
 
-    if (userRole === 'consultor' && ticket.consultorResponsavelId === user.uid) {
-        if (ticket.status === 'escalado_para_consultor') {
-            return [{ value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área' }];
-        }
+  // Consultor
+  if (userRole === 'consultor' && ticket.consultorResponsavelId === user.uid) {
+    if (ticket.status === 'escalado_para_consultor') {
+      return [{ value: 'executado_pelo_consultor', label: 'Executar e Devolver para a Área' }];
     }
-    
-    return [];
-  };
+  }
+
+  return [];
+};
 
   const handleEscalation = async () => {
     if (!escalationArea) {
