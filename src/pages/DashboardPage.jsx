@@ -810,11 +810,11 @@ const DashboardPage = () => {
       <div className="space-y-4">
         {Object.entries(grouped).map(([projectLabel, projectTickets]) => (
           <div key={projectLabel} className="border rounded-lg">
-            <button
+            <button type="button"
               onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
               className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
             >
-              const isOpen = expandedProjects[projectLabel] || Boolean(searchTerm && searchTerm.trim());
+              <div className="flex items-center gap-2">
                 {(expandedProjects[projectLabel] || (searchTerm && searchTerm.trim())) ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
                 <div>
                   <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
