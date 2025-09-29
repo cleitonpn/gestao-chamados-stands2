@@ -505,7 +505,7 @@ const ReportsPage = () => {
     return arr;
   };
 
-  const handleExport = async () => {
+  async function handleExport() {
     const base = filterTicketsForExport((filteredTickets && filteredTickets.length) ? filteredTickets : tickets);
     const rows = buildExportRows(base);
 
