@@ -520,11 +520,9 @@ const ReportsPage = () => {
     } else {
       exportAsCSV(rows, `${fname}.csv`);
     }
-  };
+  }
 
-  };
-
-  const calculateKpisAndCharts = (currentTickets, currentProjects) => {
+const calculateKpisAndCharts = (currentTickets, currentProjects) => {
     const completedTickets = currentTickets.filter(t => ['concluido', 'arquivado'].includes(t.status)).length;
     const openTickets = currentTickets.filter(t => !['concluido', 'arquivado', 'cancelado'].includes(t.status)).length;
     const extraTickets = currentTickets.filter(t => t.isExtra).length;
