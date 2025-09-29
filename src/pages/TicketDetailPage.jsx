@@ -136,362 +136,311 @@ const TicketDetailPage = () => {
 
   // ======= Função para imprimir o chamado (ATUALIZADA) =======
   const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('Popup bloqueado pelo navegador.');
+    return;
+  }
 
-    // --- helpers para resolver nomes/labels ---
-    const byUserId = (id) => {
-      if (!id || !Array.isArray(users)) return null;
-      const u = users.find(u => u.uid === id || u.id === id);
-      return u?.nome || null;
+  // --- helpers para resolver nomes/labels ---
+  const byUserId = (id) => {
+    if (!id || !Array.isArray(users)) return null;
+    const u = users.find(u => u.uid === id || u.id === id);
+    return u?.nome || null;
+  };
+
+  const resolveEventName = () => {
+    const fromTicket =
+      ticket?.eventoNome ||
+      ticket?.nomeEvento ||
+      ticket?.nomeDoEvento ||
+      ticket?.evento?.nome ||
+      ticket?.evento?.title ||
+      ticket?.evento;
+    if (fromTicket) return fromTicket;
+    return project?.feira || project?.eventoNome || project?.nomeDoEvento || project?.nome || null;
+  };
+
+  const resolveConsultorName = () => {
+    const fromTicket =
+      ticket?.consultorResponsavelNome ||
+      ticket?.consultorNome ||
+      ticket?.consultor?.nome ||
+      byUserId(ticket?.consultorResponsavelId) ||
+      byUserId(ticket?.consultorId);
+    if (fromTicket) return fromTicket;
+    return resolveUserNameByProjectField(project, 'consultor') || null;
+  };
+
+  const resolveProdutorName = () => {
+    const fromTicket =
+      ticket?.produtorResponsavelNome ||
+      ticket?.produtorNome ||
+      ticket?.produtor?.nome ||
+      byUserId(ticket?.produtorResponsavelId) ||
+      byUserId(ticket?.produtorId);
+    if (fromTicket) return fromTicket;
+    return resolveUserNameByProjectField(project, 'produtor') || null;
+  };
+
+  const eventName = resolveEventName();
+  const consultorName = resolveConsultorName();
+  const produtorName = resolveProdutorName();
+
+  const getStatusText = (status) => {
+    const statusMap = {
+      'aberto': 'Aberto',
+      'em_tratativa': 'Em Tratativa',
+      'em_execucao': 'Em Execução',
+      'concluido': 'Concluído',
+      'cancelado': 'Cancelado',
+      'arquivado': 'Arquivado',
+      'devolvido': 'Devolvido',
+      'aguardando_aprovacao': 'Aguardando Aprovação',
+      'enviado_para_area': 'Enviado para Área',
+      'escalado_para_area': 'Escalado para Área',
+      'escalado_para_gerencia': 'Escalado para Gerência',
+      'escalado_para_consultor': 'Escalado para Consultor',
+      'transferido_para_produtor': 'Transferido para Produtor',
+      'executado_aguardando_validacao': 'Executado - Aguardando Validação',
+      'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador',
     };
+    return statusMap[status] || status;
+  };
 
-    const resolveEventName = () => {
-      const fromTicket =
-        ticket?.eventoNome ||
-        ticket?.nomeEvento ||
-        ticket?.nomeDoEvento ||
-        ticket?.evento?.nome ||
-        ticket?.evento?.title ||
-        ticket?.evento;
-      if (fromTicket) return fromTicket;
-      // fallbacks comuns em projeto
-      return project?.feira || project?.eventoNome || project?.nomeDoEvento || project?.nome || null;
-    };
+  const css = `
+    <style>
+      @media print { * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; } }
+      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+      .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+      .header h1 { margin: 0; color: #111827; font-size: 26px; font-weight: 800; }
+      .header p { margin: 6px 0 0 0; color: #2563eb; font-size: 16px; font-weight: 600; }
+      .section { margin-bottom: 25px; page-break-inside: avoid; }
+      .section-title { font-size: 18px; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-bottom: 15px; }
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
+      .info-item { margin-bottom: 10px; }
+      .info-label { font-weight: bold; color: #374151; margin-bottom: 3px; }
+      .info-value { color: #6b7280; }
+      .description { background-color: #f9fafb; padding: 15px; border-radius: 8px; border-left: 4px solid #2563eb; white-space: pre-wrap; word-wrap: break-word; }
+      .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+      .status-aberto { background-color: #dbeafe; color: #1e40af; }
+      .status-em_tratativa { background-color: #fef3c7; color: #92400e; }
+      .status-concluido { background-color: #d1fae5; color: #065f46; }
+      .status-cancelado { background-color: #fee2e2; color: #991b1b; }
+      .history-item { display: flex; align-items: flex-start; margin-bottom: 12px; padding: 10px; background-color: #f8fafc; border-radius: 6px; }
+      .history-content { flex: 1; }
+      .history-description { font-weight: 500; margin-bottom: 2px; }
+      .history-date { font-size: 12px; color: #6b7280; }
+      .message-item { margin-bottom: 15px; padding: 12px; border-radius: 8px; border-left: 3px solid #e5e7eb; }
+      .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .message-sender { font-weight: bold; color: #374151; }
+      .message-date { font-size: 12px; color: #6b7280; }
+      .message-content { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
+      .extra-item { background-color: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+      .extra-title { font-weight: bold; color: #92400e; margin-bottom: 8px; }
+      .print-date { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; }
+      .page-break { break-after: page; page-break-after: always; }
+      @page { margin: 1in; }
+    </style>
+  `;
 
-    const resolveConsultorName = () => {
-      const fromTicket =
-        ticket?.consultorResponsavelNome ||
-        ticket?.consultorNome ||
-        ticket?.consultor?.nome ||
-        byUserId(ticket?.consultorResponsavelId) ||
-        byUserId(ticket?.consultorId);
-      if (fromTicket) return fromTicket;
+  // ---------- Blocos HTML ----------
+  const headerHTML = `
+    <div class="header">
+      <h1>${resolveEventName() || 'Evento não informado'}</h1>
+      <p>Chamado #${ticket.numero || (ticketId || '').slice(-6)} — ${ticket.titulo || 'Título não disponível'} • Impresso em: ${new Date().toLocaleString('pt-BR')}</p>
+    </div>
+  `;
 
-      const fromProject = resolveUserNameByProjectField(project, 'consultor');
-      return fromProject || null;
-    };
+  const basicasHTML = `
+    <div class="section">
+      <div class="section-title">📋 Informações Básicas</div>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">Status:</div>
+          <div class="info-value"><span class="status-badge status-${ticket.status}">${getStatusText(ticket.status)}</span></div>
+        </div>
+        <div class="info-item"><div class="info-label">Prioridade:</div><div class="info-value">${ticket.prioridade || 'Não definida'}</div></div>
+        <div class="info-item"><div class="info-label">Área:</div><div class="info-value">${ticket.area || 'Não especificada'}</div></div>
+        <div class="info-item"><div class="info-label">Tipo:</div><div class="info-value">${ticket.tipo || 'Não especificado'}</div></div>
+        <div class="info-item"><div class="info-label">Criado por:</div><div class="info-value">${ticket.criadoPorNome || 'Não disponível'}</div></div>
+        <div class="info-item"><div class="info-label">Criado em:</div><div class="info-value">${formatDate(ticket.createdAt || ticket.criadoEm)}</div></div>
+        <div class="info-item"><div class="info-label">Evento:</div><div class="info-value">${resolveEventName() || 'Não informado'}</div></div>
+        <div class="info-item"><div class="info-label">Consultor:</div><div class="info-value">${resolveConsultorName() || 'Não informado'}</div></div>
+        <div class="info-item"><div class="info-label">Produtor:</div><div class="info-value">${resolveProdutorName() || 'Não informado'}</div></div>
+      </div>
+      ${project ? `
+        <div class="info-item">
+          <div class="info-label">Projeto:</div>
+          <div class="info-value">${project.nome}</div>
+        </div>` : ''
+      }
+    </div>
+  `;
 
-    const resolveProdutorName = () => {
-      const fromTicket =
-        ticket?.produtorResponsavelNome ||
-        ticket?.produtorNome ||
-        ticket?.produtor?.nome ||
-        byUserId(ticket?.produtorResponsavelId) ||
-        byUserId(ticket?.produtorId);
-      if (fromTicket) return fromTicket;
+  const descricaoHTML = `
+    <div class="section">
+      <div class="section-title">📝 Descrição</div>
+      <div class="description">${ticket.descricao || 'Descrição não disponível'}</div>
+    </div>
+  `;
 
-      const fromProject = resolveUserNameByProjectField(project, 'produtor');
-      return fromProject || null;
-    };
+  const extraHTML = (ticket.isExtra || ticket.itemExtra) ? `
+    <div class="section">
+      <div class="extra-item">
+        <div class="extra-title">🔥 ITEM EXTRA</div>
+        ${(ticket.motivoExtra || ticket.motivoItemExtra) ? `<div><strong>Motivo:</strong> ${ticket.motivoExtra || ticket.motivoItemExtra}</div>` : ''}
+      </div>
+    </div>
+  ` : '';
 
-    const eventName = resolveEventName();
-    const consultorName = resolveConsultorName();
-    const produtorName = resolveProdutorName();
-
-    const getStatusText = (status) => {
-      const statusMap = {
-        'aberto': 'Aberto',
-        'em_tratativa': 'Em Tratativa',
-        'em_execucao': 'Em Execução',
-        'concluido': 'Concluído',
-        'cancelado': 'Cancelado',
-        'arquivado': 'Arquivado',
-        'devolvido': 'Devolvido',
-        'aguardando_aprovacao': 'Aguardando Aprovação',
-        'enviado_para_area': 'Enviado para Área',
-        'escalado_para_area': 'Escalado para Área',
-        'escalado_para_gerencia': 'Escalado para Gerência',
-        'escalado_para_consultor': 'Escalado para Consultor',
-        'transferido_para_produtor': 'Transferido para Produtor',
-        'executado_aguardando_validacao': 'Executado - Aguardando Validação',
-        'executado_aguardando_validacao_operador': 'Aguardando Validação do Operador',
-      };
-      return statusMap[status] || status;
-    };
-
-    // HTML de impressão — com TÍTULO DO EVENTO NO TOPO
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>${eventName || 'Chamado'} — #${ticket.numero || (ticketId || '').slice(-6)}</title>
-          <style>
-            @media print { * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; } }
-            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-            .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-            .header h1 { margin: 0; color: #111827; font-size: 26px; font-weight: 800; }
-            .header p { margin: 6px 0 0 0; color: #2563eb; font-size: 16px; font-weight: 600; }
-            .section { margin-bottom: 25px; page-break-inside: avoid; }
-            .section-title { font-size: 18px; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-bottom: 15px; }
-            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-            .info-item { margin-bottom: 10px; }
-            .info-label { font-weight: bold; color: #374151; margin-bottom: 3px; }
-            .info-value { color: #6b7280; }
-            .description { background-color: #f9fafb; padding: 15px; border-radius: 8px; border-left: 4px solid #2563eb; white-space: pre-wrap; word-wrap: break-word; }
-            .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
-            .status-aberto { background-color: #dbeafe; color: #1e40af; }
-            .status-em_tratativa { background-color: #fef3c7; color: #92400e; }
-            .status-concluido { background-color: #d1fae5; color: #065f46; }
-            .status-cancelado { background-color: #fee2e2; color: #991b1b; }
-            .history-item { display: flex; align-items: flex-start; margin-bottom: 12px; padding: 10px; background-color: #f8fafc; border-radius: 6px; }
-            .history-content { flex: 1; }
-            .history-description { font-weight: 500; margin-bottom: 2px; }
-            .history-date { font-size: 12px; color: #6b7280; }
-            .message-item { margin-bottom: 15px; padding: 12px; border-radius: 8px; border-left: 3px solid #e5e7eb; }
-            .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-            .message-sender { font-weight: bold; color: #374151; }
-            .message-date { font-size: 12px; color: #6b7280; }
-            .message-content { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
-            .extra-item { background-color: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-            .extra-title { font-weight: bold; color: #92400e; margin-bottom: 8px; }
-            .print-date { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; }
-            @page { margin: 1in; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>${eventName || 'Evento não informado'}</h1>
-            <p>Chamado #${ticket.numero || (ticketId || '').slice(-6)} — ${ticket.titulo || 'Título não disponível'} • Impresso em: ${new Date().toLocaleString('pt-BR')}</p>
-          </div>
-
-          <div class="section">
-            <div class="section-title">📋 Informações Básicas</div>
+  const especificasHTML = (ticket.camposEspecificos && ticket.camposEspecificos.length > 0) ? `
+    <div class="section">
+      <div class="section-title">📋 Informações Específicas${ticket.area === 'financeiro' && ticket.tipo ? ` (${ticket.tipo})` : ''}</div>
+      <div class="info-grid">
+        ${ticket.camposEspecificos.map((item, index) => `
+          <div style="grid-column: 1 / -1; margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+            <h4 style="margin: 0 0 10px 0; color: #1e40af;">Item ${index + 1}</h4>
             <div class="info-grid">
-              <div class="info-item">
-                <div class="info-label">Status:</div>
-                <div class="info-value">
-                  <span class="status-badge status-${ticket.status}">${getStatusText(ticket.status)}</span>
-                </div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Prioridade:</div>
-                <div class="info-value">${ticket.prioridade || 'Não definida'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Área:</div>
-                <div class="info-value">${ticket.area || 'Não especificada'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Tipo:</div>
-                <div class="info-value">${ticket.tipo || 'Não especificado'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Criado por:</div>
-                <div class="info-value">${ticket.criadoPorNome || 'Não disponível'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Criado em:</div>
-                <div class="info-value">${formatDate(ticket.createdAt || ticket.criadoEm)}</div>
-              </div>
+              ${ticket.area === 'locacao' ? `
+                ${item.codItem ? `<div class="info-item"><div class="info-label">Código do Item:</div><div class="info-value">${item.codItem}</div></div>` : ''}
+                ${item.item ? `<div class="info-item"><div class="info-label">Item:</div><div class="info-value">${item.item}</div></div>` : ''}
+                ${item.quantidade ? `<div class="info-item"><div class="info-label">Quantidade:</div><div class="info-value">${item.quantidade}</div></div>` : ''}
+              ` : ''}
 
-              <!-- Novos campos solicitados -->
-              <div class="info-item">
-                <div class="info-label">Evento:</div>
-                <div class="info-value">${eventName || 'Não informado'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Consultor:</div>
-                <div class="info-value">${consultorName || 'Não informado'}</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Produtor:</div>
-                <div class="info-value">${produtorName || 'Não informado'}</div>
-              </div>
-            </div>
+              ${ticket.area === 'compras' ? `
+                ${item.item ? `<div class="info-item"><div class="info-label">Item:</div><div class="info-value">${item.item}</div></div>` : ''}
+                ${item.quantidade ? `<div class="info-item"><div class="info-label">Quantidade:</div><div class="info-value">${item.quantidade}</div></div>` : ''}
+              ` : ''}
 
-            ${project ? `
-              <div class="info-item">
-                <div class="info-label">Projeto:</div>
-                <div class="info-value">${project.nome}</div>
-              </div>
-            ` : ''}
-          </div>
-
-          <div class="section">
-            <div class="section-title">📝 Descrição</div>
-            <div class="description">${ticket.descricao || 'Descrição não disponível'}</div>
-          </div>
-
-          ${(ticket.isExtra || ticket.itemExtra) ? `
-            <div class="section">
-              <div class="extra-item">
-                <div class="extra-title">🔥 ITEM EXTRA</div>
-                ${(ticket.motivoExtra || ticket.motivoItemExtra) ? `
-                  <div><strong>Motivo:</strong> ${ticket.motivoExtra || ticket.motivoItemExtra}</div>
-                ` : ''}
-              </div>
-            </div>
-          ` : ''}
-
-          ${(ticket.camposEspecificos && ticket.camposEspecificos.length > 0) ? `
-            <div class="section">
-              <div class="section-title">📋 Informações Específicas</div>
-              <div class="info-grid">
-                ${ticket.camposEspecificos.map((item, index) => `
-                  <div style="grid-column: 1 / -1; margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-                    <h4 style="margin: 0 0 10px 0; color: #1e40af;">Item ${index + 1}</h4>
-                    <div class="info-grid">
-                      ${ticket.area === 'locacao' ? `
-                        ${item.codItem ? `
-                          <div class="info-item">
-                            <div class="info-label">Código do Item:</div>
-                            <div class="info-value">${item.codItem}</div>
-                          </div>
-                        ` : ''}
-                        ${item.item ? `
-                          <div class="info-item">
-                            <div class="info-label">Item:</div>
-                            <div class="info-value">${item.item}</div>
-                          </div>
-                        ` : ''}
-                        ${item.quantidade ? `
-                          <div class="info-item">
-                            <div class="info-label">Quantidade:</div>
-                            <div class="info-value">${item.quantidade}</div>
-                          </div>
-                        ` : ''}
-                      ` : ''}
-
-                      ${ticket.area === 'compras' ? `
-                        ${item.item ? `
-                          <div class="info-item">
-                            <div class="info-label">Item:</div>
-                            <div class="info-value">${item.item}</div>
-                          </div>
-                        ` : ''}
-                        ${item.quantidade ? `
-                          <div class="info-item">
-                            <div class="info-label">Quantidade:</div>
-                            <div class="info-value">${item.quantidade}</div>
-                          </div>
-                        ` : ''}
-                      ` : ''}
-
-                      ${ticket.area === 'financeiro' && (ticket.tipo === 'Pagamento de Frete' || ticket.tipo === 'Pagamento frete') ? `
-                        ${item.motorista ? `
-                          <div class="info-item">
-                            <div class="info-label">Motorista:</div>
-                            <div class="info-value">${item.motorista}</div>
-                          </div>
-                        ` : ''}
-                        ${item.placa ? `
-                          <div class="info-item">
-                            <div class="info-label">Placa:</div>
-                            <div class="info-value">${item.placa}</div>
-                          </div>
-                        ` : ''}
-                        ${item.dataFrete ? `
-                          <div class="info-item">
-                            <div class="info-label">Data do Frete:</div>
-                            <div class="info-value">${item.dataFrete}</div>
-                          </div>
-                        ` : ''}
-                        ${item.finalidadeFrete ? `
-                          <div class="info-item">
-                            <div class="info-label">Finalidade:</div>
-                            <div class="info-value">${item.finalidadeFrete}</div>
-                          </div>
-                        ` : ''}
-                        ${item.valorInicial ? `
-                          <div class="info-item">
-                            <div class="info-label">Valor Inicial:</div>
-                            <div class="info-value">R$ ${item.valorInicial}</div>
-                          </div>
-                        ` : ''}
-                        ${item.valorNegociado ? `
-                          <div class="info-item">
-                            <div class="info-label">Valor Negociado:</div>
-                            <div class="info-value">R$ ${item.valorNegociado}</div>
-                          </div>
-                        ` : ''}
-                        ${item.centroCustos ? `
-                          <div class="info-item">
-                            <div class="info-label">Centro de Custos:</div>
-                            <div class="info-value">${item.centroCustos}</div>
-                          </div>
-                        ` : ''}
-                        ${item.dadosPagamento ? `
-                          <div class="info-item" style="grid-column: 1 / -1;">
-                            <div class="info-label">Dados de Pagamento:</div>
-                            <div class="info-value" style="white-space: pre-wrap;">${item.dadosPagamento}</div>
-                          </div>
-                        ` : ''}
-                        ${(item.qtdHR || item.qtdBau || item.qtdCarreta || item.qtdGuincho) ? `
-                          <div class="info-item" style="grid-column: 1 / -1;">
-                            <div class="info-label">🚛 Tipos de Caminhão:</div>
-                            <div class="info-value">
-                              ${item.qtdHR ? `HR: ${item.qtdHR}` : ''}
-                              ${item.qtdBau ? `${item.qtdHR ? ' | ' : ''}Baú: ${item.qtdBau}` : ''}
-                              ${item.qtdCarreta ? `${(item.qtdHR || item.qtdBau) ? ' | ' : ''}Carreta: ${item.qtdCarreta}` : ''}
-                              ${item.qtdGuincho ? `${(item.qtdHR || item.qtdBau || item.qtdCarreta) ? ' | ' : ''}Guincho: ${item.qtdGuincho}` : ''}
-                            </div>
-                          </div>
-                        ` : ''}
-                      ` : ''}
+              ${ticket.area === 'financeiro' && /frete/i.test(ticket.tipo || '') ? `
+                ${item.motorista ? `<div class="info-item"><div class="info-label">Motorista:</div><div class="info-value">${item.motorista}</div></div>` : ''}
+                ${item.placa ? `<div class="info-item"><div class="info-label">Placa:</div><div class="info-value">${item.placa}</div></div>` : ''}
+                ${item.dataFrete ? `<div class="info-item"><div class="info-label">Data do Frete:</div><div class="info-value">${item.dataFrete}</div></div>` : ''}
+                ${item.finalidadeFrete ? `<div class="info-item"><div class="info-label">Finalidade:</div><div class="info-value">${item.finalidadeFrete}</div></div>` : ''}
+                ${item.valorInicial ? `<div class="info-item"><div class="info-label">Valor Inicial:</div><div class="info-value">R$ ${item.valorInicial}</div></div>` : ''}
+                ${item.valorNegociado ? `<div class="info-item"><div class="info-label">Valor Negociado:</div><div class="info-value">R$ ${item.valorNegociado}</div></div>` : ''}
+                ${item.centroCustos ? `<div class="info-item"><div class="info-label">Centro de Custos:</div><div class="info-value">${item.centroCustos}</div></div>` : ''}
+                ${item.dadosPagamento ? `<div class="info-item" style="grid-column: 1 / -1;"><div class="info-label">Dados de Pagamento:</div><div class="info-value" style="white-space: pre-wrap;">${item.dadosPagamento}</div></div>` : ''}
+                ${(item.qtdHR || item.qtdBau || item.qtdCarreta || item.qtdGuincho) ? `
+                  <div class="info-item" style="grid-column: 1 / -1;">
+                    <div class="info-label">🚛 Tipos de Caminhão:</div>
+                    <div class="info-value">
+                      ${item.qtdHR ? `HR: ${item.qtdHR}` : ''}
+                      ${item.qtdBau ? `${item.qtdHR ? ' | ' : ''}Baú: ${item.qtdBau}` : ''}
+                      ${item.qtdCarreta ? `${(item.qtdHR || item.qtdBau) ? ' | ' : ''}Carreta: ${item.qtdCarreta}` : ''}
+                      ${item.qtdGuincho ? `${(item.qtdHR || item.qtdBau || item.qtdCarreta) ? ' | ' : ''}Guincho: ${item.qtdGuincho}` : ''}
                     </div>
                   </div>
-                `).join('')}
-              </div>
+                ` : ''}
+              ` : ''}
             </div>
-          ` : ''}
-
-          ${historyEvents.length > 0 ? `
-            <div class="section">
-              <div class="section-title">📅 Histórico de Alterações</div>
-              ${historyEvents.map(event => `
-                <div class="history-item">
-                  <div class="history-content">
-                    <div class="history-description">${event.description} ${event.userName}</div>
-                    <div class="history-date">${formatDate(event.date)}</div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          ` : ''}
-
-          ${messages.length > 0 ? `
-            <div class="section">
-              <div class="section-title">💬 Histórico de Mensagens</div>
-              ${messages.map(message => `
-                <div class="message-item">
-                  <div class="message-header">
-                    <span class="message-sender">${message.remetenteNome || 'Sistema'}</span>
-                    <span class="message-date">${formatDate(message.criadoEm)}</span>
-                  </div>
-                  <div class="message-content">${message.conteudo}</div>
-                </div>
-              `).join('')}
-            </div>
-          ` : ''}
-
-          ${(ticket.attachedLinks && ticket.attachedLinks.length > 0) ? `
-            <div class="section">
-              <div class="section-title">🔗 Links Anexados</div>
-              ${ticket.attachedLinks.map(link => `
-                <div class="info-item">
-                  <div class="info-label">${link.description}:</div>
-                  <div class="info-value">${link.url}</div>
-                  <div class="history-date">Anexado por ${link.addedByName} em ${formatDate(link.addedAt)}</div>
-                </div>
-              `).join('')}
-            </div>
-          ` : ''}
-
-          <div class="print-date">
-            Documento gerado automaticamente pelo Sistema de Gestão de Chamados
           </div>
-        </body>
-      </html>
-    `;
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
 
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.onload = () => {
-      printWindow.print();
-      printWindow.close();
-    };
+  const historicoHTML = (historyEvents.length > 0) ? `
+    <div class="section">
+      <div class="section-title">📅 Histórico de Alterações</div>
+      ${historyEvents.map(event => `
+        <div class="history-item">
+          <div class="history-content">
+            <div class="history-description">${event.description} ${event.userName}</div>
+            <div class="history-date">${formatDate(event.date)}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  const mensagensHTML = (messages.length > 0) ? `
+    <div class="section">
+      <div class="section-title">💬 Histórico de Mensagens</div>
+      ${messages.map(message => `
+        <div class="message-item">
+          <div class="message-header">
+            <span class="message-sender">${message.remetenteNome || 'Sistema'}</span>
+            <span class="message-date">${formatDate(message.criadoEm)}</span>
+          </div>
+          <div class="message-content">${message.conteudo}</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  const linksHTML = (attachedLinks && attachedLinks.length > 0) ? `
+    <div class="section">
+      <div class="section-title">🔗 Links Anexados</div>
+      ${attachedLinks.map(link => `
+        <div class="info-item">
+          <div class="info-label">${link.description}:</div>
+          <div class="info-value">${link.url}</div>
+          <div class="history-date">Anexado por ${link.addedByName} em ${formatDate(link.addedAt)}</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  const rodapeHTML = `
+    <div class="print-date">Documento gerado automaticamente pelo Sistema de Gestão de Chamados</div>
+  `;
+
+  // ---------- ORDEM CONDICIONAL ----------
+  const isFinanceFrete =
+    (ticket?.area || '').toLowerCase() === 'financeiro' &&
+    /(frete|pagamento.*frete)/i.test(ticket?.tipo || '');
+
+  let bodyHTML;
+  if (isFinanceFrete && especificasHTML) {
+    bodyHTML = `
+      ${headerHTML}
+      ${especificasHTML}
+      <div class="page-break"></div>
+      ${basicasHTML}
+      ${descricaoHTML}
+      ${extraHTML}
+      ${historicoHTML}
+      ${mensagensHTML}
+      ${linksHTML}
+      ${rodapeHTML}
+    `;
+  } else {
+    bodyHTML = `
+      ${headerHTML}
+      ${basicasHTML}
+      ${descricaoHTML}
+      ${extraHTML}
+      ${especificasHTML}
+      ${historicoHTML}
+      ${mensagensHTML}
+      ${linksHTML}
+      ${rodapeHTML}
+    `;
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${resolveEventName() || 'Chamado'} — #${ticket.numero || (ticketId || '').slice(-6)}</title>
+        ${css}
+      </head>
+      <body>
+        ${bodyHTML}
+      </body>
+    </html>
+  `;
+
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.onload = () => {
+    printWindow.print();
+    printWindow.close();
   };
+};;
   // ======= FIM handlePrint =======
 
   // Função para adicionar link
