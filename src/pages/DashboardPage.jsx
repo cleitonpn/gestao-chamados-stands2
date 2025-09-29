@@ -114,10 +114,6 @@ const DashboardPage = () => {
     return `${meta.nome} – ${evento}`;
   };
 
-
-  // Extrai o possível ID do chamado digitado na busca (remove # e espaços)
-  const getSearchIdCandidate = (s) => (s || '').trim().replace(/^#/, '');
-
   // --------- Listas derivadas ---------
   const allEvents = useMemo(() => {
     const names = new Set();
@@ -370,28 +366,6 @@ const DashboardPage = () => {
     setSelectedTickets(next);
   };
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    const raw = (searchTerm || '').trim();
-    if (!raw) return;
-
-    const idCandidate = getSearchIdCandidate(raw).toLowerCase();
-
-    // 1) match exato de ID
-    const exact = tickets.find(t => ((t.id || '').toString().toLowerCase() === idCandidate));
-    if (exact) {
-      navigate(`/chamado/${exact.id}`);
-      return;
-    }
-
-    // 2) único match parcial -> navega
-    const partial = tickets.filter(t => ((t.id || '').toString().toLowerCase().includes(idCandidate)));
-    if (partial.length === 1) {
-      navigate(`/chamado/${partial[0].id}`);
-    }
-  };
-
-
   // --------- Ordenação e filtros ---------
   const priorityOrder = { 'alta': 3, 'media': 2, 'baixa': 1 };
   const statusOrder = {
@@ -402,7 +376,28 @@ const DashboardPage = () => {
   };
   const getUpdatedDate = (t) => t.arquivadoEm?.toDate?.() || t.dataUltimaAtualizacao?.toDate?.() || t.createdAt?.toDate?.() || new Date(0);
 
-  const getFilteredTickets = () => {
+  
+  // --- Busca por ID (#...) util & submit handler ---
+  const getSearchIdCandidate = (s) => (s || '').trim().replace(/^#/, '');
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const raw = (searchTerm || '').trim();
+    if (!raw) return;
+    const idCandidate = getSearchIdCandidate(raw).toLowerCase();
+    // match exato
+    const exact = tickets.find(t => ((t.id || '').toString().toLowerCase() === idCandidate));
+    if (exact) {
+      navigate(`/chamado/${exact.id}`);
+      return;
+    }
+    // único match parcial
+    const partial = tickets.filter(t => ((t.id || '').toString().toLowerCase().includes(idCandidate)));
+    if (partial.length === 1) {
+      navigate(`/chamado/${partial[0].id}`);
+    }
+  };
+const getFilteredTickets = () => {
     let base = [];
     if (activeFilter === 'arquivados') {
       base = tickets.filter(t => t.status === 'arquivado');
@@ -433,6 +428,7 @@ const DashboardPage = () => {
       }
     }
 
+    
     // Busca por título/descrição e também por ID do chamado (#ABC123... ou parcial)
     const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const term = norm(searchTerm || '');
@@ -440,14 +436,14 @@ const DashboardPage = () => {
       const raw = (searchTerm || '').trim();
       const idCandidateRaw = getSearchIdCandidate(raw);
       const idCandidate = idCandidateRaw.toLowerCase();
-      // Heurística: se digitou com # ou parece um ID (6+ chars alfanuméricos/_-), considerar busca por ID
+      // Heurística: se digitou com # ou parece um ID (6+ chars alfanuméricos/_-)
       const looksLikeId = raw.startsWith('#') || (/^[A-Za-z0-9_-]{6,}$/.test(idCandidateRaw));
 
       base = base.filter(t => {
-        // 1) match por ID (parcial ou completo, case-insensitive)
-        const byId = looksLikeId ? (((t.id || '').toString().toLowerCase().includes(idCandidate))) : false;
+        // match por ID (parcial ou completo)
+        const byId = looksLikeId ? ((t.id || '').toString().toLowerCase().includes(idCandidate)) : false;
 
-        // 2) match textual padrão
+        // match textual padrão
         const titulo = norm(t.titulo);
         const descricao = norm(t.descricao);
         const area = norm(t.area);
@@ -457,7 +453,7 @@ const DashboardPage = () => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
         const projLabels = ids.map(id => norm(`${(projectMeta[id]?.nome || '')} ${(projectMeta[id]?.feira || '')}`)).join(' ');
 
-        const byText = (term && (
+        const byText = term && (
           titulo.includes(term) ||
           descricao.includes(term) ||
           area.includes(term) ||
@@ -465,13 +461,12 @@ const DashboardPage = () => {
           prioridade.includes(term) ||
           directProjectName.includes(term) ||
           projLabels.includes(term)
-        ));
+        );
 
         return byId || byText;
       });
     }
-
-    // Filtro por evento (project.feira)
+// Filtro por evento (project.feira)
     if (selectedEvent && selectedEvent !== 'todos') {
       base = base.filter(t => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
@@ -810,12 +805,12 @@ const DashboardPage = () => {
       <div className="space-y-4">
         {Object.entries(grouped).map(([projectLabel, projectTickets]) => (
           <div key={projectLabel} className="border rounded-lg">
-            <button type="button"
+            <button
               onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
               className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
             >
-              <div className="flex items-center gap-2">
-                {(expandedProjects[projectLabel] || (searchTerm && searchTerm.trim())) ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+              <div className="flex items-center space-x-3">
+                {expandedProjects[projectLabel] ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
                 <div>
                   <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
                   <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
@@ -1034,15 +1029,15 @@ const DashboardPage = () => {
               {/* Barra sticky: busca + filtros + toggle view */}
               <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
-                  <Input
-                  <form onSubmit={handleSearchSubmit} className="flex-1">
-                    <Input
-                      className="h-9 w-full"
-                      placeholder="Buscar por título, descrição, projeto ou #número do chamado..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </form>
+  <form onSubmit={handleSearchSubmit} className="flex-1">
+    <Input
+      className="h-9 w-full"
+      placeholder="Buscar por título, descrição, projeto ou #número do chamado..."
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+    />
+  </form>
+  <Button
                     variant="outline"
                     size="icon"
                     className="h-9 w-9"
