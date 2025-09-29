@@ -114,6 +114,10 @@ const DashboardPage = () => {
     return `${meta.nome} – ${evento}`;
   };
 
+  // Extrai o possível ID do chamado digitado na busca (remove # e espaços)
+  const getSearchIdCandidate = (s) => (s || '').trim().replace(/^#/, '');
+
+
   // --------- Listas derivadas ---------
   const allEvents = useMemo(() => {
     const names = new Set();
@@ -406,12 +410,23 @@ const DashboardPage = () => {
         default: break;
       }
     }
-
-    // Busca por título/descrição
+    // Busca por título/descrição e também por ID do chamado (#ABC123... ou parcial)
     const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const term = norm(searchTerm || '');
-    if (term) {
+    if (searchTerm && searchTerm.trim()) {
+      const raw = (searchTerm || '').trim();
+      const idCandidateRaw = getSearchIdCandidate(raw);
+      const idCandidate = idCandidateRaw.toLowerCase();
+      // Heurística: se digitou com # ou parece um ID (6+ chars alfanuméricos/_-), considerar busca por ID
+      const looksLikeId = raw.startsWith('#') || (/^[A-Za-z0-9_-]{6,}$/.test(idCandidateRaw));
+
       base = base.filter(t => {
+        // 1) match por ID (parcial ou completo, case-insensitive)
+        const byId = looksLikeId
+          ? ((t.id || '').toString().toLowerCase().includes(idCandidate))
+          : false;
+
+        // 2) match textual padrão
         const titulo = norm(t.titulo);
         const descricao = norm(t.descricao);
         const area = norm(t.area);
@@ -420,16 +435,22 @@ const DashboardPage = () => {
         const directProjectName = norm(t.projetoNome || t.projectName || t.nomeProjeto || t.projeto || t.eventoNome || t.feira);
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
         const projLabels = ids.map(id => norm(`${(projectMeta[id]?.nome || '')} ${(projectMeta[id]?.feira || '')}`)).join(' ');
-        return (
-          titulo.includes(term) ||
-          descricao.includes(term) ||
-          area.includes(term) ||
-          status.includes(term) ||
-          prioridade.includes(term) ||
-          directProjectName.includes(term) ||
-          projLabels.includes(term)
-        );
+
+        const byText =
+          (term && (
+            titulo.includes(term) ||
+            descricao.includes(term) ||
+            area.includes(term) ||
+            status.includes(term) ||
+            prioridade.includes(term) ||
+            directProjectName.includes(term) ||
+            projLabels.includes(term)
+          ));
+
+        return byId || byText;
       });
+    }
+);
     }
 
     // Filtro por evento (project.feira)
@@ -784,7 +805,7 @@ const DashboardPage = () => {
               </div>
             </button>
 
-            {expandedProjects[projectLabel] && (
+            {(searchTerm && searchTerm.trim() ? true : expandedProjects[projectLabel]) && (
               <div className="border-t bg-gray-50/50 p-3 sm:p-4 space-y-3">
                 {projectTickets.map((ticket) => {
                   const isAwaitingApproval =
@@ -995,12 +1016,14 @@ const DashboardPage = () => {
               {/* Barra sticky: busca + filtros + toggle view */}
               <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
-                  <Input
-                    className="flex-1 h-9"
-                    placeholder="Buscar por título, descrição ou projeto..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
+                  <form onSubmit={handleSearchSubmit} className="flex-1">
+                    <Input
+                      className="h-9 w-full"
+                      placeholder="Buscar por título, descrição, projeto ou #número do chamado..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </form>
                   <Button
                     variant="outline"
                     size="icon"
