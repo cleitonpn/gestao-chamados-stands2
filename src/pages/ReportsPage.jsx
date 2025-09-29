@@ -51,6 +51,24 @@ const ReportsPage = () => {
   const [kpiStats, setKpiStats] = useState({});
   const [chartData, setChartData] = useState({});
   const [flowAnalysis, setFlowAnalysis] = useState({});
+  // ====== EXPORTAÇÃO: estados e listas ======
+  const [exportFormat, setExportFormat] = useState('xlsx'); // 'xlsx' | 'csv'
+  const [exportAreaOrigin, setExportAreaOrigin] = useState('all');
+  const [exportAreaExecuted, setExportAreaExecuted] = useState('all');
+  const [exportTicketType, setExportTicketType] = useState('all');
+
+  const AREA_LIST = useMemo(() => {
+    const fromUsers = Array.from(new Set((allUsers || []).map(u => u?.area).filter(Boolean)));
+    const fromTickets = Array.from(new Set((tickets || []).flatMap(t => [
+      t?.areaDeOrigem, t?.areaInicial, t?.area
+    ]).filter(Boolean)));
+    return Array.from(new Set([...fromUsers, ...fromTickets])).sort();
+  }, [allUsers, tickets]);
+
+  const TIPO_LIST = useMemo(() => {
+    return Array.from(new Set((tickets || []).map(t => t?.tipo).filter(Boolean))).sort();
+  }, [tickets]);
+
 
   useEffect(() => {
     loadData();
@@ -340,6 +358,170 @@ const ReportsPage = () => {
     // 🔧 NOVA ANÁLISE DE FLUXO
     const flowData = analyzeTicketFlow(tempTickets);
     setFlowAnalysis(flowData);
+
+  // ====== EXPORTAÇÃO: helpers ======
+  const fmtDate = (d) => {
+    try {
+      const dt = d?.toDate ? d.toDate() : d;
+      if (!dt) return '';
+      return new Date(dt).toLocaleString('pt-BR');
+    } catch { return ''; }
+  };
+
+  const findUser = (id) => {
+    if (!id) return null;
+    return (allUsers || []).find(u => u.id === id || u.uid === id);
+  };
+
+  const getExecutedArea = (ticket) => {
+    const isClosed = ['concluido', 'arquivado'].includes(ticket?.status);
+    const resolvedById = ticket?.resolvidoPor || ticket?.concluídoPor || ticket?.finalizadoPor || (isClosed ? ticket?.atribuidoA : null);
+    const user = findUser(resolvedById);
+    return user?.area || null;
+  };
+
+  const getExecutedByName = (ticket) => {
+    const isClosed = ['concluido', 'arquivado'].includes(ticket?.status);
+    const resolvedById = ticket?.resolvidoPor || ticket?.concluídoPor || ticket?.finalizadoPor || (isClosed ? ticket?.atribuidoA : null);
+    const user = findUser(resolvedById);
+    return user?.nome || '';
+  };
+
+  const flattenTicketRows = (ticket) => {
+    const project = (projects || []).find(p => p.id === ticket?.projetoId);
+    const base = {
+      id: ticket?.id || '',
+      titulo: ticket?.titulo || '',
+      descricao: (ticket?.descricao || '').trim(),
+      status: ticket?.status || '',
+      prioridade: ticket?.prioridade || '',
+      area_origem: ticket?.areaDeOrigem || ticket?.areaInicial || '',
+      area_atual: ticket?.area || '',
+      area_executora: getExecutedArea(ticket) || '',
+      criado_por: (findUser(ticket?.criadoPor)?.nome) || '',
+      atribuido_a: (findUser(ticket?.atribuidoA)?.nome) || '',
+      executado_por: getExecutedByName(ticket) || '',
+      criado_em: fmtDate(ticket?.createdAt),
+      atualizado_em: fmtDate(ticket?.updatedAt),
+      resolvido_em: fmtDate(ticket?.resolvidoEm),
+      is_extra: !!ticket?.isExtra,
+      projeto_id: ticket?.projetoId || '',
+      projeto_nome: project?.nome || '',
+      evento: project?.feira || '',
+      local: project?.local || '',
+      metragem: project?.metragem || '',
+      tipo: ticket?.tipo || '',
+    };
+
+    const itens = Array.isArray(ticket?.camposEspecificos) ? ticket.camposEspecificos : [];
+    if (itens.length === 0) {
+      return [base];
+    }
+
+    return itens.map((item, idx) => {
+      const itemCols = {};
+      Object.entries(item || {}).forEach(([k, v]) => {
+        if (k === 'id') return;
+        itemCols[`item_${idx + 1}_${k}`] = (v ?? '').toString();
+      });
+      return { ...base, ...itemCols, itens_count: itens.length };
+    });
+  };
+
+  const buildExportRows = (ticketsList) => {
+    const rows = [];
+    (ticketsList || []).forEach(t => {
+      flattenTicketRows(t).forEach(r => rows.push(r));
+    });
+    return rows;
+  };
+
+  const exportAsCSV = (rows, filename = 'relatorio.csv') => {
+    if (!rows.length) {
+      alert('Nenhum dado para exportar.');
+      return;
+    }
+    const headers = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+    const escape = (val) => {
+      const s = (val ?? '').toString();
+      if (/[;\n"]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+    const csv = [
+      headers.join(';'),
+      ...rows.map(r => headers.map(h => escape(r[h])).join(';'))
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAsXLSX = async (rows, filename = 'relatorio.xlsx') => {
+    try {
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Relatorio');
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('xlsx não encontrado; exportando CSV.', e);
+      exportAsCSV(rows, filename.replace(/\.xlsx$/i, '.csv'));
+    }
+  };
+
+  const filterTicketsForExport = (list) => {
+    let arr = [...(list || [])];
+
+    if (exportAreaOrigin !== 'all') {
+      arr = arr.filter(t => (t?.areaDeOrigem || t?.areaInicial) === exportAreaOrigin);
+    }
+
+    if (exportAreaExecuted !== 'all') {
+      arr = arr.filter(t => ['concluido','arquivado'].includes(t?.status) && getExecutedArea(t) === exportAreaExecuted);
+    }
+
+    if (exportTicketType !== 'all') {
+      arr = arr.filter(t => (t?.tipo === exportTicketType));
+    }
+
+    return arr;
+  };
+
+  const handleExport = async () => {
+    const base = filterTicketsForExport((filteredTickets && filteredTickets.length) ? filteredTickets : tickets);
+    const rows = buildExportRows(base);
+
+    const nameParts = [];
+    if (exportAreaOrigin !== 'all') nameParts.push(`origem-${exportAreaOrigin}`);
+    if (exportAreaExecuted !== 'all') nameParts.push(`exec-${exportAreaExecuted}`);
+    if (exportTicketType !== 'all') nameParts.push(`tipo-${exportTicketType}`);
+    const fname = `relatorio_${nameParts.join('_') || 'geral'}_${Date.now()}`;
+
+    if (exportFormat === 'xlsx') {
+      await exportAsXLSX(rows, `${fname}.xlsx`);
+    } else {
+      exportAsCSV(rows, `${fname}.csv`);
+    }
+  };
+
   };
 
   const calculateKpisAndCharts = (currentTickets, currentProjects) => {
@@ -721,6 +903,81 @@ const ReportsPage = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* ===== Exportação Excel/CSV por Área & Tipo ===== */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Download className="h-5 w-5 mr-2" /> Exportação Excel/CSV (campos completos)
+            </CardTitle>
+            <CardDescription>
+              Gere planilhas com todos os campos do chamado (inclusive Financeiro/Compras/Locação).
+              Você pode filtrar por área de origem (quem abriu), área executora (quem resolveu) e por tipo de chamado.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="space-y-2">
+              <Label>Área que abriu (origem)</Label>
+              <Select value={exportAreaOrigin} onValueChange={setExportAreaOrigin}>
+                <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {AREA_LIST.map(a => <SelectItem key={`o-${a}`} value={a}>{a}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Área que executou (concluiu)</Label>
+              <Select value={exportAreaExecuted} onValueChange={setExportAreaExecuted}>
+                <SelectTrigger><SelectValue placeholder="Todas" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {AREA_LIST.map(a => <SelectItem key={`e-${a}`} value={a}>{a}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">Aplica-se a chamados concluídos/arquivados.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Tipo de chamado</Label>
+              <Select value={exportTicketType} onValueChange={setExportTicketType}>
+                <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {TIPO_LIST.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">Ex.: “Pagamento frete”.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Formato</Label>
+              <Select value={exportFormat} onValueChange={setExportFormat}>
+                <SelectTrigger><SelectValue placeholder="Escolha o formato" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                  <SelectItem value="csv">CSV (.csv)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end">
+              <Button className="w-full" onClick={handleExport}>
+                <Download className="h-4 w-4 mr-2" /> Exportar
+              </Button>
+            </div>
+
+            <div className="md:col-span-5">
+              <p className="text-xs text-gray-500">
+                Dica: combine “Área executora = Financeiro” com “Tipo = Pagamento frete” para uma planilha com
+                todas as colunas específicas (motorista, placa, datas, valores, itens de compra/locação etc.).
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+
 
         {/* KPIs Melhorados */}
         <Card>
