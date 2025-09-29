@@ -114,9 +114,9 @@ const DashboardPage = () => {
     return `${meta.nome} – ${evento}`;
   };
 
+
   // Extrai o possível ID do chamado digitado na busca (remove # e espaços)
   const getSearchIdCandidate = (s) => (s || '').trim().replace(/^#/, '');
-
 
   // --------- Listas derivadas ---------
   const allEvents = useMemo(() => {
@@ -370,6 +370,28 @@ const DashboardPage = () => {
     setSelectedTickets(next);
   };
 
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const raw = (searchTerm || '').trim();
+    if (!raw) return;
+
+    const idCandidate = getSearchIdCandidate(raw).toLowerCase();
+
+    // 1) match exato de ID
+    const exact = tickets.find(t => ((t.id || '').toString().toLowerCase() === idCandidate));
+    if (exact) {
+      navigate(`/chamado/${exact.id}`);
+      return;
+    }
+
+    // 2) único match parcial -> navega
+    const partial = tickets.filter(t => ((t.id || '').toString().toLowerCase().includes(idCandidate)));
+    if (partial.length === 1) {
+      navigate(`/chamado/${partial[0].id}`);
+    }
+  };
+
+
   // --------- Ordenação e filtros ---------
   const priorityOrder = { 'alta': 3, 'media': 2, 'baixa': 1 };
   const statusOrder = {
@@ -410,6 +432,7 @@ const DashboardPage = () => {
         default: break;
       }
     }
+
     // Busca por título/descrição e também por ID do chamado (#ABC123... ou parcial)
     const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const term = norm(searchTerm || '');
@@ -422,9 +445,7 @@ const DashboardPage = () => {
 
       base = base.filter(t => {
         // 1) match por ID (parcial ou completo, case-insensitive)
-        const byId = looksLikeId
-          ? ((t.id || '').toString().toLowerCase().includes(idCandidate))
-          : false;
+        const byId = looksLikeId ? (((t.id || '').toString().toLowerCase().includes(idCandidate))) : false;
 
         // 2) match textual padrão
         const titulo = norm(t.titulo);
@@ -436,21 +457,18 @@ const DashboardPage = () => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
         const projLabels = ids.map(id => norm(`${(projectMeta[id]?.nome || '')} ${(projectMeta[id]?.feira || '')}`)).join(' ');
 
-        const byText =
-          (term && (
-            titulo.includes(term) ||
-            descricao.includes(term) ||
-            area.includes(term) ||
-            status.includes(term) ||
-            prioridade.includes(term) ||
-            directProjectName.includes(term) ||
-            projLabels.includes(term)
-          ));
+        const byText = (term && (
+          titulo.includes(term) ||
+          descricao.includes(term) ||
+          area.includes(term) ||
+          status.includes(term) ||
+          prioridade.includes(term) ||
+          directProjectName.includes(term) ||
+          projLabels.includes(term)
+        ));
 
         return byId || byText;
       });
-    }
-);
     }
 
     // Filtro por evento (project.feira)
@@ -796,8 +814,8 @@ const DashboardPage = () => {
               onClick={() => setExpandedProjects(prev => ({ ...prev, [projectLabel]: !prev[projectLabel] }))}
               className="w-full flex items-center justify-between p-3 sm:p-4 text-left hover:bg-gray-50 transition-colors"
             >
-              <div className="flex items-center space-x-3">
-                {expandedProjects[projectLabel] ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+              const isOpen = expandedProjects[projectLabel] || Boolean(searchTerm && searchTerm.trim());
+                {(expandedProjects[projectLabel] || (searchTerm && searchTerm.trim())) ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
                 <div>
                   <h3 className="font-medium text-sm md:text-base">{projectLabel}</h3>
                   <p className="text-xs text-gray-500">{projectTickets.length} chamado{projectTickets.length !== 1 ? 's' : ''}</p>
@@ -805,7 +823,7 @@ const DashboardPage = () => {
               </div>
             </button>
 
-            {(searchTerm && searchTerm.trim() ? true : expandedProjects[projectLabel]) && (
+            {(expandedProjects[projectLabel] || (searchTerm && searchTerm.trim())) && (
               <div className="border-t bg-gray-50/50 p-3 sm:p-4 space-y-3">
                 {projectTickets.map((ticket) => {
                   const isAwaitingApproval =
@@ -1016,6 +1034,7 @@ const DashboardPage = () => {
               {/* Barra sticky: busca + filtros + toggle view */}
               <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
+                  <Input
                   <form onSubmit={handleSearchSubmit} className="flex-1">
                     <Input
                       className="h-9 w-full"
@@ -1024,7 +1043,6 @@ const DashboardPage = () => {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </form>
-                  <Button
                     variant="outline"
                     size="icon"
                     className="h-9 w-9"
