@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import DiaryCard from "../components/DiaryCard";
-import DiaryForm from "../components/DiaryForm";
-import { diaryService } from "../services/diaryService";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { useAuth } from "../contexts/AuthContext";
+import { diaryService } from "../services/diaryService";
+import DiaryCard from "../components/DiaryCard";
+import DiaryForm from "../components/DiaryForm";
 
 export default function AllDiariesPage() {
   const navigate = useNavigate();
@@ -26,25 +26,31 @@ export default function AllDiariesPage() {
 
   const [projects, setProjects] = useState([]);
 
-  // Carrega lista de projetos (coleção top-level "projetos")
+  // ====== carregar projetos (somente ativos) ======
   useEffect(() => {
     (async () => {
       const snap = await getDocs(collection(db, "projetos"));
       const list = [];
-      snap.forEach(d => {
+      snap.forEach((d) => {
         const data = d.data() || {};
-        const name = data.nome || data.name || data.projectName || d.id;
-        list.push({ id: d.id, name });
+        // regras de "ativo"
+        const status = (data.status || "").toString().toLowerCase();
+        const arquivado = data.arquivado === true;
+        const inativo = data.ativo === false || ["arquivado", "inativo", "fechado"].includes(status);
+        if (!arquivado && !inativo) {
+          const name = data.nome || data.name || data.projectName || d.id;
+          list.push({ id: d.id, name });
+        }
       });
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProjects(list);
     })();
   }, []);
 
-  // Estado -> URL
+  // ====== estado -> URL ======
   useEffect(() => {
     const next = new URLSearchParams();
-    if (limitN) next.set("limit", String(limitN));
+    next.set("limit", String(limitN));
     if (search) next.set("q", search);
     if (selectedProjectId) next.set("projectId", selectedProjectId);
     if (filters.area) next.set("area", filters.area);
@@ -53,7 +59,7 @@ export default function AllDiariesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
 
-  // Carrega feed conforme estado
+  // ====== carregar feed conforme estado ======
   useEffect(() => {
     let stop = false;
     (async () => {
@@ -84,7 +90,9 @@ export default function AllDiariesPage() {
         if (!stop) setLoading(false);
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
 
   const handleLoadMore = async () => {
@@ -94,13 +102,11 @@ export default function AllDiariesPage() {
       cursor,
       filters,
     });
-    setItems(prev => [...prev, ...(res.items || [])]);
+    setItems((prev) => [...prev, ...(res.items || [])]);
     setCursor(res.nextCursor || null);
   };
 
-  const gotoProject = (projectId) => {
-    navigate(`/projeto/${projectId}`); // casa com tuas rotas
-  };
+  const gotoProject = (projectId) => navigate(`/projeto/${projectId}`);
 
   const handleCreate = async ({ projectId, projectName, text, area, atribuidoA, linkUrl }) => {
     await diaryService.addEntryWithFeed(
@@ -115,13 +121,10 @@ export default function AllDiariesPage() {
         linkUrl: linkUrl || null,
         attachments: [],
       },
-      {
-        // companyId: null // se usar multiempresa, passe aqui
-        projectName,
-      }
+      { projectName }
     );
 
-    // recarrega lista conforme o estado atual
+    // recarrega conforme o estado atual
     if (selectedProjectId) {
       const res = await diaryService.fetchFeedByProject({ projectId: selectedProjectId, pageSize: limitN });
       setItems(res.items || []);
@@ -135,25 +138,29 @@ export default function AllDiariesPage() {
     }
   };
 
-  const header = useMemo(() => (
-    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <div className="flex-1">
-        <h1 className="text-xl font-semibold">Todos os Diários</h1>
-        <p className="text-sm text-neutral-400">Últimas inserções, busca por projeto e publicação rápida.</p>
+  // ====== UI ======
+  const header = useMemo(
+    () => (
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div className="flex-1">
+          <h1 className="text-2xl font-semibold">Todos os Diários</h1>
+          <p className="text-sm text-neutral-400">Últimas inserções, busca por projeto e publicação rápida.</p>
+        </div>
+        <div className="flex gap-2">
+          <select
+            className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
+            value={limitN}
+            onChange={(e) => setLimitN(Number(e.target.value))}
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </select>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <select
-          className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
-          value={limitN}
-          onChange={(e) => setLimitN(Number(e.target.value))}
-        >
-          <option value={10}>10</option>
-          <option value={20}>20</option>
-          <option value={50}>50</option>
-        </select>
-      </div>
-    </div>
-  ), [limitN]);
+    ),
+    [limitN]
+  );
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -162,53 +169,67 @@ export default function AllDiariesPage() {
       {/* Filtros */}
       <div className="grid md:grid-cols-4 gap-3">
         <input
-          className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
+          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
           placeholder="Buscar por nome do projeto…"
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setSelectedProjectId(""); }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setSelectedProjectId("");
+          }}
         />
         <select
-          className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
+          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
           value={selectedProjectId}
-          onChange={(e) => { setSelectedProjectId(e.target.value); setSearch(""); }}
+          onChange={(e) => {
+            setSelectedProjectId(e.target.value);
+            setSearch("");
+          }}
         >
           <option value="">Filtrar por projeto…</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
         </select>
         <input
-          className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
+          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
           placeholder="Filtrar por área…"
           value={filters.area}
-          onChange={(e) => setFilters(prev => ({ ...prev, area: e.target.value }))}
+          onChange={(e) => setFilters((prev) => ({ ...prev, area: e.target.value }))}
         />
         <input
-          className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
+          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
           placeholder="Filtrar por atribuído a…"
           value={filters.atribuidoA}
-          onChange={(e) => setFilters(prev => ({ ...prev, atribuidoA: e.target.value }))}
+          onChange={(e) => setFilters((prev) => ({ ...prev, atribuidoA: e.target.value }))}
         />
       </div>
 
       {/* Form para publicar direto da página */}
-      <DiaryForm
-        projects={projects}
-        onSubmit={handleCreate}
-        defaultProjectId={selectedProjectId || ""}
-      />
+      <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-4">
+        <DiaryForm projects={projects} onSubmit={handleCreate} defaultProjectId={selectedProjectId || ""} />
+      </div>
 
       {/* Lista */}
       <div className="mt-2">
         {loading && <div className="text-sm text-neutral-400">Carregando…</div>}
         {!loading && items.length === 0 && (
-          <div className="text-sm text-neutral-400">Nenhum diário encontrado.</div>
+          <div className="text-sm text-neutral-400">
+            Nenhum diário encontrado.
+            <br />
+            <span className="text-neutral-500">
+              Dica: se você já tinha diários antigos dentro dos projetos, rode o backfill abaixo para popular o feed.
+            </span>
+          </div>
         )}
-        {items.map(i => (
+        {items.map((i) => (
           <DiaryCard key={i.id} item={i} onProjectClick={gotoProject} />
         ))}
         {!loading && cursor && !selectedProjectId && !search && (
           <button
             onClick={handleLoadMore}
-            className="mt-2 px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700"
+            className="mt-3 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
           >
             Carregar mais
           </button>
