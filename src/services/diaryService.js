@@ -18,15 +18,34 @@ import {
   writeBatch,
   updateDoc,
   arrayUnion,
+  Timestamp,
 } from 'firebase/firestore';
 
-// ✅ Caminho corrigido para o seu projeto:
 import { db } from '../config/firebase';
 
-// ------------------------------
+// ==============================
 // Helpers
-// ------------------------------
+// ==============================
 const toLower = (s) => (s || '').toString().trim().toLowerCase();
+const asDate = (v) => {
+  // tenta converter o createdAt antigo para Date
+  // pode vir como string ISO, número (ms), ou objeto { seconds }
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof v === 'number') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof v === 'object' && (v.seconds || v._seconds)) {
+    const s = v.seconds ?? v._seconds;
+    return new Date(s * 1000);
+  }
+  return null;
+};
 
 // Subcoleção do diário dentro do projeto (usa PT-BR: "projetos")
 const diaryCol = (projectId) => collection(db, 'projetos', projectId, 'diary');
@@ -61,7 +80,7 @@ export const diaryService = {
     return true;
   },
 
-  // Migra observações antigas (se estavam inline no doc do projeto)
+  // Migra observações antigas (se estavam inline no doc do projeto) para a subcoleção
   async migrateInlineIfNeeded(projectId, inlineEntries = []) {
     if (!Array.isArray(inlineEntries) || inlineEntries.length === 0) return 0;
 
@@ -86,10 +105,12 @@ export const diaryService = {
     return inlineEntries.length;
   },
 
-  // ================== NOVO: FEED GLOBAL ==================
+  // ================== FEED GLOBAL ==================
 
   /**
    * Espelha uma entrada no feed global (/diary_feed)
+   * @param {object} payload
+   * @param {Date|number|string|null} [payload.createdAtOverride]  Data a fixar no feed (usado no backfill)
    */
   async mirrorToFeed({
     projectId,
@@ -102,9 +123,13 @@ export const diaryService = {
     atribuidoA = null,
     linkUrl = null,
     attachments = [],
+    createdAtOverride = null,
     extra = {},
   }) {
     if (!projectId || !text) throw new Error('projectId e text são obrigatórios para o feed');
+
+    const createdAtDate = asDate(createdAtOverride);
+    const createdAt = createdAtDate ? Timestamp.fromDate(createdAtDate) : serverTimestamp();
 
     const payload = {
       projectId,
@@ -118,7 +143,7 @@ export const diaryService = {
       atribuidoA,
       linkUrl,
       attachments,
-      createdAt: serverTimestamp(),
+      createdAt,
       ...extra,
     };
 
@@ -137,7 +162,7 @@ export const diaryService = {
     // 1) grava na subcoleção do projeto (compatível com telas antigas)
     const created = await this.addEntry(projectId, entry);
 
-    // 2) tenta resolver o nome do projeto se não foi passado
+    // 2) resolve o nome do projeto se não foi passado
     let effectiveProjectName = projectName;
     if (!effectiveProjectName) {
       const pSnap = await getDoc(doc(db, 'projetos', projectId));
@@ -172,7 +197,7 @@ export const diaryService = {
   async fetchFeedRecent({ pageSize = 20, cursor = null, filters = {} } = {}) {
     let qBase = query(feedCol(), orderBy('createdAt', 'desc'), limit(pageSize));
 
-    // filtros opcionais (exigem índices compostos se usados MUITO)
+    // filtros opcionais (exigem índices compostos se usados com orderBy)
     if (filters?.area) {
       qBase = query(feedCol(), where('area', '==', filters.area), orderBy('createdAt', 'desc'), limit(pageSize));
     }
@@ -250,38 +275,70 @@ export const diaryService = {
 
     return { items, nextCursor };
   },
-};
 
-// ---- BACKFILL: copia itens antigos do array "diario" do projeto para o feed ----
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "../config/firebase";
+  // ================== BACKFILL ==================
 
-export async function backfillInlineDiariesToFeedOnce() {
-  const projs = await getDocs(collection(db, "projetos"));
-  let count = 0;
+  /**
+   * Copia diários antigos que estão dentro do documento do projeto
+   * (campo `diario`, provavelmente um array) para o feed `/diary_feed`.
+   *
+   * @param {object} currentUser - usuário logado { uid, displayName, email }
+   * @param {object} options
+   * @param {boolean} [options.useCurrentUserAsAuthor=true]
+   *        Se true, grava authorId = currentUser.uid (compatível com suas regras).
+   *        O autor original fica em originalAuthorId / originalAuthorName.
+   *        Se false, tenta usar o autor original (pode falhar nas regras).
+   *
+   * @returns {number} total inserido
+   */
+  async backfillInlineDiariesToFeedOnce(currentUser, { useCurrentUserAsAuthor = true } = {}) {
+    const projsSnap = await getDocs(collection(db, 'projetos'));
+    let count = 0;
 
-  for (const d of projs.docs) {
-    const data = d.data() || {};
-    const projectId = d.id;
-    const projectName = data.nome || data.name || data.projectName || projectId;
+    for (const proj of projsSnap.docs) {
+      const data = proj.data() || {};
+      const projectId = proj.id;
+      const projectName = data.nome || data.name || data.projectName || projectId;
 
-    const antigos = Array.isArray(data.diario) ? data.diario : [];
-    for (const it of antigos) {
-      // campos comuns
-      await diaryService.mirrorToFeed({
-        projectId,
-        projectName,
-        authorId: it.authorId || it.userId || "",
-        authorName: it.authorName || it.nome || it.userName || "Usuário",
-        authorRole: it.authorRole || it.funcao || null,
-        text: it.text || it.obs || it.observacao || it.observação || "",
-        area: it.area || null,
-        atribuidoA: it.atribuidoA || null,
-        linkUrl: it.linkUrl || it.driveLink || null,
-        attachments: it.attachments || [],
-      });
-      count++;
+      const antigos = Array.isArray(data.diario) ? data.diario : [];
+      for (const it of antigos) {
+        const originalAuthorId = it.authorId || it.userId || '';
+        const originalAuthorName = it.authorName || it.nome || it.userName || 'Usuário';
+        const createdAtOriginal = asDate(it.createdAt);
+
+        // Respeita as regras: por padrão usa o usuário atual como authorId
+        const authorIdToWrite = useCurrentUserAsAuthor
+          ? (currentUser?.uid || originalAuthorId)
+          : (originalAuthorId || currentUser?.uid || '');
+
+        const authorNameToWrite = useCurrentUserAsAuthor
+          ? (currentUser?.displayName || currentUser?.email || originalAuthorName || 'Usuário')
+          : (originalAuthorName || currentUser?.displayName || currentUser?.email || 'Usuário');
+
+        await this.mirrorToFeed({
+          projectId,
+          projectName,
+          authorId: authorIdToWrite,
+          authorName: authorNameToWrite,
+          authorRole: it.authorRole || it.funcao || null,
+          text: it.text || it.obs || it.observacao || it.observação || '',
+          area: it.area || null,
+          atribuidoA: it.atribuidoA || null,
+          linkUrl: it.linkUrl || it.driveLink || null,
+          attachments: it.attachments || [],
+          createdAtOverride: createdAtOriginal || null,
+          extra: {
+            originalAuthorId,
+            originalAuthorName,
+            createdAtOriginal: createdAtOriginal ? Timestamp.fromDate(createdAtOriginal) : null,
+            backfilled: true,
+          },
+        });
+
+        count++;
+      }
     }
-  }
-  return count;
-}
+
+    return count;
+  },
+};
