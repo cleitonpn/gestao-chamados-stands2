@@ -162,7 +162,7 @@ export const diaryService = {
     // 2) Garante projectName (se não veio, tenta buscar do projeto)
     let effectiveProjectName = projectName;
     if (!effectiveProjectName) {
-      const pSnap = await getDoc(doc(db, 'projects', projectId));
+      const pSnap = await getDoc(doc(db, 'projetos', projectId));
       if (pSnap.exists()) {
         const pd = pSnap.data() || {};
         effectiveProjectName = pd.nome || pd.name || pd.projectName || projectId;
