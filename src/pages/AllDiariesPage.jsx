@@ -8,20 +8,29 @@ import DiaryCard from "../components/DiaryCard";
 import DiaryForm from "../components/DiaryForm";
 import { ArrowLeft, Search } from "lucide-react";
 
+// heurística para considerar projeto ativo
+function isActiveProject(data = {}) {
+  const status = (data.status || data.fase || data.situacao || "").toString().toLowerCase();
+  const negativeWords = ["encerr", "finaliz", "conclu", "inativ", "fech", "arquiv", "cancel"];
+  const negativeFlag =
+    data.arquivado === true ||
+    data.ativo === false ||
+    data.encerrado === true ||
+    data.finalizado === true ||
+    negativeWords.some((w) => status.includes(w));
+  return !negativeFlag;
+}
+
 export default function AllDiariesPage() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
 
-  // highlights (top 3)
   const [highlights, setHighlights] = useState([]);
-
-  // feed principal
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [limitN, setLimitN] = useState(20);
 
-  // projetos (lado direito)
   const [projects, setProjects] = useState([]);
   const [projSearch, setProjSearch] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -33,12 +42,7 @@ export default function AllDiariesPage() {
       const list = [];
       snap.forEach((d) => {
         const data = d.data() || {};
-        const status = (data.status || "").toString().toLowerCase();
-        const arquivado = data.arquivado === true;
-        const inativo =
-          data.ativo === false ||
-          ["arquivado", "inativo", "fechado"].includes(status);
-        if (!arquivado && !inativo) {
+        if (isActiveProject(data)) {
           const name = data.nome || data.name || data.projectName || d.id;
           list.push({ id: d.id, name });
         }
@@ -48,7 +52,7 @@ export default function AllDiariesPage() {
     })();
   }, []);
 
-  // highlights (3 mais recentes, independentes de filtro)
+  // highlights (3 mais recentes)
   useEffect(() => {
     (async () => {
       const res = await diaryService.fetchFeedRecent({ pageSize: 3 });
@@ -56,8 +60,8 @@ export default function AllDiariesPage() {
     })();
   }, []);
 
-  // feed conforme projeto selecionado
-  const loadFeed = async (opts = {}) => {
+  // feed
+  const loadFeed = async () => {
     setLoadingFeed(true);
     try {
       let res;
@@ -67,9 +71,7 @@ export default function AllDiariesPage() {
           pageSize: limitN,
         });
       } else {
-        res = await diaryService.fetchFeedRecent({
-          pageSize: limitN,
-        });
+        res = await diaryService.fetchFeedRecent({ pageSize: limitN });
       }
       setItems(res.items || []);
       setCursor(res.nextCursor || null);
@@ -77,39 +79,31 @@ export default function AllDiariesPage() {
       setLoadingFeed(false);
     }
   };
-
   useEffect(() => {
     loadFeed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, limitN]);
 
-  // carregar mais no feed
   const handleLoadMore = async () => {
     if (!cursor || selectedProjectId) return;
-    const res = await diaryService.fetchFeedRecent({
-      pageSize: limitN,
-      cursor,
-    });
+    const res = await diaryService.fetchFeedRecent({ pageSize: limitN, cursor });
     setItems((prev) => [...prev, ...(res.items || [])]);
     setCursor(res.nextCursor || null);
   };
 
   const gotoProject = (projectId) => navigate(`/projeto/${projectId}`);
 
-  // publicar novo diário (coluna esquerda)
-  const handleCreate = async ({
-    projectId,
-    projectName,
-    text,
-    area,
-    atribuidoA,
-    linkUrl,
-  }) => {
+  const handleCreate = async ({ projectId, projectName, text, area, atribuidoA, linkUrl }) => {
+    // evita undefined em authorId e também garante compat com regras do feed
+    if (!currentUser?.uid) {
+      alert("Usuário ainda não carregado. Tente novamente em 2 segundos.");
+      return;
+    }
     await diaryService.addEntryWithFeed(
       projectId,
       {
-        authorId: currentUser?.uid,
-        authorName: currentUser?.displayName || currentUser?.email || "Usuário",
+        authorId: currentUser.uid,                                // << garante não-undefined
+        authorName: currentUser.displayName || currentUser.email || "Usuário",
         authorRole: "colaborador",
         text,
         area: area || null,
@@ -119,14 +113,11 @@ export default function AllDiariesPage() {
       },
       { projectName }
     );
-
-    // atualiza highlights e feed atual
     const hi = await diaryService.fetchFeedRecent({ pageSize: 3 });
     setHighlights(hi.items || []);
     await loadFeed();
   };
 
-  // lista de projetos filtrada pela busca da sidebar
   const filteredProjects = useMemo(() => {
     const q = projSearch.trim().toLowerCase();
     if (!q) return projects;
@@ -135,8 +126,6 @@ export default function AllDiariesPage() {
 
   return (
     <div className="px-4 md:px-6 py-4 space-y-4">
-
-      {/* topo com voltar */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate("/dashboard")}
@@ -148,7 +137,7 @@ export default function AllDiariesPage() {
         <h1 className="text-2xl font-semibold text-slate-900">Diário do Projeto</h1>
       </div>
 
-      {/* highlights: últimos 3 */}
+      {/* highlights */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {highlights.map((h) => {
           const createdAt = h.createdAt?.toDate
@@ -156,50 +145,32 @@ export default function AllDiariesPage() {
             : h.createdAt?._seconds
             ? new Date(h.createdAt._seconds * 1000)
             : null;
-        const preview = (h.text || "").length > 160 ? (h.text || "").slice(0,160) + "…" : (h.text || "");
+          const preview = (h.text || "").length > 160 ? (h.text || "").slice(0, 160) + "…" : (h.text || "");
           return (
             <div key={h.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-              <div className="text-xs text-slate-500">
-                {createdAt ? createdAt.toLocaleString() : "—"}
-              </div>
-              <button
-                className="mt-1 text-blue-600 hover:underline font-medium"
-                onClick={() => gotoProject(h.projectId)}
-              >
+              <div className="text-xs text-slate-500">{createdAt ? createdAt.toLocaleString() : "—"}</div>
+              <button className="mt-1 text-blue-600 hover:underline font-medium" onClick={() => gotoProject(h.projectId)}>
                 {h.projectName || "Projeto"}
               </button>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {h.authorName || "—"}
-              </div>
-              <p className="mt-2 text-sm text-slate-700">
-                {preview}
-              </p>
+              <div className="text-xs text-slate-500 mt-0.5">{h.authorName || "—"}</div>
+              <p className="mt-2 text-sm text-slate-700">{preview}</p>
             </div>
           );
         })}
         {highlights.length === 0 && (
-          <div className="md:col-span-3 text-sm text-slate-500">
-            Nenhum diário recente.
-          </div>
+          <div className="md:col-span-3 text-sm text-slate-500">Nenhum diário recente.</div>
         )}
       </div>
 
-      {/* 3 colunas: form | feed | sidebar projetos */}
+      {/* 3 colunas */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* coluna esquerda: form */}
         <div className="lg:col-span-1">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900 mb-3">Novo diário</h2>
-            <DiaryForm
-              projects={projects}
-              onSubmit={handleCreate}
-              defaultProjectId={selectedProjectId || ""}
-            />
+            <DiaryForm projects={projects} onSubmit={handleCreate} defaultProjectId={selectedProjectId || ""} />
           </div>
         </div>
 
-        {/* coluna central: feed */}
         <div className="lg:col-span-1">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="flex items-center justify-between mb-3">
@@ -208,10 +179,7 @@ export default function AllDiariesPage() {
                   {selectedProjectId ? "Diários do projeto" : "Últimos diários"}
                 </h2>
                 {selectedProjectId && (
-                  <button
-                    onClick={() => setSelectedProjectId("")}
-                    className="text-xs text-slate-600 hover:underline"
-                  >
+                  <button onClick={() => setSelectedProjectId("")} className="text-xs text-slate-600 hover:underline">
                     limpar seleção
                   </button>
                 )}
@@ -228,16 +196,11 @@ export default function AllDiariesPage() {
             </div>
 
             <div className="h-[70vh] overflow-y-auto pr-1">
-              {loadingFeed && (
-                <div className="text-sm text-slate-500">Carregando…</div>
-              )}
-              {!loadingFeed && items.length === 0 && (
-                <div className="text-sm text-slate-500">Nenhum diário encontrado.</div>
-              )}
+              {loadingFeed && <div className="text-sm text-slate-500">Carregando…</div>}
+              {!loadingFeed && items.length === 0 && <div className="text-sm text-slate-500">Nenhum diário encontrado.</div>}
               {items.map((i) => (
                 <DiaryCard key={i.id} item={i} onProjectClick={gotoProject} />
               ))}
-
               {!loadingFeed && cursor && !selectedProjectId && (
                 <div className="pt-2">
                   <button
@@ -252,11 +215,9 @@ export default function AllDiariesPage() {
           </div>
         </div>
 
-        {/* coluna direita: seleção de projetos */}
         <div className="lg:col-span-1">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900">Projetos ativos</h2>
-
             <div className="mt-3 relative">
               <Search className="h-4 w-4 text-slate-400 absolute left-3 top-3" />
               <input
@@ -266,11 +227,8 @@ export default function AllDiariesPage() {
                 onChange={(e) => setProjSearch(e.target.value)}
               />
             </div>
-
             <div className="mt-3 h-[60vh] overflow-y-auto pr-1">
-              {filteredProjects.length === 0 && (
-                <div className="text-sm text-slate-500">Nenhum projeto encontrado.</div>
-              )}
+              {filteredProjects.length === 0 && <div className="text-sm text-slate-500">Nenhum projeto encontrado.</div>}
               <ul className="space-y-1">
                 {filteredProjects.map((p) => {
                   const active = selectedProjectId === p.id;
@@ -291,9 +249,9 @@ export default function AllDiariesPage() {
                 })}
               </ul>
             </div>
-
           </div>
         </div>
+
       </div>
     </div>
   );
