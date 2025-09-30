@@ -1,21 +1,30 @@
-import React, { useState, useEffect } from "react";
+// src/components/DiaryForm.jsx
+import React, { useEffect, useState } from "react";
 
-export default function DiaryForm({ projects, onSubmit, defaultProjectId=null, disabled=false }) {
+export default function DiaryForm({
+  projects,
+  onSubmit,
+  defaultProjectId = null,
+  disabled = false, // desabilita o submit enquanto o auth não estiver pronto
+}) {
   const [projectId, setProjectId] = useState(defaultProjectId || "");
   const [text, setText] = useState("");
   const [area, setArea] = useState("");
   const [atribuidoA, setAtribuidoA] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
 
+  // sempre que vier um novo defaultProjectId, atualiza o select
   useEffect(() => {
     if (defaultProjectId) setProjectId(defaultProjectId);
   }, [defaultProjectId]);
 
+  // pode enviar somente quando houver projeto + texto e o formulário não estiver desabilitado
   const canSend = !disabled && projectId && text.trim().length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canSend) return;
+
     const selected = projects.find((p) => p.id === projectId);
     await onSubmit({
       projectId,
@@ -25,6 +34,8 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId=null, d
       atribuidoA: atribuidoA || null,
       linkUrl: linkUrl || null,
     });
+
+    // limpa apenas campos de conteúdo; mantém o projeto selecionado
     setText("");
     setArea("");
     setAtribuidoA("");
@@ -49,6 +60,7 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId=null, d
             ))}
           </select>
         </div>
+
         <div>
           <label className="text-xs text-slate-500">Área</label>
           <input
@@ -58,6 +70,7 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId=null, d
             onChange={(e) => setArea(e.target.value)}
           />
         </div>
+
         <div>
           <label className="text-xs text-slate-500">Atribuído a</label>
           <input
