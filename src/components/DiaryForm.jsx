@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-export default function DiaryForm({ projects, onSubmit, defaultProjectId = null }) {
+export default function DiaryForm({ projects, onSubmit, defaultProjectId=null, disabled=false }) {
   const [projectId, setProjectId] = useState(defaultProjectId || "");
   const [text, setText] = useState("");
   const [area, setArea] = useState("");
@@ -11,7 +11,7 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
     if (defaultProjectId) setProjectId(defaultProjectId);
   }, [defaultProjectId]);
 
-  const canSend = projectId && text.trim().length > 0;
+  const canSend = !disabled && projectId && text.trim().length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
