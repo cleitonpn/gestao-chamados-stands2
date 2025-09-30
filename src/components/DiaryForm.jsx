@@ -12,7 +12,7 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canSend) return;
-    const selected = projects.find(p => p.id === projectId);
+    const selected = projects.find((p) => p.id === projectId);
     await onSubmit({
       projectId,
       projectName: selected?.name || "",
@@ -21,7 +21,6 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
       atribuidoA: atribuidoA || null,
       linkUrl: linkUrl || null,
     });
-    // limpa
     setText("");
     setArea("");
     setAtribuidoA("");
@@ -29,25 +28,27 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 space-y-3">
+    <form onSubmit={handleSubmit} className="space-y-3">
       <div className="grid md:grid-cols-4 gap-3">
         <div className="md:col-span-2">
           <label className="text-xs text-neutral-400">Projeto</label>
           <select
-            className="mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 p-2"
+            className="mt-1 w-full rounded-lg bg-neutral-900 border border-neutral-800 p-2"
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
           >
             <option value="">Selecione…</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
             ))}
           </select>
         </div>
         <div>
           <label className="text-xs text-neutral-400">Área</label>
           <input
-            className="mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 p-2"
+            className="mt-1 w-full rounded-lg bg-neutral-900 border border-neutral-800 p-2"
             placeholder="ex.: produção, montagem, elétrica…"
             value={area}
             onChange={(e) => setArea(e.target.value)}
@@ -56,7 +57,7 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
         <div>
           <label className="text-xs text-neutral-400">Atribuído a</label>
           <input
-            className="mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 p-2"
+            className="mt-1 w-full rounded-lg bg-neutral-900 border border-neutral-800 p-2"
             placeholder="nome/usuário"
             value={atribuidoA}
             onChange={(e) => setAtribuidoA(e.target.value)}
@@ -67,8 +68,8 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
       <div>
         <label className="text-xs text-neutral-400">Texto do diário</label>
         <textarea
-          rows={4}
-          className="mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 p-2"
+          rows={5}
+          className="mt-1 w-full rounded-lg bg-neutral-900 border border-neutral-800 p-3"
           placeholder="Escreva aqui…"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -78,18 +79,20 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
       <div>
         <label className="text-xs text-neutral-400">Link (opcional)</label>
         <input
-          className="mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 p-2"
+          className="mt-1 w-full rounded-lg bg-neutral-900 border border-neutral-800 p-2"
           placeholder="https://…"
           value={linkUrl}
           onChange={(e) => setLinkUrl(e.target.value)}
         />
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <button
           type="submit"
           disabled={!canSend}
-          className={`px-3 py-2 rounded-lg ${canSend ? "bg-indigo-600 hover:bg-indigo-500" : "bg-neutral-700 cursor-not-allowed"}`}
+          className={`px-3 py-2 rounded-lg ${
+            canSend ? "bg-indigo-600 hover:bg-indigo-500" : "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+          }`}
         >
           Publicar diário
         </button>
