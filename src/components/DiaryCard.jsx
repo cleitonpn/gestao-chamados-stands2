@@ -48,4 +48,19 @@ export default function DiaryCard({ item, onProjectClick }) {
               Abrir link
             </a>
           )}
-          {(item
+          {(item.attachments || []).map((f, i) => (
+            <a
+              key={i}
+              href={f.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs px-2 py-1 rounded bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
+            >
+              {f.name || `Arquivo ${i + 1}`}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
