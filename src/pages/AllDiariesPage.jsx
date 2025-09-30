@@ -5,7 +5,7 @@ import DiaryCard from "../components/DiaryCard";
 import DiaryForm from "../components/DiaryForm";
 import { diaryService } from "../services/diaryService";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../services/firebase"; // ✅ caminho correto
+import { db } from "../config/firebase";
 
 export default function AllDiariesPage() {
   const navigate = useNavigate();
