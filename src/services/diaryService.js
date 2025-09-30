@@ -23,7 +23,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
-import { db } from './firebase'; // ajuste o caminho se seu arquivo firebase estiver em outro lugar
+import { db } from '../config/firebase; 
 
 // ------------------------------
 // Utilidades de caminho
