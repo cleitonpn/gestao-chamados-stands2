@@ -41,6 +41,63 @@ const sanitize = (obj) =>
 const diaryCol = (projectId) => collection(db, 'projetos', projectId, 'diary');
 const feedCol  = () => collection(db, 'diary_feed');
 
+// ---------------- internals ----------------
+
+// tenta localizar e deletar o doc da subcoleção do projeto quando NÃO temos sourceDiaryId
+async function findAndDeleteSubDocHeuristic(projectId, feedData) {
+  try {
+    if (!projectId || !feedData) return false;
+
+    const feedText = (feedData.text || '').toString().trim();
+    const feedAuthorId = feedData.authorId || null;
+    const feedDate = asDate(feedData.createdAt);
+    const feedMillis = feedDate ? feedDate.getTime() : null;
+
+    // pega um lote pequeno e recente; evita exigir índices compostos
+    const qSub = query(diaryCol(projectId), orderBy('createdAt', 'desc'), limit(50));
+    const snapSub = await getDocs(qSub);
+    if (snapSub.empty) return false;
+
+    // procura o melhor candidato:
+    // 1) texto igual (case sensitive) + autor igual => prioridade
+    // 2) se múltiplos, usa o menor delta de tempo
+    // 3) se não houver autor, usa só texto; se não houver texto, usa só autor; por fim, usa tempo
+    let bestDoc = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const d of snapSub.docs) {
+      const sd = d.data() || {};
+      const sText = (sd.text || '').toString().trim();
+      const sAuthor = sd.authorId || null;
+      const sDate = asDate(sd.createdAt);
+      const sMillis = sDate ? sDate.getTime() : null;
+
+      const textMatch = feedText && sText && sText === feedText;
+      const authorMatch = feedAuthorId && sAuthor && sAuthor === feedAuthorId;
+      const timeDiff = (feedMillis != null && sMillis != null) ? Math.abs(feedMillis - sMillis) : 5 * 60 * 1000 + 1; // 5min+1
+
+      // score menor = melhor
+      // pesos: texto 0, autor 0, tempo como desempate; se não bater texto/autor, penaliza
+      let score = timeDiff;
+      if (!textMatch) score += 60 * 60 * 1000; // penaliza +1h
+      if (feedAuthorId && !authorMatch) score += 30 * 60 * 1000; // penaliza +30min
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestDoc = d;
+      }
+    }
+
+    if (bestDoc) {
+      await deleteDoc(bestDoc.ref);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export const diaryService = {
   // ===== subcoleção do projeto =====
   async getEntries(projectId) {
@@ -73,7 +130,7 @@ export const diaryService = {
     linkUrl = null,
     attachments = [],
     createdAtOverride = null,
-    sourceDiaryId = null, // << id da subcoleção (para deletar sincronizado)
+    sourceDiaryId = null, // id da subcoleção (para deletar sincronizado)
     extra = {},
   }) {
     if (!projectId || !text) throw new Error('projectId e text são obrigatórios');
@@ -94,7 +151,7 @@ export const diaryService = {
       linkUrl,
       attachments,
       createdAt,
-      sourceDiaryId, // << guarda vínculo com subcoleção
+      sourceDiaryId, // vínculo com subcoleção
       ...extra,
     });
 
@@ -137,7 +194,7 @@ export const diaryService = {
       atribuidoA: entry.atribuidoA ?? null,
       linkUrl: entry.linkUrl ?? entry.driveLink ?? null,
       attachments: Array.isArray(entry.attachments) ? entry.attachments : [],
-      sourceDiaryId: created.id, // << vínculo
+      sourceDiaryId: created.id,
     });
 
     return created;
@@ -191,34 +248,71 @@ export const diaryService = {
     return true;
   },
 
+  // >>> atualizado: apaga feed e tenta apagar a subcoleção (direto ou via heurística)
   async deleteFeedAndProject({ feedId, projectId, sourceDiaryId }) {
-    // apaga do feed
+    // 0) lê dados do feed (para heurística) ANTES de deletar
+    let feedData = null;
+    try {
+      const feedRef = doc(db, 'diary_feed', feedId);
+      const snap = await getDoc(feedRef);
+      if (snap.exists()) feedData = snap.data();
+    } catch (_) {}
+
+    // 1) apaga do feed
     await this.deleteFeedEntry(feedId);
-    // tenta apagar da subcoleção, se houver vínculo
-    if (projectId && sourceDiaryId) {
+
+    // 2) apaga da subcoleção
+    if (!projectId) return true;
+
+    // 2.1) se temos o vínculo, tenta direto
+    if (sourceDiaryId) {
       try {
         await this.deleteEntry(projectId, sourceDiaryId);
+        return true;
       } catch (_) {
-        // ok se não existir (backfill antigo não tinha subcoleção)
+        // cai para heurística
       }
     }
+
+    // 2.2) fallback por heurística (para itens antigos, sem vínculo)
+    await findAndDeleteSubDocHeuristic(projectId, feedData);
     return true;
   },
 
-  async deleteFeedEntriesBulk(feedItems /* array de {id, projectId, sourceDiaryId} */) {
-    // chunk em lotes (~400) para evitar limites
+  // >>> atualizado: exclusão em massa com fallback
+  async deleteFeedEntriesBulk(feedItems /* array de {id, projectId, sourceDiaryId?} */) {
+    // primeiro, para cada item sem sourceDiaryId, pegue os dados do feed para heurística
+    const enriched = [];
+    for (const it of feedItems) {
+      let feedData = null;
+      try {
+        const snap = await getDoc(doc(db, 'diary_feed', it.id));
+        if (snap.exists()) feedData = snap.data();
+      } catch (_) {}
+      enriched.push({ ...it, __feedData: feedData });
+    }
+
+    // apaga em lotes no feed
     const chunkSize = 400;
-    for (let i = 0; i < feedItems.length; i += chunkSize) {
-      const slice = feedItems.slice(i, i + chunkSize);
+    for (let i = 0; i < enriched.length; i += chunkSize) {
+      const slice = enriched.slice(i, i + chunkSize);
       const batch = writeBatch(db);
       for (const it of slice) {
         batch.delete(doc(db, 'diary_feed', it.id));
         if (it.projectId && it.sourceDiaryId) {
+          // quando temos vínculo, apagamos sincrono
           batch.delete(doc(db, 'projetos', it.projectId, 'diary', it.sourceDiaryId));
         }
       }
       await batch.commit();
     }
+
+    // para os que NÃO tinham sourceDiaryId, tenta heurística após remover do feed
+    const needingHeuristic = enriched.filter((x) => x.projectId && !x.sourceDiaryId && x.__feedData);
+    for (const it of needingHeuristic) {
+      await findAndDeleteSubDocHeuristic(it.projectId, it.__feedData);
+    }
+
     return true;
   },
 
@@ -233,8 +327,8 @@ export const diaryService = {
 
     // chunk em lotes
     const docs = [
-      ...feedDocs.map((d) => ({ type: 'feed', ref: d.ref })),
-      ...diaryDocs.map((d) => ({ type: 'sub', ref: d.ref })),
+      ...feedDocs.map((d) => ({ ref: d.ref })),
+      ...diaryDocs.map((d) => ({ ref: d.ref })),
     ];
     const chunkSize = 400;
     for (let i = 0; i < docs.length; i += chunkSize) {
@@ -246,7 +340,7 @@ export const diaryService = {
     return { feed: feedDocs.length, diary: diaryDocs.length };
   },
 
-  // ===== backfill (permanece igual — apenas sem vínculo de subcoleção) =====
+  // ===== backfill =====
   async backfillInlineDiariesToFeedOnce(currentUser, { useCurrentUserAsAuthor = true } = {}) {
     const projsSnap = await getDocs(collection(db, 'projetos'));
     let count = 0;
