@@ -19,9 +19,13 @@ import OperationalPanel from './pages/OperationalPanel';
 import TVPanel from './pages/TVPanel';
 import CronogramaPage from './pages/CronogramaPage';
 import AdminPanelPage from './pages/AdminPanelPage';
-import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';// NOVA IMPORTAÇÃO
+import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage'; // NOVA IMPORTAÇÃO
 import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
 import GamingPage from './pages/GamingPage';
+
+// >>> NOVA IMPORTAÇÃO: Página de Diários (feed global)
+import AllDiariesPage from './pages/AllDiariesPage';
+
 import './App.css';
 
 function App() {
@@ -33,161 +37,173 @@ function App() {
             <Routes>
               {/* Rota pública - Login */}
               <Route path="/login" element={<LoginPage />} />
-              
+
               {/* Rotas protegidas */}
-              <Route 
-                path="/dashboard" 
+              <Route
+                path="/dashboard"
                 element={
                   <ProtectedRoute>
                     <DashboardPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/novo-chamado" 
+
+              <Route
+                path="/novo-chamado"
                 element={
                   <ProtectedRoute>
                     <NewTicketPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/projetos" 
+
+              <Route
+                path="/projetos"
                 element={
                   <ProtectedRoute>
                     <ProjectsPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/projetos/novo" 
+
+              <Route
+                path="/projetos/novo"
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <ProjectFormPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/projetos/editar/:projectId" 
+
+              <Route
+                path="/projetos/editar/:projectId"
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <ProjectFormPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/projeto/:projectId" 
+
+              <Route
+                path="/projeto/:projectId"
                 element={
                   <ProtectedRoute>
                     <ProjectDetailPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              {/* NOVA ROTA: Cronograma de Eventos - Acessível a todos */}
-              <Route 
-                path="/cronograma" 
+
+              {/* NOVA ROTA: Cronograma de Eventos - Acessível a todos logados */}
+              <Route
+                path="/cronograma"
                 element={
                   <ProtectedRoute>
                     <CronogramaPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
+
               {/* NOVA ROTA: Eventos - Apenas administradores */}
-              <Route 
-                path="/eventos" 
+              <Route
+                path="/eventos"
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <EventsPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/chamado/:ticketId" 
+
+              <Route
+                path="/chamado/:ticketId"
                 element={
                   <ProtectedRoute>
                     <TicketDetailPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/usuarios" 
+
+              <Route
+                path="/usuarios"
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <UsersPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/relatorios" 
+
+              <Route
+                path="/relatorios"
                 element={
                   <ProtectedRoute>
                     <ReportsPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-<Route
-   path="/gaming"
-   element={
-     <ProtectedRoute>
-       <GamingPage />
-     </ProtectedRoute>
-   }
- />
-              <Route path="/admin/painel" element={
-  <ProtectedRoute requiredRole="administrador">
-    <AdminPanelPage />
-  </ProtectedRoute>
-} />
-              
-              <Route 
-                path="/analytics" 
+
+              <Route
+                path="/gaming"
                 element={
-                  <ProtectedRoute requiredRoles={["administrador", "gerente"]}>
+                  <ProtectedRoute>
+                    <GamingPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/painel"
+                element={
+                  <ProtectedRoute requiredRole="administrador">
+                    <AdminPanelPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/analytics"
+                element={
+                  <ProtectedRoute requiredRoles={['administrador', 'gerente']}>
                     <AnalyticsPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/templates" 
+
+              <Route
+                path="/templates"
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <TemplateManagerPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route path="/admin/chamados-filtrados" element={
-  <ProtectedRoute requiredRole="administrador">
-    <ChamadosFiltradosPage />
-  </ProtectedRoute>
-} />
-              
+
+              <Route
+                path="/admin/chamados-filtrados"
+                element={
+                  <ProtectedRoute requiredRole="administrador">
+                    <ChamadosFiltradosPage />
+                  </ProtectedRoute>
+                }
+              />
+
               {/* Rota para painel operacional - sem header */}
-              <Route 
-                path="/painel-operacional" 
-                element={<OperationalPanel />} 
-              />
-              
+              <Route path="/painel-operacional" element={<OperationalPanel />} />
+
               {/* Rota para painel TV - sem header, sem login */}
-              <Route 
-                path="/painel-tv" 
-                element={<TVPanel />} 
+              <Route path="/painel-tv" element={<TVPanel />} />
+
+              {/* >>> NOVA ROTA: Todos os Diários (feed) */}
+              <Route
+                path="/diarios"
+                element={
+                  <ProtectedRoute>
+                    <AllDiariesPage />
+                  </ProtectedRoute>
+                }
               />
-              
+
               {/* Redirecionar raiz para dashboard */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              
+
               {/* Rota 404 - redirecionar para dashboard */}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
@@ -199,4 +215,3 @@ function App() {
 }
 
 export default App;
-
