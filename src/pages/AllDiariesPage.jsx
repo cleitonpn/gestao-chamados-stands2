@@ -1,23 +1,23 @@
 // src/pages/AllDiariesPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext"; // assume que você já tem
+import { useAuth } from "../contexts/AuthContext";
 import DiaryCard from "../components/DiaryCard";
 import DiaryForm from "../components/DiaryForm";
 import {
-  createDiary,
-  fetchRecentDiaries,
-  searchDiariesByProjectName,
-  fetchDiariesByProject
+  createDiaryWithFeed,
+  diaryService,
 } from "../services/diaryService";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../firebase";
+import { db } from "../services/firebase"; // ✅ caminho corrigido
 
 export default function AllDiariesPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
-  const { currentUser, companyId } = useAuth(); // ajuste de acordo com seu AuthContext
+  // companyId é opcional; se não usar multiempresa, o feed cai na coleção raiz /diary_feed
+  const { currentUser } = useAuth();
+
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
@@ -31,20 +31,21 @@ export default function AllDiariesPage() {
   });
 
   const [projects, setProjects] = useState([]);
-  const canPost = Boolean(selectedProjectId);
 
-  // Carrega projetos permitidos (nome/id) — ajuste se você já tem um service pronto
+  // Carrega projetos (coleção top-level "projetos", conforme suas regras)
   useEffect(() => {
     (async () => {
-      // simples: pega todos os projetos da company; se você tem filtro por permissão, troque aqui
-      const snap = await getDocs(collection(db, "companies", companyId, "projects"));
+      const snap = await getDocs(collection(db, "projetos"));
       const list = [];
-      snap.forEach(d => list.push({ id: d.id, name: d.data().nome || d.data().name || d.data().projectName || d.id }));
-      // ordena por nome
+      snap.forEach(d => {
+        const data = d.data() || {};
+        const name = data.nome || data.name || data.projectName || d.id;
+        list.push({ id: d.id, name });
+      });
       list.sort((a, b) => a.name.localeCompare(b.name));
       setProjects(list);
     })();
-  }, [companyId]);
+  }, []);
 
   // Sincroniza estado -> URL
   useEffect(() => {
@@ -67,11 +68,20 @@ export default function AllDiariesPage() {
       try {
         let res;
         if (selectedProjectId) {
-          res = await fetchDiariesByProject({ companyId, projectId: selectedProjectId, pageSize: limitN });
+          res = await diaryService.fetchFeedByProject({
+            projectId: selectedProjectId,
+            pageSize: limitN,
+          });
         } else if (search.trim()) {
-          res = await searchDiariesByProjectName({ companyId, term: search.trim(), pageSize: limitN });
+          res = await diaryService.searchFeedByProjectName({
+            term: search.trim(),
+            pageSize: limitN,
+          });
         } else {
-          res = await fetchRecentDiaries({ companyId, pageSize: limitN, filters });
+          res = await diaryService.fetchFeedRecent({
+            pageSize: limitN,
+            filters,
+          });
         }
         if (!stop) {
           setItems(res.items || []);
@@ -84,39 +94,60 @@ export default function AllDiariesPage() {
     run();
 
     return () => { stop = true; };
-  }, [companyId, limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
+  }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
 
   const handleLoadMore = async () => {
     if (!cursor || selectedProjectId || search.trim()) return;
-    const res = await fetchRecentDiaries({ companyId, pageSize: limitN, cursor, filters });
+    const res = await diaryService.fetchFeedRecent({
+      pageSize: limitN,
+      cursor,
+      filters,
+    });
     setItems(prev => [...prev, ...(res.items || [])]);
     setCursor(res.nextCursor || null);
   };
 
   const gotoProject = (projectId) => {
-    navigate(`/projetos/${projectId}`); // ajuste para sua rota real
+    navigate(`/projeto/${projectId}`); // ✅ sua rota é singular
   };
 
   const handleCreate = async ({ projectId, projectName, text, area, atribuidoA, linkUrl }) => {
-    await createDiary({
-      companyId,
+    await createDiaryWithFeed(
       projectId,
-      projectName,
-      authorId: currentUser?.uid,
-      authorName: currentUser?.displayName || currentUser?.email || "Usuário",
-      authorRole: "colaborador",
-      text, area, atribuidoA, linkUrl,
-      attachments: []
-    });
+      {
+        authorId: currentUser?.uid,
+        authorName: currentUser?.displayName || currentUser?.email || "Usuário",
+        authorRole: "colaborador",
+        text,
+        area: area || null,
+        atribuidoA: atribuidoA || null,
+        linkUrl: linkUrl || null,
+        attachments: [],
+      },
+      {
+        // companyId: null, // se não usar multiempresa, deixe null (feed em /diary_feed)
+        projectName,
+      }
+    );
+
     // recarrega lista atual
     if (selectedProjectId) {
-      const res = await fetchDiariesByProject({ companyId, projectId: selectedProjectId, pageSize: limitN });
+      const res = await diaryService.fetchFeedByProject({
+        projectId: selectedProjectId,
+        pageSize: limitN,
+      });
       setItems(res.items || []);
     } else if (search.trim()) {
-      const res = await searchDiariesByProjectName({ companyId, term: search.trim(), pageSize: limitN });
+      const res = await diaryService.searchFeedByProjectName({
+        term: search.trim(),
+        pageSize: limitN,
+      });
       setItems(res.items || []);
     } else {
-      const res = await fetchRecentDiaries({ companyId, pageSize: limitN, filters });
+      const res = await diaryService.fetchFeedRecent({
+        pageSize: limitN,
+        filters,
+      });
       setItems(res.items || []);
       setCursor(res.nextCursor || null);
     }
@@ -172,7 +203,7 @@ export default function AllDiariesPage() {
           className="rounded-lg bg-neutral-900 border border-neutral-700 p-2"
           placeholder="Filtrar por atribuído a…"
           value={filters.atribuidoA}
-          onChange={(e) => setFilters(prev => ({ ...prev, atribuicao: undefined, atribuidoA: e.target.value }))}
+          onChange={(e) => setFilters(prev => ({ ...prev, atribuidoA: e.target.value }))}
         />
       </div>
 
