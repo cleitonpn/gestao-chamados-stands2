@@ -52,4 +52,60 @@ export default function DiaryForm({ projects, onSubmit, defaultProjectId = null 
         <div>
           <label className="text-xs text-slate-500">Área</label>
           <input
-            className="mt-1 w-full rounded-lg bg-white border
+            className="mt-1 w-full rounded-lg bg-white border border-slate-200 text-slate-800 p-2"
+            placeholder="ex.: produção, montagem, elétrica…"
+            value={area}
+            onChange={(e) => setArea(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Atribuído a</label>
+          <input
+            className="mt-1 w-full rounded-lg bg-white border border-slate-200 text-slate-800 p-2"
+            placeholder="nome/usuário"
+            value={atribuidoA}
+            onChange={(e) => setAtribuidoA(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs text-slate-500">Texto do diário</label>
+        <textarea
+          rows={6}
+          className="mt-1 w-full rounded-lg bg-white border border-slate-200 text-slate-800 p-3"
+          placeholder="Escreva aqui…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <label className="text-xs text-slate-500">Link (opcional)</label>
+        <input
+          className="mt-1 w-full rounded-lg bg-white border border-slate-200 text-slate-800 p-2"
+          placeholder="https://…"
+          value={linkUrl}
+          onChange={(e) => setLinkUrl(e.target.value)}
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={!canSend}
+          className={`px-3 py-2 rounded-lg ${
+            canSend
+              ? "bg-blue-600 text-white hover:bg-blue-500"
+              : "bg-slate-100 text-slate-400 cursor-not-allowed"
+          }`}
+        >
+          Publicar diário
+        </button>
+        <span className="text-xs text-slate-500">
+          O diário será salvo no projeto e no feed.
+        </span>
+      </div>
+    </form>
+  );
+}
