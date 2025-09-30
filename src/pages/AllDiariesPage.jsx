@@ -1,42 +1,43 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { diaryService } from "../services/diaryService";
 import DiaryCard from "../components/DiaryCard";
 import DiaryForm from "../components/DiaryForm";
+import { ArrowLeft, Search } from "lucide-react";
 
 export default function AllDiariesPage() {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
   const { currentUser } = useAuth();
 
-  const [loading, setLoading] = useState(true);
+  // highlights (top 3)
+  const [highlights, setHighlights] = useState([]);
+
+  // feed principal
+  const [loadingFeed, setLoadingFeed] = useState(true);
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
+  const [limitN, setLimitN] = useState(20);
 
-  const [limitN, setLimitN] = useState(Number(params.get("limit")) || 20);
-  const [search, setSearch] = useState(params.get("q") || "");
-  const [selectedProjectId, setSelectedProjectId] = useState(params.get("projectId") || "");
-  const [filters, setFilters] = useState({
-    area: params.get("area") || "",
-    atribuidoA: params.get("atribuidoA") || "",
-  });
-
+  // projetos (lado direito)
   const [projects, setProjects] = useState([]);
+  const [projSearch, setProjSearch] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
 
-  // ====== carregar projetos (somente ativos) ======
+  // carrega projetos (somente ativos)
   useEffect(() => {
     (async () => {
       const snap = await getDocs(collection(db, "projetos"));
       const list = [];
       snap.forEach((d) => {
         const data = d.data() || {};
-        // regras de "ativo"
         const status = (data.status || "").toString().toLowerCase();
         const arquivado = data.arquivado === true;
-        const inativo = data.ativo === false || ["arquivado", "inativo", "fechado"].includes(status);
+        const inativo =
+          data.ativo === false ||
+          ["arquivado", "inativo", "fechado"].includes(status);
         if (!arquivado && !inativo) {
           const name = data.nome || data.name || data.projectName || d.id;
           list.push({ id: d.id, name });
@@ -47,60 +48,47 @@ export default function AllDiariesPage() {
     })();
   }, []);
 
-  // ====== estado -> URL ======
+  // highlights (3 mais recentes, independentes de filtro)
   useEffect(() => {
-    const next = new URLSearchParams();
-    next.set("limit", String(limitN));
-    if (search) next.set("q", search);
-    if (selectedProjectId) next.set("projectId", selectedProjectId);
-    if (filters.area) next.set("area", filters.area);
-    if (filters.atribuidoA) next.set("atribuidoA", filters.atribuidoA);
-    setParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
-
-  // ====== carregar feed conforme estado ======
-  useEffect(() => {
-    let stop = false;
     (async () => {
-      setLoading(true);
-      try {
-        let res;
-        if (selectedProjectId) {
-          res = await diaryService.fetchFeedByProject({
-            projectId: selectedProjectId,
-            pageSize: limitN,
-          });
-        } else if (search.trim()) {
-          res = await diaryService.searchFeedByProjectName({
-            term: search.trim(),
-            pageSize: limitN,
-          });
-        } else {
-          res = await diaryService.fetchFeedRecent({
-            pageSize: limitN,
-            filters,
-          });
-        }
-        if (!stop) {
-          setItems(res.items || []);
-          setCursor(res.nextCursor || null);
-        }
-      } finally {
-        if (!stop) setLoading(false);
-      }
+      const res = await diaryService.fetchFeedRecent({ pageSize: 3 });
+      setHighlights(res.items || []);
     })();
-    return () => {
-      stop = true;
-    };
-  }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
+  }, []);
 
+  // feed conforme projeto selecionado
+  const loadFeed = async (opts = {}) => {
+    setLoadingFeed(true);
+    try {
+      let res;
+      if (selectedProjectId) {
+        res = await diaryService.fetchFeedByProject({
+          projectId: selectedProjectId,
+          pageSize: limitN,
+        });
+      } else {
+        res = await diaryService.fetchFeedRecent({
+          pageSize: limitN,
+        });
+      }
+      setItems(res.items || []);
+      setCursor(res.nextCursor || null);
+    } finally {
+      setLoadingFeed(false);
+    }
+  };
+
+  useEffect(() => {
+    loadFeed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, limitN]);
+
+  // carregar mais no feed
   const handleLoadMore = async () => {
-    if (!cursor || selectedProjectId || search.trim()) return;
+    if (!cursor || selectedProjectId) return;
     const res = await diaryService.fetchFeedRecent({
       pageSize: limitN,
       cursor,
-      filters,
     });
     setItems((prev) => [...prev, ...(res.items || [])]);
     setCursor(res.nextCursor || null);
@@ -108,7 +96,15 @@ export default function AllDiariesPage() {
 
   const gotoProject = (projectId) => navigate(`/projeto/${projectId}`);
 
-  const handleCreate = async ({ projectId, projectName, text, area, atribuidoA, linkUrl }) => {
+  // publicar novo diário (coluna esquerda)
+  const handleCreate = async ({
+    projectId,
+    projectName,
+    text,
+    area,
+    atribuidoA,
+    linkUrl,
+  }) => {
     await diaryService.addEntryWithFeed(
       projectId,
       {
@@ -124,116 +120,180 @@ export default function AllDiariesPage() {
       { projectName }
     );
 
-    // recarrega conforme o estado atual
-    if (selectedProjectId) {
-      const res = await diaryService.fetchFeedByProject({ projectId: selectedProjectId, pageSize: limitN });
-      setItems(res.items || []);
-    } else if (search.trim()) {
-      const res = await diaryService.searchFeedByProjectName({ term: search.trim(), pageSize: limitN });
-      setItems(res.items || []);
-    } else {
-      const res = await diaryService.fetchFeedRecent({ pageSize: limitN, filters });
-      setItems(res.items || []);
-      setCursor(res.nextCursor || null);
-    }
+    // atualiza highlights e feed atual
+    const hi = await diaryService.fetchFeedRecent({ pageSize: 3 });
+    setHighlights(hi.items || []);
+    await loadFeed();
   };
 
-  // ====== UI ======
-  const header = useMemo(
-    () => (
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div className="flex-1">
-          <h1 className="text-2xl font-semibold">Todos os Diários</h1>
-          <p className="text-sm text-neutral-400">Últimas inserções, busca por projeto e publicação rápida.</p>
-        </div>
-        <div className="flex gap-2">
-          <select
-            className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
-            value={limitN}
-            onChange={(e) => setLimitN(Number(e.target.value))}
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-          </select>
-        </div>
-      </div>
-    ),
-    [limitN]
-  );
+  // lista de projetos filtrada pela busca da sidebar
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(q));
+  }, [projSearch, projects]);
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      {header}
+    <div className="px-4 md:px-6 py-4 space-y-4">
 
-      {/* Filtros */}
-      <div className="grid md:grid-cols-4 gap-3">
-        <input
-          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
-          placeholder="Buscar por nome do projeto…"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setSelectedProjectId("");
-          }}
-        />
-        <select
-          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
-          value={selectedProjectId}
-          onChange={(e) => {
-            setSelectedProjectId(e.target.value);
-            setSearch("");
-          }}
+      {/* topo com voltar */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="inline-flex items-center gap-2 text-slate-700 hover:text-slate-900 bg-white border border-slate-200 rounded-lg px-3 py-2"
         >
-          <option value="">Filtrar por projeto…</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
-          placeholder="Filtrar por área…"
-          value={filters.area}
-          onChange={(e) => setFilters((prev) => ({ ...prev, area: e.target.value }))}
-        />
-        <input
-          className="rounded-lg bg-neutral-900 border border-neutral-800 p-2"
-          placeholder="Filtrar por atribuído a…"
-          value={filters.atribuidoA}
-          onChange={(e) => setFilters((prev) => ({ ...prev, atribuidoA: e.target.value }))}
-        />
+          <ArrowLeft className="h-4 w-4" />
+          Voltar ao Dashboard
+        </button>
+        <h1 className="text-2xl font-semibold text-slate-900">Diário do Projeto</h1>
       </div>
 
-      {/* Form para publicar direto da página */}
-      <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-4">
-        <DiaryForm projects={projects} onSubmit={handleCreate} defaultProjectId={selectedProjectId || ""} />
-      </div>
-
-      {/* Lista */}
-      <div className="mt-2">
-        {loading && <div className="text-sm text-neutral-400">Carregando…</div>}
-        {!loading && items.length === 0 && (
-          <div className="text-sm text-neutral-400">
-            Nenhum diário encontrado.
-            <br />
-            <span className="text-neutral-500">
-              Dica: se você já tinha diários antigos dentro dos projetos, rode o backfill abaixo para popular o feed.
-            </span>
+      {/* highlights: últimos 3 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {highlights.map((h) => {
+          const createdAt = h.createdAt?.toDate
+            ? h.createdAt.toDate()
+            : h.createdAt?._seconds
+            ? new Date(h.createdAt._seconds * 1000)
+            : null;
+        const preview = (h.text || "").length > 160 ? (h.text || "").slice(0,160) + "…" : (h.text || "");
+          return (
+            <div key={h.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <div className="text-xs text-slate-500">
+                {createdAt ? createdAt.toLocaleString() : "—"}
+              </div>
+              <button
+                className="mt-1 text-blue-600 hover:underline font-medium"
+                onClick={() => gotoProject(h.projectId)}
+              >
+                {h.projectName || "Projeto"}
+              </button>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {h.authorName || "—"}
+              </div>
+              <p className="mt-2 text-sm text-slate-700">
+                {preview}
+              </p>
+            </div>
+          );
+        })}
+        {highlights.length === 0 && (
+          <div className="md:col-span-3 text-sm text-slate-500">
+            Nenhum diário recente.
           </div>
         )}
-        {items.map((i) => (
-          <DiaryCard key={i.id} item={i} onProjectClick={gotoProject} />
-        ))}
-        {!loading && cursor && !selectedProjectId && !search && (
-          <button
-            onClick={handleLoadMore}
-            className="mt-3 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
-          >
-            Carregar mais
-          </button>
-        )}
+      </div>
+
+      {/* 3 colunas: form | feed | sidebar projetos */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* coluna esquerda: form */}
+        <div className="lg:col-span-1">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+            <h2 className="text-base font-semibold text-slate-900 mb-3">Novo diário</h2>
+            <DiaryForm
+              projects={projects}
+              onSubmit={handleCreate}
+              defaultProjectId={selectedProjectId || ""}
+            />
+          </div>
+        </div>
+
+        {/* coluna central: feed */}
+        <div className="lg:col-span-1">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-slate-900">
+                  {selectedProjectId ? "Diários do projeto" : "Últimos diários"}
+                </h2>
+                {selectedProjectId && (
+                  <button
+                    onClick={() => setSelectedProjectId("")}
+                    className="text-xs text-slate-600 hover:underline"
+                  >
+                    limpar seleção
+                  </button>
+                )}
+              </div>
+              <select
+                className="rounded-lg bg-white border border-slate-200 text-slate-700 p-2"
+                value={limitN}
+                onChange={(e) => setLimitN(Number(e.target.value))}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            <div className="h-[70vh] overflow-y-auto pr-1">
+              {loadingFeed && (
+                <div className="text-sm text-slate-500">Carregando…</div>
+              )}
+              {!loadingFeed && items.length === 0 && (
+                <div className="text-sm text-slate-500">Nenhum diário encontrado.</div>
+              )}
+              {items.map((i) => (
+                <DiaryCard key={i.id} item={i} onProjectClick={gotoProject} />
+              ))}
+
+              {!loadingFeed && cursor && !selectedProjectId && (
+                <div className="pt-2">
+                  <button
+                    onClick={handleLoadMore}
+                    className="w-full rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2"
+                  >
+                    Carregar mais
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* coluna direita: seleção de projetos */}
+        <div className="lg:col-span-1">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+            <h2 className="text-base font-semibold text-slate-900">Projetos ativos</h2>
+
+            <div className="mt-3 relative">
+              <Search className="h-4 w-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700"
+                placeholder="Buscar projeto…"
+                value={projSearch}
+                onChange={(e) => setProjSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="mt-3 h-[60vh] overflow-y-auto pr-1">
+              {filteredProjects.length === 0 && (
+                <div className="text-sm text-slate-500">Nenhum projeto encontrado.</div>
+              )}
+              <ul className="space-y-1">
+                {filteredProjects.map((p) => {
+                  const active = selectedProjectId === p.id;
+                  return (
+                    <li key={p.id}>
+                      <button
+                        onClick={() => setSelectedProjectId(active ? "" : p.id)}
+                        className={`w-full text-left px-3 py-2 rounded-lg border ${
+                          active
+                            ? "bg-blue-50 border-blue-200 text-blue-800"
+                            : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {p.name}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+          </div>
+        </div>
       </div>
     </div>
   );
