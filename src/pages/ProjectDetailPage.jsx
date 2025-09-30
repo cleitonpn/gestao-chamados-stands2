@@ -1,9 +1,23 @@
+// src/pages/ProjectDetailPage.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 import { userService } from '../services/userService';
 import { ticketService } from '../services/ticketService';
+
+import { db } from '../config/firebase';
+import {
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  where,
+  getDocs,
+  deleteDoc,
+  doc,
+} from 'firebase/firestore';
+import { diaryService } from '../services/diaryService';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -123,7 +137,7 @@ const ProjectDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // ====== Diário
+  // ====== Diário (subcoleção)
   const [diaryEntries, setDiaryEntries] = useState([]);
   const [newDiaryText, setNewDiaryText] = useState('');
   const [newDiaryLink, setNewDiaryLink] = useState('');
@@ -191,15 +205,6 @@ const ProjectDetailPage = () => {
       setProject(projectData);
       setUsers(usersData || []);
 
-      // ====== Diário
-      const initialDiary = Array.isArray(projectData?.diario) ? projectData.diario : [];
-      initialDiary.sort((a, b) => {
-        const ta = new Date(a?.createdAt || 0).getTime();
-        const tb = new Date(b?.createdAt || 0).getTime();
-        return tb - ta;
-      });
-      setDiaryEntries(initialDiary);
-
       // ====== Chamados do projeto (para resumo)
       await loadTicketsForProject(projectData.id || projectId);
     } catch (err) {
@@ -209,6 +214,21 @@ const ProjectDetailPage = () => {
       setLoading(false);
     }
   };
+
+  // ====== Diário (subcoleção em tempo real)
+  useEffect(() => {
+    const pid = project?.id || projectId;
+    if (!pid) return;
+    const q = query(
+      collection(db, 'projetos', pid, 'diary'),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setDiaryEntries(arr);
+    });
+    return () => unsub();
+  }, [project?.id, projectId]);
 
   const loadTicketsForProject = async (pid) => {
     try {
@@ -233,7 +253,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // ====== Diário (ações)
+  // ====== Diário (ações - NOVO fluxo com diaryService + feed)
   const handleAddDiaryEntry = async () => {
     setDiaryError('');
     const textVal = (newDiaryText || '').trim();
@@ -245,36 +265,24 @@ const ProjectDetailPage = () => {
       return;
     }
 
-    const entry = {
-      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
-      text: textVal,
-      authorId: userProfile?.id || user?.uid || '',
-      authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
-      authorRole: userProfile?.funcao || 'usuário',
-      createdAt: new Date().toISOString(),
-      ...(linkVal ? { linkUrl: linkVal } : {}),
-    };
-
     try {
       setSavingDiary(true);
 
-      const next = Array.isArray(project?.diario) ? [...project.diario, entry] : [entry];
+      await diaryService.addEntryWithFeed(
+        project.id || projectId,
+        {
+          authorId: userProfile?.id || user?.uid || null,
+          authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
+          authorRole: userProfile?.funcao || 'usuário',
+          text: textVal,
+          area: null,
+          atribuidoA: null,
+          linkUrl: linkVal || null,
+          attachments: [],
+        },
+        { projectName: project?.nome || projectId }
+      );
 
-      if (typeof projectService.addDiaryEntry === 'function') {
-        await projectService.addDiaryEntry(project.id || projectId, entry);
-      } else if (typeof projectService.updateProject === 'function') {
-        await projectService.updateProject(project.id || projectId, {
-          diario: next,
-          atualizadoEm: new Date().toISOString(),
-        });
-      }
-
-      setDiaryEntries((prev) => [entry, ...prev]);
-      setProject((prev) => ({
-        ...(prev || {}),
-        diario: next,
-        atualizadoEm: new Date().toISOString(),
-      }));
       setNewDiaryText('');
       setNewDiaryLink('');
     } catch (e) {
@@ -285,33 +293,31 @@ const ProjectDetailPage = () => {
     }
   };
 
+  // Excluir diário (admin): apaga subcoleção e feed relacionado (sourceDiaryId)
   const handleDeleteDiaryEntry = async (entryId) => {
     setDiaryError('');
-    if (userProfile?.funcao !== 'administrador') {
+    if ((userProfile?.funcao || '').toLowerCase() !== 'administrador') {
       setDiaryError('Apenas administradores podem excluir observações.');
       return;
     }
     try {
-      setSavingDiary(true);
-      const current = Array.isArray(project?.diario) ? project.diario : diaryEntries;
-      const next = current.filter((e) => e.id !== entryId);
-
-      if (typeof projectService.removeDiaryEntry === 'function') {
-        await projectService.removeDiaryEntry(project.id || projectId, entryId);
-      } else if (typeof projectService.updateProject === 'function') {
-        await projectService.updateProject(project.id || projectId, {
-          diario: next,
-          atualizadoEm: new Date().toISOString(),
-        });
+      // 1) deletar feed(s) vinculado(s) a este entry (sourceDiaryId)
+      const feedSnap = await getDocs(
+        query(
+          collection(db, 'diary_feed'),
+          where('projectId', '==', project.id || projectId),
+          where('sourceDiaryId', '==', entryId)
+        )
+      );
+      for (const d of feedSnap.docs) {
+        await deleteDoc(doc(db, 'diary_feed', d.id));
       }
 
-      setDiaryEntries((prev) => prev.filter((e) => e.id !== entryId));
-      setProject((prev) => ({ ...(prev || {}), diario: next }));
+      // 2) deletar o doc da subcoleção
+      await deleteDoc(doc(db, 'projetos', project.id || projectId, 'diary', entryId));
     } catch (e) {
       console.error('Erro ao excluir observação do diário:', e);
       setDiaryError('Não foi possível excluir a observação. Tente novamente.');
-    } finally {
-      setSavingDiary(false);
     }
   };
 
@@ -348,7 +354,7 @@ const ProjectDetailPage = () => {
     return { label: 'Finalizado', color: 'gray' };
   };
 
-  const canEdit = userProfile?.funcao === 'administrador';
+  const canEdit = (userProfile?.funcao || '').toLowerCase() === 'administrador';
 
   // ====== Métricas de chamados (memo)
   const ticketMetrics = useMemo(() => {
@@ -429,11 +435,6 @@ const ProjectDetailPage = () => {
         <div className="text-center">
           <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Projeto não encontrado</h2>
-          <p className="text-gray-600 mb-4">O projeto solicitado não existe ou foi removido.</p>
-          <Button onClick={() => navigate('/projetos')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar para Projetos
-          </Button>
         </div>
       </div>
     );
@@ -537,7 +538,7 @@ const ProjectDetailPage = () => {
               </CardContent>
             </Card>
 
-            {/* Diário do Projeto — FORM */}
+            {/* Diário do Projeto — FORM (mantém posição) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -773,19 +774,13 @@ const ProjectDetailPage = () => {
                 <div>
                   Criado em:{' '}
                   <span className="font-medium">
-                    {formatDateTimeSP(
-                      /* ✅ agora cobrimos createdAt também */
-                      project.createdAt || project.criadoEm || project.criadoem
-                    )}
+                    {formatDateTimeSP(project.createdAt || project.criadoEm || project.criadoem)}
                   </span>
                 </div>
                 <div>
                   Atualizado em:{' '}
                   <span className="font-medium">
-                    {formatDateTimeSP(
-                      /* ✅ agora cobrimos updatedAt também */
-                      project.updatedAt || project.atualizadoEm || project.atualizadoem
-                    )}
+                    {formatDateTimeSP(project.updatedAt || project.atualizadoEm || project.atualizadoem)}
                   </span>
                 </div>
                 <div> Status: <span className="font-medium capitalize">{project.status || 'ativo'}</span></div>
@@ -810,7 +805,8 @@ const ProjectDetailPage = () => {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm text-gray-700">
-                            <span className="font-semibold">{e.authorName}</span> ({e.authorRole}) deixou a seguinte observação:
+                            <span className="font-semibold">{e.authorName || '—'}</span>
+                            {e.authorRole ? ` (${e.authorRole})` : ''} deixou a seguinte observação:
                           </p>
                           <p className="mt-1 whitespace-pre-wrap text-gray-900 break-words">{e.text}</p>
                           {e.linkUrl && (
@@ -827,7 +823,7 @@ const ProjectDetailPage = () => {
                             </div>
                           )}
                         </div>
-                        {userProfile?.funcao === 'administrador' && (
+                        {(userProfile?.funcao || '').toLowerCase() === 'administrador' && (
                           <Button
                             variant="ghost"
                             size="icon"
