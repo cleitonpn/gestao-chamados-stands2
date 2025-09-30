@@ -251,3 +251,37 @@ export const diaryService = {
     return { items, nextCursor };
   },
 };
+
+// ---- BACKFILL: copia itens antigos do array "diario" do projeto para o feed ----
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "../config/firebase";
+
+export async function backfillInlineDiariesToFeedOnce() {
+  const projs = await getDocs(collection(db, "projetos"));
+  let count = 0;
+
+  for (const d of projs.docs) {
+    const data = d.data() || {};
+    const projectId = d.id;
+    const projectName = data.nome || data.name || data.projectName || projectId;
+
+    const antigos = Array.isArray(data.diario) ? data.diario : [];
+    for (const it of antigos) {
+      // campos comuns
+      await diaryService.mirrorToFeed({
+        projectId,
+        projectName,
+        authorId: it.authorId || it.userId || "",
+        authorName: it.authorName || it.nome || it.userName || "Usuário",
+        authorRole: it.authorRole || it.funcao || null,
+        text: it.text || it.obs || it.observacao || it.observação || "",
+        area: it.area || null,
+        atribuidoA: it.atribuidoA || null,
+        linkUrl: it.linkUrl || it.driveLink || null,
+        attachments: it.attachments || [],
+      });
+      count++;
+    }
+  }
+  return count;
+}
