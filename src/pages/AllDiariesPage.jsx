@@ -1,21 +1,15 @@
-// src/pages/AllDiariesPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DiaryCard from "../components/DiaryCard";
 import DiaryForm from "../components/DiaryForm";
-import {
-  createDiaryWithFeed,
-  diaryService,
-} from "../services/diaryService";
+import { diaryService } from "../services/diaryService";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../services/firebase"; // ✅ caminho corrigido
+import { db } from "../services/firebase"; // ✅ caminho correto
 
 export default function AllDiariesPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-
-  // companyId é opcional; se não usar multiempresa, o feed cai na coleção raiz /diary_feed
   const { currentUser } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -32,7 +26,7 @@ export default function AllDiariesPage() {
 
   const [projects, setProjects] = useState([]);
 
-  // Carrega projetos (coleção top-level "projetos", conforme suas regras)
+  // Carrega lista de projetos (coleção top-level "projetos")
   useEffect(() => {
     (async () => {
       const snap = await getDocs(collection(db, "projetos"));
@@ -47,7 +41,7 @@ export default function AllDiariesPage() {
     })();
   }, []);
 
-  // Sincroniza estado -> URL
+  // Estado -> URL
   useEffect(() => {
     const next = new URLSearchParams();
     if (limitN) next.set("limit", String(limitN));
@@ -62,8 +56,7 @@ export default function AllDiariesPage() {
   // Carrega feed conforme estado
   useEffect(() => {
     let stop = false;
-
-    async function run() {
+    (async () => {
       setLoading(true);
       try {
         let res;
@@ -90,9 +83,7 @@ export default function AllDiariesPage() {
       } finally {
         if (!stop) setLoading(false);
       }
-    }
-    run();
-
+    })();
     return () => { stop = true; };
   }, [limitN, search, selectedProjectId, filters.area, filters.atribuidoA]);
 
@@ -108,11 +99,11 @@ export default function AllDiariesPage() {
   };
 
   const gotoProject = (projectId) => {
-    navigate(`/projeto/${projectId}`); // ✅ sua rota é singular
+    navigate(`/projeto/${projectId}`); // casa com tuas rotas
   };
 
   const handleCreate = async ({ projectId, projectName, text, area, atribuidoA, linkUrl }) => {
-    await createDiaryWithFeed(
+    await diaryService.addEntryWithFeed(
       projectId,
       {
         authorId: currentUser?.uid,
@@ -125,29 +116,20 @@ export default function AllDiariesPage() {
         attachments: [],
       },
       {
-        // companyId: null, // se não usar multiempresa, deixe null (feed em /diary_feed)
+        // companyId: null // se usar multiempresa, passe aqui
         projectName,
       }
     );
 
-    // recarrega lista atual
+    // recarrega lista conforme o estado atual
     if (selectedProjectId) {
-      const res = await diaryService.fetchFeedByProject({
-        projectId: selectedProjectId,
-        pageSize: limitN,
-      });
+      const res = await diaryService.fetchFeedByProject({ projectId: selectedProjectId, pageSize: limitN });
       setItems(res.items || []);
     } else if (search.trim()) {
-      const res = await diaryService.searchFeedByProjectName({
-        term: search.trim(),
-        pageSize: limitN,
-      });
+      const res = await diaryService.searchFeedByProjectName({ term: search.trim(), pageSize: limitN });
       setItems(res.items || []);
     } else {
-      const res = await diaryService.fetchFeedRecent({
-        pageSize: limitN,
-        filters,
-      });
+      const res = await diaryService.fetchFeedRecent({ pageSize: limitN, filters });
       setItems(res.items || []);
       setCursor(res.nextCursor || null);
     }
