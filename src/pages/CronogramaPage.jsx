@@ -29,6 +29,16 @@ import { db } from '../config/firebase';
 
 // Componente para o Cronograma de Eventos
 const CronogramaPage = () => {
+
+  // ── Helpers de normalização para casar nomes com/sem ano ─────────────────────
+  const stripYear = (s) => (s || '').replace(/\b20\d{2}\b/g, '').replace(/\s{2,}/g, ' ').trim();
+  const norm = (s) =>
+    (s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/\s+/g, ' ') // espaços
+      .trim()
+      .toLowerCase();
+
   const { user, authInitialized } = useAuth();
   const navigate = useNavigate();
 
@@ -38,7 +48,8 @@ const CronogramaPage = () => {
   const [archivingEvent, setArchivingEvent] = useState(null);
 
   // 🔗 Mapa com os links (manual/planta) do evento cadastrado
-  const [eventLinksMap, setEventLinksMap] = useState({}); // { [nomeEvento]: { linkManual, linkPlanta } }
+  // Mapa normalizado: chave em lowercase/sem acento/sem duplicidades
+  const [eventLinksMap, setEventLinksMap] = useState({}); // { [normalizedKey]: { linkManual, linkPlanta } }
 
   useEffect(() => {
     if (authInitialized && user) {
@@ -49,35 +60,42 @@ const CronogramaPage = () => {
   }, [user, authInitialized, navigate]);
 
   // Busca todos os eventos cadastrados (coleções "eventos" e "events") e cria um mapa por nome
+  
   const loadEventLinksMap = async () => {
     const map = {};
 
-    // Função auxiliar que lê uma coleção e popula o mapa
+    const saveVariants = (nome, data) => {
+      const raw = (nome || '').trim();
+      if (!raw) return;
+      const ano = (data?.ano != null && data.ano !== '') ? String(data.ano) : '';
+      const variants = new Set([raw, stripYear(raw), ano ? `${raw} ${ano}` : null].filter(Boolean));
+      variants.forEach(v => {
+        map[norm(v)] = {
+          linkManual: (data.linkManual || '').trim(),
+          linkPlanta: (data.linkPlanta || '').trim()
+        };
+      });
+    };
+
     const readCollectionIntoMap = async (colName) => {
       try {
         const colRef = collection(db, colName);
         const snap = await getDocs(colRef);
         snap.forEach((d) => {
           const data = d.data() || {};
-          const nome = (data.nome || '').trim();
-          if (!nome) return;
-          // Último write vence em caso de duplicata entre coleções
-          map[nome] = {
-            linkManual: (data.linkManual || '').trim(),
-            linkPlanta: (data.linkPlanta || '').trim()
-          };
+          saveVariants(data.nome, data);
         });
       } catch {
-        // Ignora se a coleção não existir nesse projeto
+        // coleção pode não existir; ignora
       }
     };
 
-    // Tenta nas duas convenções mais comuns do seu código
     await readCollectionIntoMap('eventos');
     await readCollectionIntoMap('events');
 
     setEventLinksMap(map);
   };
+;
 
   // Função para carregar e agrupar os projetos em eventos
   const loadEventos = async () => {
@@ -251,7 +269,7 @@ const CronogramaPage = () => {
       ) : (
         <div className="flex overflow-x-auto space-x-6 pb-4">
           {eventos.map((evento) => {
-            const links = eventLinksMap[evento.nome] || {};
+            const links = eventLinksMap[norm(evento.nome)] || eventLinksMap[norm(stripYear(evento.nome))] || {};
             const hasManual = !!links.linkManual;
             const hasPlanta = !!links.linkPlanta;
 
