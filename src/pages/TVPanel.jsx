@@ -5,7 +5,7 @@ import { db } from '../config/firebase';
 import { 
   BarChart3, Clock, Zap, CheckCircle, AlertOctagon, TrendingUp, FolderOpen,
   Activity, UserCheck, Target, Award, PlusCircle, ArrowRightCircle, 
-  TrendingDown, Flag, GitPullRequest, Calendar, Users, FileText
+  TrendingDown, Flag, GitPullRequest, Calendar, Users, FileText, Image as ImageIcon
 } from 'lucide-react';
 
 // HELPER PARA FORMATAR TEMPO RELATIVO
@@ -41,13 +41,13 @@ const TVPanel = () => {
 
   // --- Estados para Novos Cards e Correções (originais do seu painel) ---
   const [untreatedByArea, setUntreatedByArea] = useState({});
-  const [topExecutors, setTopExecutors] = useState([]); // (mantido, mas não exibido mais)
+  const [topExecutors, setTopExecutors] = useState([]); // mantido (não exibido)
   const [slaStats, setSlaStats] = useState({ violated: 0, atRisk: 0 });
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [awaitingValidationCount, setAwaitingValidationCount] = useState(0);
   const [escalationRate, setEscalationRate] = useState(0);
-  const [topAreaCreators, setTopAreaCreators] = useState([]); // (mantido, mas não exibido mais)
+  const [topAreaCreators, setTopAreaCreators] = useState([]); // mantido (não exibido)
   const [openedToday, setOpenedToday] = useState(0);
   const [openedThisMonth, setOpenedThisMonth] = useState(0);
   
@@ -63,7 +63,7 @@ const TVPanel = () => {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Assinaturas principais (iguais ao seu arquivo)
+  // Assinaturas principais (iguais ao seu arquivo base)
   useEffect(() => {
     const unsubscribeUsers = onSnapshot(query(collection(db, 'usuarios')), (snapshot) => {
       const usersData = snapshot.docs.reduce((acc, doc) => {
@@ -90,7 +90,6 @@ const TVPanel = () => {
         total: tickets.length,
         abertos: openTickets.length,
         emAndamento: tickets.filter(t => t && ['em tratativa', 'tratativa', 'escalado_para_outra_area', 'aguardando_aprovacao'].includes(t.status)).length,
-        // Concluídos = concluido + arquivado (mantida sua alteração)
         concluidos: tickets.filter(t => t && ['concluido', 'arquivado'].includes(t.status)).length,
       });
 
@@ -104,7 +103,7 @@ const TVPanel = () => {
       const totalEscalated = tickets.filter(t => t && ['escalado_para_outra_area', 'aguardando_aprovacao'].includes(t.status)).length;
       setEscalationRate(tickets.length > 0 ? (totalEscalated / tickets.length) * 100 : 0);
 
-      // (mantidos, ainda que não exibidos agora)
+      // contagens auxiliares (mantidas)
       const executedThisMonth = tickets.filter(t => {
         if (!t) return false;
         const lastUpdate = getLatestTimestamp(t);
@@ -146,8 +145,9 @@ const TVPanel = () => {
       });
       setSlaStats({ violated: violatedCount, atRisk: atRiskCount });
       
+      // >>> FEED: pega muito e corta para 20 últimos (mais estável)
       const sortedTickets = [...tickets].sort((a, b) => getLatestTimestamp(b) - getLatestTimestamp(a));
-      setActivityFeed(sortedTickets.slice(0, 10).map(ticket => {
+      setActivityFeed(sortedTickets.slice(0, 20).map(ticket => {
         if (!ticket) return null;
         const timestamp = getLatestTimestamp(ticket);
         let message, icon;
@@ -170,7 +170,7 @@ const TVPanel = () => {
           const dt = data.createdAt?.toDate
             ? data.createdAt.toDate()
             : (data.createdAt?._seconds ? new Date(data.createdAt._seconds * 1000) : null);
-        return { id: d.id, ...data, _dt: dt };
+          return { id: d.id, ...data, _dt: dt };
         });
         setDiaryFeed(list);
       }
@@ -334,7 +334,7 @@ const TVPanel = () => {
             </div>
           </section>
           
-          {/* >>> AQUI trocamos os dois quadros por UM painel de DIÁRIOS <<< */}
+          {/* Painel de DIÁRIOS (substitui os 2 quadros removidos) */}
           <section className="grid grid-cols-2 gap-2 flex-grow">
             <div className="col-span-2 bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col">
               <h3 className="text-md font-bold mb-2 flex items-center">
@@ -348,6 +348,12 @@ const TVPanel = () => {
                   {diaryFeed.map((d) => {
                     const when = d._dt || null;
                     const preview = (d.text || "").length > 200 ? (d.text || "").slice(0, 200) + "…" : (d.text || "");
+                    const images = Array.isArray(d.attachments)
+                      ? d.attachments.filter(a => (a.type || a.contentType || '').toString().includes('image'))
+                      : [];
+                    const thumb = images.slice(0, 4);
+                    const more = Math.max(images.length - thumb.length, 0);
+
                     return (
                       <div key={d.id} className="bg-black/20 border border-white/10 rounded-lg p-2">
                         <div className="flex items-center justify-between">
@@ -358,12 +364,38 @@ const TVPanel = () => {
                             {when ? formatTimeAgo(when) : "—"}
                           </div>
                         </div>
+
                         <div className="mt-1 text-sm font-medium truncate">
                           {d.authorName || "—"}{d.authorRole ? <span className="text-white/60 font-normal"> · {d.authorRole}</span> : null}
                         </div>
-                        <p className="mt-1 text-sm text-white/80 break-words">
+
+                        {/* miniaturas */}
+                        {thumb.length > 0 && (
+                          <div className="mt-2 grid grid-cols-4 gap-1">
+                            {thumb.map((img, idx) => (
+                              <div key={idx} className="relative w-full h-16 rounded overflow-hidden bg-black/30">
+                                <img
+                                  src={img.url}
+                                  alt={img.name || `img-${idx}`}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              </div>
+                            ))}
+                            {more > 0 && (
+                              <div className="w-full h-16 rounded bg-black/30 border border-white/10 flex items-center justify-center text-xs text-white/80">
+                                +{more}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* texto */}
+                        <p className="mt-2 text-sm text-white/80 break-words">
                           {preview}
                         </p>
+
+                        {/* link opcional */}
                         {d.linkUrl && (
                           <a
                             href={d.linkUrl}
@@ -384,11 +416,12 @@ const TVPanel = () => {
           </section>
         </main>
 
-        {/* Lateral direita: Feed de atividades (igual) */}
+        {/* Lateral direita: Feed de atividades (20 últimos) */}
         <aside className="bg-black/20 border border-white/20 rounded-xl p-3 shadow-lg flex flex-col w-1/4">
           <h3 className="text-lg font-bold mb-2 flex items-center flex-shrink-0">
             <Activity className="h-5 w-5 mr-2 text-cyan-400" />Feed de Atividades
           </h3>
+          <div className="text-xs text-white/70 mb-1">20 últimos</div>
           <div className="space-y-2 overflow-y-auto flex-grow custom-scrollbar pr-2">
             {activityFeed.map((item, index) => {
               if (!item) return null;
