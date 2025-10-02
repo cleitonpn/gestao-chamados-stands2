@@ -24,6 +24,10 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
+  Calendar,
+  Zap,
+  UserCheck,
+  PlusCircle,
 } from "lucide-react";
 
 /* ============================
@@ -56,7 +60,7 @@ const timeAgo = (date) => {
   return `há ${seconds} seg`;
 };
 
-// pega o timestamp mais recente do chamado
+// timestamp “mais recente” do chamado para ordenar feed
 const latestTicketDate = (t) =>
   tsToDate(t?.dataUltimaAtualizacao) ||
   tsToDate(t?.updatedAt) ||
@@ -65,32 +69,63 @@ const latestTicketDate = (t) =>
   tsToDate(t?.criadoEm) ||
   new Date(0);
 
+/* heurísticas de status comuns do seu sistema */
+const isClosed = (s) =>
+  ["concluido", "concluído", "arquivado"].includes((s || "").toLowerCase());
+
+const isOpen = (s) =>
+  !["concluido", "concluído", "cancelado", "arquivado"].includes(
+    (s || "").toLowerCase()
+  );
+
+const isInProgress = (s) =>
+  ["em tratativa", "em execução", "em execucao", "andamento"].some((x) =>
+    (s || "").toLowerCase().includes(x)
+  );
+
+const isPendingApproval = (s) =>
+  ["aguardando_validacao", "aguardando validação", "aguardando validacao"].some(
+    (x) => (s || "").toLowerCase().includes(x)
+  );
+
+const isEscalated = (t) =>
+  !!t?.escalado ||
+  ["escalado", "escalados para mim"].includes((t?.status || "").toLowerCase());
+
+const isSlaViolated = (t) => {
+  const v = (t?.slaStatus || t?.sla || "").toString().toLowerCase();
+  return v.includes("viol") || t?.slaViolado === true;
+};
+const isSlaRisk = (t) => {
+  const v = (t?.slaStatus || t?.sla || "").toString().toLowerCase();
+  return v.includes("risco") || v.includes("at_risk") || t?.slaRisco === true;
+};
+
 /* ============================
    Página
    ============================ */
 export default function TVPanel() {
-  // KPIs simples (mantidos)
+  // Dados base
   const [tickets, setTickets] = useState([]);
   const [projectsTotal, setProjectsTotal] = useState(0);
 
-  // Feed de chamados (direita)
+  // Feed direita: chamados
   const [activityFeed, setActivityFeed] = useState([]);
 
-  // NOVO: últimos diários (quadro novo)
+  // NOVO: últimos diários
   const [lastDiaries, setLastDiaries] = useState([]);
 
   /* ---------------- assinaturas ---------------- */
-  // Assinatura dos KPIs básicos dos chamados (coleção "chamados")
+  // Chamados (todos) para métricas
   useEffect(() => {
-    const qTickets = query(collection(db, "chamados"));
-    const unsub = onSnapshot(qTickets, (snap) => {
+    const unsub = onSnapshot(collection(db, "chamados"), (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setTickets(list);
     });
     return () => unsub();
   }, []);
 
-  // Assinatura do total de projetos (coleção "projetos")
+  // Projetos para KPI de ativos/total (mantém contagem simples)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "projetos"), (snap) => {
       setProjectsTotal(snap.size || 0);
@@ -98,25 +133,24 @@ export default function TVPanel() {
     return () => unsub();
   }, []);
 
-  // Feed da direita: 10 últimos chamados abertos/atualizados
+  // Feed de chamados (direita): 10 últimos por atualização
   useEffect(() => {
-    // usa um campo comum e estável; o array já é resortado no client por segurança
     const qFeed = query(
       collection(db, "chamados"),
       orderBy("updatedAt", "desc"),
-      limit(20) // pega mais e a gente filtra para os 10 "mais recentes" pelo helper
+      limit(30) // pega um pouco mais e resorta/seleciona 10
     );
     const unsub = onSnapshot(qFeed, (snap) => {
       const raw = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const sorted = raw
         .sort((a, b) => latestTicketDate(b) - latestTicketDate(a))
-        .slice(0, 20);
+        .slice(0, 10);
       setActivityFeed(sorted);
     });
     return () => unsub();
   }, []);
 
-  // NOVO: últimos 10 diários (coleção global "diary_feed")
+  // NOVO: últimos 10 diários do feed global
   useEffect(() => {
     const qDiaries = query(
       collection(db, "diary_feed"),
@@ -130,15 +164,30 @@ export default function TVPanel() {
     return () => unsub();
   }, []);
 
-  /* ---------------- KPIs derivados ---------------- */
+  /* ---------------- métricas derivadas ---------------- */
   const metrics = useMemo(() => {
     const total = tickets.length;
-    const closedSet = new Set(["concluido", "concluído", "arquivado"]);
-    const notOpen = new Set(["concluido", "concluído", "cancelado", "arquivado"]);
-    const closed = tickets.filter((t) => closedSet.has((t.status || "").toLowerCase())).length;
-    const open = tickets.filter((t) => !notOpen.has((t.status || "").toLowerCase())).length;
+    const open = tickets.filter((t) => isOpen(t.status)).length;
+    const inProg = tickets.filter((t) => isInProgress(t.status)).length;
+    const closed = tickets.filter((t) => isClosed(t.status)).length;
     const progress = total > 0 ? Math.round((closed / total) * 100) : 0;
-    return { total, open, closed, progress };
+
+    const pendAprov = tickets.filter((t) => isPendingApproval(t.status)).length;
+    const escalados = tickets.filter((t) => isEscalated(t)).length;
+
+    const slaViol = tickets.filter((t) => isSlaViolated(t)).length;
+    const slaRisk = tickets.filter((t) => isSlaRisk(t)).length;
+
+    return {
+      total,
+      open,
+      inProg,
+      closed,
+      progress,
+      pendingApproval: pendAprov,
+      escalated: escalados,
+      sla: { violated: slaViol, atRisk: slaRisk },
+    };
   }, [tickets]);
 
   /* ---------------- layout ---------------- */
@@ -149,7 +198,9 @@ export default function TVPanel() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <BarChart3 className="h-6 w-6 text-sky-400" />
-            <h1 className="text-2xl font-bold tracking-tight">Painel Operacional</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Painel Operacional
+            </h1>
           </div>
           <div className="text-sm text-slate-300">
             Atualizado {timeAgo(new Date())}
@@ -159,7 +210,7 @@ export default function TVPanel() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-6">
           {/* COLUNA ESQUERDA (cards/kpis) */}
           <div className="space-y-6">
-            {/* KPIs */}
+            {/* KPIs principais */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <KpiCard
                 icon={<FolderOpen className="h-5 w-5" />}
@@ -181,7 +232,7 @@ export default function TVPanel() {
               />
               <KpiCard
                 icon={<Award className="h-5 w-5" />}
-                label="Projetos ativos"
+                label="Projetos"
                 value={projectsTotal}
                 tone="violet"
               />
@@ -212,6 +263,41 @@ export default function TVPanel() {
                   Picos de fila esporádicos
                 </span>
               </div>
+            </div>
+
+            {/* Linha de cartões operacionais (mantidos) */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <OpCard
+                icon={<Calendar className="h-4 w-4" />}
+                label="Em andamento"
+                value={metrics.inProg}
+                tone="sky"
+              />
+              <OpCard
+                icon={<Flag className="h-4 w-4" />}
+                label="Aguardando validação"
+                value={metrics.pendingApproval}
+                tone="amber"
+              />
+              <OpCard
+                icon={<AlertOctagon className="h-4 w-4" />}
+                label="SLA em risco"
+                value={metrics.sla.atRisk}
+                tone="rose"
+              />
+              <OpCard
+                icon={<Zap className="h-4 w-4" />}
+                label="SLA violado"
+                value={metrics.sla.violated}
+                tone="red"
+              />
+            </div>
+
+            {/* Pequenos status gerais (mantidos) */}
+            <div className="grid grid-cols-3 gap-3">
+              <MiniCard icon={<Clock className="h-4 w-4" />} label="Takt" value="5m" />
+              <MiniCard icon={<Users className="h-4 w-4" />} label="Equipes" value="On-line" />
+              <MiniCard icon={<UserCheck className="h-4 w-4" />} label="Escalados" value={metrics.escalated} />
             </div>
 
             {/* ====== QUADRO NOVO: ÚLTIMOS DIÁRIOS ====== */}
@@ -275,8 +361,6 @@ export default function TVPanel() {
                 </ul>
               )}
             </div>
-
-            {/* (Removidos: Top executores / Áreas que mais abriram) */}
           </div>
 
           {/* COLUNA DIREITA (feed dos chamados) */}
@@ -321,11 +405,14 @@ export default function TVPanel() {
               )}
             </div>
 
-            {/* Cartão pequeno de status gerais (opcional) */}
+            {/* Cartões pequenos (mantidos) */}
             <div className="grid grid-cols-3 gap-3">
-              <MiniCard icon={<Clock className="h-4 w-4" />} label="Takt" value="5m" />
+              <MiniCard icon={<PlusCircle className="h-4 w-4" />} label="Novos (24h)" value={tickets.filter(t => {
+                const d = latestTicketDate(t);
+                return d && Date.now() - d.getTime() <= 24*3600*1000;
+              }).length} />
               <MiniCard icon={<Users className="h-4 w-4" />} label="Equipes" value="On-line" />
-              <MiniCard icon={<AlertOctagon className="h-4 w-4" />} label="SLA risco" value="ok" />
+              <MiniCard icon={<AlertOctagon className="h-4 w-4" />} label="SLA risco" value={metrics.sla.atRisk} />
             </div>
           </div>
         </div>
@@ -349,6 +436,24 @@ function KpiCard({ icon, label, value, tone = "sky" }) {
       <div className="flex items-center justify-between">
         <div className={`p-2 rounded-lg ${tones[tone]}`}>{icon}</div>
         <span className="text-2xl font-bold tabular-nums">{value}</span>
+      </div>
+      <div className="mt-2 text-sm text-slate-300">{label}</div>
+    </div>
+  );
+}
+
+function OpCard({ icon, label, value, tone = "sky" }) {
+  const tones = {
+    sky: "text-sky-300",
+    amber: "text-amber-300",
+    rose: "text-rose-300",
+    red: "text-red-300",
+  };
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+      <div className="flex items-center justify-between">
+        <div className={`p-2 rounded-lg bg-white/10 ${tones[tone]}`}>{icon}</div>
+        <span className="text-xl font-bold tabular-nums">{value}</span>
       </div>
       <div className="mt-2 text-sm text-slate-300">{label}</div>
     </div>
