@@ -82,7 +82,7 @@ const extractEmpreiteiros = (equipesEmpreiteiras) => {
 };
 
 /* =========================================================================
-   Card do Projeto (apenas UI; NÃO altera regras/serviços)
+   Card do Projeto (UI somente)
    ========================================================================= */
 const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
   const navigate = useNavigate();
@@ -119,8 +119,25 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
   const statusInfo = getStatusInfo();
 
-  // Nomes já hidratados no load (project.__empreiteiros), com fallback se já veio no payload
-  const terceirizadas = Array.isArray(project.__empreiteiros) ? project.__empreiteiros : extractEmpreiteiros(project.equipesEmpreiteiras);
+  // Estado local para empreiteiros carregados via botão "Equipes"
+  const [terceirizadas, setTerceirizadas] = useState(extractEmpreiteiros(project.equipesEmpreiteiras));
+  const [loadingEq, setLoadingEq] = useState(false);
+  const [loadedEq, setLoadedEq] = useState(terceirizadas.length > 0);
+
+  const handleLoadEquipes = async () => {
+    if (loadedEq || loadingEq) return;
+    try {
+      setLoadingEq(true);
+      const full = await projectService.getProjectById(project.id);
+      const nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
+      setTerceirizadas(nomes);
+      setLoadedEq(true);
+    } catch (e) {
+      // silencioso; se falhar, não quebra o card
+    } finally {
+      setLoadingEq(false);
+    }
+  };
 
   return (
     <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
@@ -153,12 +170,12 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
         <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
         <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
 
-        {/* Empreiteiras (chips) */}
+        {/* Empreiteiras (chips) — aparecem quando já existem no payload ou após clicar em "Equipes" */}
         {terceirizadas.length > 0 && (
           <div className="flex items-start">
             <span className="w-20">👷 Equipes:</span>
             <div className="flex flex-wrap gap-1">
-              {terceirizadas.slice(0, 4).map((nome) => (
+              {terceirizadas.slice(0, 8).map((nome) => (
                 <span
                   key={nome}
                   className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-gray-700 bg-gray-50"
@@ -167,8 +184,8 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
                   {nome}
                 </span>
               ))}
-              {terceirizadas.length > 4 && (
-                <span className="text-xs text-gray-500">+{terceirizadas.length - 4}</span>
+              {terceirizadas.length > 8 && (
+                <span className="text-xs text-gray-500">+{terceirizadas.length - 8}</span>
               )}
             </div>
           </div>
@@ -181,13 +198,24 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
       </div>
 
       <div className="flex gap-2">
-        {/* Botão Ver: preservado exatamente como está (não alterado) */}
+        {/* Ver: volta a abrir a página de detalhe do projeto */}
         <button
           type="button"
-          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)} // preservado
+          onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
           className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
         >
           👁️ Ver
+        </button>
+
+        {/* Equipes: carrega nomes dos empreiteiros no card */}
+        <button
+          type="button"
+          onClick={handleLoadEquipes}
+          disabled={loadingEq || loadedEq}
+          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${loadedEq ? 'bg-gray-200 text-gray-600' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+          title={loadedEq ? 'Equipes carregadas' : 'Carregar equipes deste projeto'}
+        >
+          {loadingEq ? 'Carregando…' : 'Equipes'}
         </button>
 
         {userRole === 'administrador' && (
@@ -246,6 +274,7 @@ const ProjectsPage = () => {
     if (eventFromUrl) setSelectedEvent(eventFromUrl);
     if (tabFromUrl) setActiveTab(tabFromUrl);
     setSearchTerm(qFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* Persistência de filtros na URL (salvar) */
@@ -253,14 +282,15 @@ const ProjectsPage = () => {
     const params = new URLSearchParams(location.search);
     params.set('evento', selectedEvent);
     params.set('tab', activeTab);
-    params.set('q', searchTerm); // mantém a busca na URL
+    params.set('q', searchTerm);
     const newSearch = `?${params.toString()}`;
     if (newSearch !== location.search) {
       navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
     }
-  }, [selectedEvent, activeTab, searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEvent, activeTab, searchTerm]);
 
-  /* Carregar projetos + hidratar empreiteiros (usando apenas funções existentes) */
+  /* Carregar projetos (sem alterar serviços/regras) */
   useEffect(() => {
     if (!authInitialized) return;
     if (!user) {
@@ -272,35 +302,14 @@ const ProjectsPage = () => {
       try {
         setLoading(true);
         setError('');
-
         const projectsData = await projectService.getAllProjects();
-
-        // Ordenação original
         const sortedProjects = projectsData.sort((a, b) => {
           const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
           const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
           return bDate - aDate;
         });
-
-        // Hidrata empreiteiros para aparecerem sem clique:
-        // - se já vieram no payload, usa direto
-        // - se não, usa projectService.getProjectById (função já existente)
-        const augmented = await Promise.all(sortedProjects.map(async (p) => {
-          let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
-          if (nomes.length === 0) {
-            try {
-              const full = await projectService.getProjectById(p.id);
-              nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
-            } catch {
-              // silencioso
-            }
-          }
-          return { ...p, __empreiteiros: nomes };
-        }));
-
-        setAllProjects(augmented);
-
-        const uniqueEvents = [...new Set(augmented.map(p => p.feira || p.evento).filter(Boolean))];
+        setAllProjects(sortedProjects);
+        const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
         setEvents(uniqueEvents);
       } catch (err) {
         console.error('Erro ao carregar projetos:', err);
@@ -309,9 +318,9 @@ const ProjectsPage = () => {
         setLoading(false);
       }
     })();
-  }, [authInitialized, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authInitialized, user, navigate]);
 
-  /* Filtragem por papéis + tabs + evento + busca (com empreiteiros) */
+  /* Filtragem por papéis + tabs + evento + busca */
   useEffect(() => {
     if (!userProfile) return;
 
@@ -347,16 +356,10 @@ const ProjectsPage = () => {
       projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
     }
 
-    // Busca: inclui empreiteiros
+    // Busca (mantida conforme já existia; não mexe nas regras)
     const term = (searchTerm || '').trim().toLowerCase();
     if (term) {
       const hit = (v) => (v || '').toString().toLowerCase().includes(term);
-
-      const hasEmpreiteiro = (p) => {
-        const list = Array.isArray(p.__empreiteiros) ? p.__empreiteiros : extractEmpreiteiros(p.equipesEmpreiteiras);
-        return list.some(n => n.toLowerCase().includes(term));
-      };
-
       projectsToDisplay = projectsToDisplay.filter(p =>
         hit(p.nome) ||
         hit(p.feira || p.evento) ||
@@ -364,8 +367,7 @@ const ProjectsPage = () => {
         hit(p.consultorNome) ||
         hit(p.produtorNome) ||
         hit(p.pavilhao) ||
-        hit(p.tipoMontagem) ||
-        hasEmpreiteiro(p) // <- aqui
+        hit(p.tipoMontagem)
       );
     }
 
@@ -373,24 +375,13 @@ const ProjectsPage = () => {
     setSelectedIds(new Set()); // limpa seleção ao mudar filtros
   }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
 
-  /* Encerrar individual e em massa — mantido igual */
+  /* Encerrar individual e em massa — não alterado */
   const handleArchiveProject = async (projectId) => {
     if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
     try {
       await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
       const projectsData = await projectService.getAllProjects();
-      // re-hidrata após atualização
-      const augmented = await Promise.all(projectsData.map(async (p) => {
-        let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
-        if (nomes.length === 0) {
-          try {
-            const full = await projectService.getProjectById(p.id);
-            nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
-          } catch {}
-        }
-        return { ...p, __empreiteiros: nomes };
-      }));
-      setAllProjects(augmented);
+      setAllProjects(projectsData);
     } catch (error) {
       console.error('Erro ao encerrar projeto:', error);
       setError('Erro ao encerrar projeto. Tente novamente.');
@@ -424,17 +415,7 @@ const ProjectsPage = () => {
         projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
       ));
       const projectsData = await projectService.getAllProjects();
-      const augmented = await Promise.all(projectsData.map(async (p) => {
-        let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
-        if (nomes.length === 0) {
-          try {
-            const full = await projectService.getProjectById(p.id);
-            nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
-          } catch {}
-        }
-        return { ...p, __empreiteiros: nomes };
-      }));
-      setAllProjects(augmented);
+      setAllProjects(projectsData);
       setSelectedIds(new Set());
     } catch (e) {
       console.error('Erro no encerramento em massa:', e);
@@ -481,7 +462,7 @@ const ProjectsPage = () => {
   }, [filteredProjects]);
 
   /* =========================
-     Exportação CSV (inclui EMPREITEIROS)
+     Exportação CSV (mantida)
      ========================= */
   const toCSVRow = (obj) => {
     const escape = (v) => {
@@ -489,10 +470,6 @@ const ProjectsPage = () => {
       const s = String(v).replace(/"/g, '""');
       return `"${s}"`;
     };
-
-    const empreiteirosStr = (Array.isArray(obj.__empreiteiros) ? obj.__empreiteiros
-      : extractEmpreiteiros(obj.equipesEmpreiteiras)).join(', ');
-
     return [
       escape(obj.id),
       escape(obj.nome),
@@ -504,13 +481,12 @@ const ProjectsPage = () => {
       escape(obj.consultorNome),
       escape(obj.produtorNome),
       escape(obj.status),
-      escape(empreiteirosStr), // <- NOVO: empreiteiros
     ].join(',');
   };
 
   const downloadCSV = (rows, filename = 'projetos.csv') => {
     const header = [
-      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status','empreiteiros'
+      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
     ].join(',');
     const body = rows.map(toCSVRow).join('\n');
     const csv = header + '\n' + body;
@@ -596,7 +572,7 @@ const ProjectsPage = () => {
           </button>
 
           {/* Novo Projeto */}
-          {userProfile?.funcao === 'administrador' && (
+          {canCreateProject && (
             <button
               onClick={() => navigate(`/projetos/novo${currentSearch}`)}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -643,7 +619,7 @@ const ProjectsPage = () => {
             </div>
           )}
 
-          {/* Busca (inclui empreiteiros) */}
+          {/* Busca */}
           <div className="w-full md:w-96 ml-auto">
             <div className="relative">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -651,7 +627,7 @@ const ProjectsPage = () => {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome, feira, local, consultor, produtor ou empreiteiro…"
+                placeholder="Buscar por nome, feira, local, consultor, produtor…"
                 className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
