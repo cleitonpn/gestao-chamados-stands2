@@ -141,6 +141,27 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
           <div>Início: {formatDate(project.dataInicio)}</div>
           <div>Fim: {formatDate(project.dataFim)}</div>
         </div>
+
+        {/* ======= NOVO: Equipes terceirizadas em pílulas ======= */}
+        {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
+          <div className="flex items-start pt-1">
+            <span className="w-20">👥 Equipes:</span>
+            <div className="flex flex-wrap gap-1">
+              {Object.values(project.equipesEmpreiteiras)
+                .filter(Boolean)
+                .map((empresa, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-xs border"
+                    title={empresa}
+                  >
+                    {empresa}
+                  </span>
+                ))}
+            </div>
+          </div>
+        )}
+        {/* ======= FIM DO BLOCO NOVO ======= */}
       </div>
 
       <div className="flex gap-2">
