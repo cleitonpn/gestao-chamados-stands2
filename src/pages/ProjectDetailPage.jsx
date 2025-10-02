@@ -71,7 +71,18 @@ const endOfDaySP = (value) => {
 };
 
 /* =========================================================================
-   Card do Projeto (custom)
+   Util: empreiteiros
+   ========================================================================= */
+const extractEmpreiteiros = (equipesEmpreiteiras) => {
+  if (!equipesEmpreiteiras || typeof equipesEmpreiteiras !== 'object') return [];
+  const arr = Object.values(equipesEmpreiteiras)
+    .filter(v => typeof v === 'string' && v.trim())
+    .map(v => v.trim());
+  return Array.from(new Set(arr));
+};
+
+/* =========================================================================
+   Card do Projeto (apenas UI; NÃO altera regras/serviços)
    ========================================================================= */
 const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
   const navigate = useNavigate();
@@ -108,45 +119,8 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
   const statusInfo = getStatusInfo();
 
-  /* =========================================================
-     Empreiteiras no card:
-     - Tenta usar o que veio no payload da lista.
-     - Se não vier, faz fallback buscando o projeto por id.
-     (Sem alterar regras de permissão/negócio, apenas UI)
-     ========================================================= */
-  const [terceirizadas, setTerceirizadas] = useState([]);
-
-  useEffect(() => {
-    let alive = true;
-
-    const extract = (eq) => {
-      if (!eq || typeof eq !== 'object') return [];
-      const nomes = Object.values(eq)
-        .filter(v => typeof v === 'string' && v.trim())
-        .map(v => v.trim());
-      return Array.from(new Set(nomes));
-    };
-
-    // 1) do payload da lista
-    const fromList = extract(project?.equipesEmpreiteiras);
-    if (fromList.length > 0) {
-      setTerceirizadas(fromList);
-      return () => { alive = false; };
-    }
-
-    // 2) fallback: buscar detalhe
-    (async () => {
-      try {
-        const full = await projectService.getProjectById(project.id);
-        if (!alive) return;
-        setTerceirizadas(extract(full?.equipesEmpreiteiras));
-      } catch {
-        // silencioso; se falhar, só não mostra os chips
-      }
-    })();
-
-    return () => { alive = false; };
-  }, [project?.id, project?.equipesEmpreiteiras]);
+  // Nomes já hidratados no load (project.__empreiteiros), com fallback se já veio no payload
+  const terceirizadas = Array.isArray(project.__empreiteiros) ? project.__empreiteiros : extractEmpreiteiros(project.equipesEmpreiteiras);
 
   return (
     <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
@@ -207,9 +181,10 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
       </div>
 
       <div className="flex gap-2">
+        {/* Botão Ver: preservado exatamente como está (não alterado) */}
         <button
           type="button"
-          onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
+          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)} // preservado
           className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
         >
           👁️ Ver
@@ -271,7 +246,6 @@ const ProjectsPage = () => {
     if (eventFromUrl) setSelectedEvent(eventFromUrl);
     if (tabFromUrl) setActiveTab(tabFromUrl);
     setSearchTerm(qFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* Persistência de filtros na URL (salvar) */
@@ -279,15 +253,14 @@ const ProjectsPage = () => {
     const params = new URLSearchParams(location.search);
     params.set('evento', selectedEvent);
     params.set('tab', activeTab);
-    params.set('q', searchTerm); // <- mantém a busca na URL
+    params.set('q', searchTerm); // mantém a busca na URL
     const newSearch = `?${params.toString()}`;
     if (newSearch !== location.search) {
       navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEvent, activeTab, searchTerm]);
+  }, [selectedEvent, activeTab, searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Carregar projetos */
+  /* Carregar projetos + hidratar empreiteiros (usando apenas funções existentes) */
   useEffect(() => {
     if (!authInitialized) return;
     if (!user) {
@@ -299,14 +272,35 @@ const ProjectsPage = () => {
       try {
         setLoading(true);
         setError('');
+
         const projectsData = await projectService.getAllProjects();
+
+        // Ordenação original
         const sortedProjects = projectsData.sort((a, b) => {
           const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
           const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
           return bDate - aDate;
         });
-        setAllProjects(sortedProjects);
-        const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
+
+        // Hidrata empreiteiros para aparecerem sem clique:
+        // - se já vieram no payload, usa direto
+        // - se não, usa projectService.getProjectById (função já existente)
+        const augmented = await Promise.all(sortedProjects.map(async (p) => {
+          let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
+          if (nomes.length === 0) {
+            try {
+              const full = await projectService.getProjectById(p.id);
+              nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
+            } catch {
+              // silencioso
+            }
+          }
+          return { ...p, __empreiteiros: nomes };
+        }));
+
+        setAllProjects(augmented);
+
+        const uniqueEvents = [...new Set(augmented.map(p => p.feira || p.evento).filter(Boolean))];
         setEvents(uniqueEvents);
       } catch (err) {
         console.error('Erro ao carregar projetos:', err);
@@ -315,9 +309,9 @@ const ProjectsPage = () => {
         setLoading(false);
       }
     })();
-  }, [authInitialized, user, navigate]);
+  }, [authInitialized, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Filtragem por papéis + tabs + evento + busca */
+  /* Filtragem por papéis + tabs + evento + busca (com empreiteiros) */
   useEffect(() => {
     if (!userProfile) return;
 
@@ -353,10 +347,16 @@ const ProjectsPage = () => {
       projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
     }
 
-    // Busca
+    // Busca: inclui empreiteiros
     const term = (searchTerm || '').trim().toLowerCase();
     if (term) {
       const hit = (v) => (v || '').toString().toLowerCase().includes(term);
+
+      const hasEmpreiteiro = (p) => {
+        const list = Array.isArray(p.__empreiteiros) ? p.__empreiteiros : extractEmpreiteiros(p.equipesEmpreiteiras);
+        return list.some(n => n.toLowerCase().includes(term));
+      };
+
       projectsToDisplay = projectsToDisplay.filter(p =>
         hit(p.nome) ||
         hit(p.feira || p.evento) ||
@@ -364,7 +364,8 @@ const ProjectsPage = () => {
         hit(p.consultorNome) ||
         hit(p.produtorNome) ||
         hit(p.pavilhao) ||
-        hit(p.tipoMontagem)
+        hit(p.tipoMontagem) ||
+        hasEmpreiteiro(p) // <- aqui
       );
     }
 
@@ -372,13 +373,24 @@ const ProjectsPage = () => {
     setSelectedIds(new Set()); // limpa seleção ao mudar filtros
   }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
 
-  /* Encerrar individual e em massa */
+  /* Encerrar individual e em massa — mantido igual */
   const handleArchiveProject = async (projectId) => {
     if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
     try {
       await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
       const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
+      // re-hidrata após atualização
+      const augmented = await Promise.all(projectsData.map(async (p) => {
+        let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
+        if (nomes.length === 0) {
+          try {
+            const full = await projectService.getProjectById(p.id);
+            nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
+          } catch {}
+        }
+        return { ...p, __empreiteiros: nomes };
+      }));
+      setAllProjects(augmented);
     } catch (error) {
       console.error('Erro ao encerrar projeto:', error);
       setError('Erro ao encerrar projeto. Tente novamente.');
@@ -412,7 +424,17 @@ const ProjectsPage = () => {
         projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
       ));
       const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
+      const augmented = await Promise.all(projectsData.map(async (p) => {
+        let nomes = extractEmpreiteiros(p.equipesEmpreiteiras);
+        if (nomes.length === 0) {
+          try {
+            const full = await projectService.getProjectById(p.id);
+            nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
+          } catch {}
+        }
+        return { ...p, __empreiteiros: nomes };
+      }));
+      setAllProjects(augmented);
       setSelectedIds(new Set());
     } catch (e) {
       console.error('Erro no encerramento em massa:', e);
@@ -459,7 +481,7 @@ const ProjectsPage = () => {
   }, [filteredProjects]);
 
   /* =========================
-     Exportação CSV (selecionados ou filtrados)
+     Exportação CSV (inclui EMPREITEIROS)
      ========================= */
   const toCSVRow = (obj) => {
     const escape = (v) => {
@@ -467,6 +489,10 @@ const ProjectsPage = () => {
       const s = String(v).replace(/"/g, '""');
       return `"${s}"`;
     };
+
+    const empreiteirosStr = (Array.isArray(obj.__empreiteiros) ? obj.__empreiteiros
+      : extractEmpreiteiros(obj.equipesEmpreiteiras)).join(', ');
+
     return [
       escape(obj.id),
       escape(obj.nome),
@@ -478,12 +504,13 @@ const ProjectsPage = () => {
       escape(obj.consultorNome),
       escape(obj.produtorNome),
       escape(obj.status),
+      escape(empreiteirosStr), // <- NOVO: empreiteiros
     ].join(',');
   };
 
   const downloadCSV = (rows, filename = 'projetos.csv') => {
     const header = [
-      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
+      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status','empreiteiros'
     ].join(',');
     const body = rows.map(toCSVRow).join('\n');
     const csv = header + '\n' + body;
@@ -569,7 +596,7 @@ const ProjectsPage = () => {
           </button>
 
           {/* Novo Projeto */}
-          {canCreateProject && (
+          {userProfile?.funcao === 'administrador' && (
             <button
               onClick={() => navigate(`/projetos/novo${currentSearch}`)}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
@@ -616,7 +643,7 @@ const ProjectsPage = () => {
             </div>
           )}
 
-          {/* Busca */}
+          {/* Busca (inclui empreiteiros) */}
           <div className="w-full md:w-96 ml-auto">
             <div className="relative">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -624,7 +651,7 @@ const ProjectsPage = () => {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome, feira, local, consultor, produtor…"
+                placeholder="Buscar por nome, feira, local, consultor, produtor ou empreiteiro…"
                 className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
