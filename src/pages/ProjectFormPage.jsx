@@ -1,456 +1,522 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
+import { userService } from '../services/userService';
+import { eventService } from '../services/eventService';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  ArrowLeft, 
+  AlertCircle,
+  Loader2,
+  Save,
+  Building,
+  CalendarDays,
+  FileText,
+  Users,
+  Wrench,
+  PartyPopper,
+  Truck,
+  Calendar,
+  ExternalLink
+} from 'lucide-react';
 
-/* =========================================================================
-   Helpers de data / fuso e formatação
-   ========================================================================= */
-const isDateOnly = (value) => {
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true; // YYYY-MM-DD
-    if (/^\d{2}-\d{2}-\d{4}$/.test(value)) return true; // DD-MM-YYYY
-  }
-  if (value && typeof value === 'object' && value.seconds) {
-    const d = new Date(value.seconds * 1000);
-    return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
-  }
-  return false;
-};
-
-const normalizeDateInput = (value) => {
-  if (!value) return null;
-  if (typeof value === 'object' && value.seconds) return new Date(value.seconds * 1000);
-  if (typeof value === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(value)) {
-    const [dd, mm, yyyy] = value.split('-');
-    return new Date(`${yyyy}-${mm}-${dd}T00:00:00.000Z`);
-  }
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return new Date(`${value}T00:00:00.000Z`);
-  }
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
-};
-
-const formatDate = (value) => {
-  if (!value) return 'N/A';
-  const date = normalizeDateInput(value);
-  if (!date) return 'N/A';
-  try {
-    if (isDateOnly(value)) {
-      const dd = String(date.getUTCDate()).padStart(2, '0');
-      const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const yyyy = String(date.getUTCFullYear());
-      return `${dd}-${mm}-${yyyy}`;
-    }
-    const dd = date.toLocaleString('pt-BR', { day: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const mm = date.toLocaleString('pt-BR', { month: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const yyyy = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
-    return `${dd}-${mm}-${yyyy}`;
-  } catch {
-    return 'N/A';
-  }
-};
-
-const startOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-};
-
-const endOfDaySP = (value) => {
-  const d = normalizeDateInput(value);
-  if (!d) return null;
-  const copy = new Date(d.getTime());
-  copy.setHours(23, 59, 59, 999);
-  return copy;
-};
-
-/* =========================================================================
-   Card do Projeto (custom)
-   ========================================================================= */
-const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
+const ProjectFormPage = () => {
+  const { projectId } = useParams();
   const navigate = useNavigate();
-
-  const getStatusInfo = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (project.montagem?.dataInicio && project.montagem?.dataFim) {
-      const inicio = startOfDaySP(project.montagem.dataInicio);
-      const fim = endOfDaySP(project.montagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Montagem', color: 'blue' };
+  const { user, userProfile, authInitialized } = useAuth();
+  
+  const [users, setUsers] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [formLoading, setFormLoading] = useState(false);
+  const [formError, setFormError] = useState('');
+  
+  // Determinar se é modo edição
+  const isEditMode = !!projectId;
+  
+  // Form state
+  const [formData, setFormData] = useState({
+    nome: '',
+    feira: '',
+    local: '',
+    metragem: '',
+    tipoMontagem: '',
+    pavilhao: '',
+    eventoId: '',
+    montagem: {
+      dataInicio: '',
+      dataFim: ''
+    },
+    evento: {
+      dataInicio: '',
+      dataFim: ''
+    },
+    desmontagem: {
+      dataInicio: '',
+      dataFim: ''
+    },
+    dataInicio: '',
+    dataFim: '',
+    produtorId: '',
+    consultorId: '',
+    descricao: '',
+    observacoes: '',
+    linkDrive: '',
+    equipesEmpreiteiras: {
+      marcenaria: '',
+      tapecaria: '',
+      limpeza: '',
+      eletrica: '',
+      pintura: '',
+      serralheria: ''
     }
+  });
 
-    if (project.evento?.dataInicio && project.evento?.dataFim) {
-      const inicio = startOfDaySP(project.evento.dataInicio);
-      const fim = endOfDaySP(project.evento.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Em Andamento', color: 'green' };
+  useEffect(() => {
+    if (authInitialized && user && userProfile) {
+      if (userProfile.funcao !== 'administrador') {
+        navigate('/dashboard');
+        return;
+      }
+      loadData();
+    } else if (authInitialized && !user) {
+      navigate('/login');
     }
+  }, [user, userProfile, authInitialized, navigate, projectId]);
 
-    if (project.desmontagem?.dataInicio && project.desmontagem?.dataFim) {
-      const inicio = startOfDaySP(project.desmontagem.dataInicio);
-      const fim = endOfDaySP(project.desmontagem.dataFim);
-      if (inicio && fim && today >= inicio && today <= fim) return { label: 'Desmontagem', color: 'orange' };
+  // Função segura para converter timestamp para string de data
+  const formatDateForInput = (timestamp) => {
+    if (!timestamp) return '';
+    
+    try {
+      let date;
+      
+      // Se é um objeto Firestore timestamp
+      if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+        date = new Date(timestamp.seconds * 1000);
+      }
+      // Se é uma string de data
+      else if (typeof timestamp === 'string') {
+        date = new Date(timestamp);
+      }
+      // Se já é um objeto Date
+      else if (timestamp instanceof Date) {
+        date = timestamp;
+      }
+      // Se é um número (timestamp em ms)
+      else if (typeof timestamp === 'number') {
+        date = new Date(timestamp);
+      }
+      else {
+        console.warn('Formato de data não reconhecido:', timestamp);
+        return '';
+      }
+      
+      // Verificar se a data é válida
+      if (isNaN(date.getTime())) {
+        console.warn('Data inválida:', timestamp);
+        return '';
+      }
+      
+      return date.toISOString().split('T')[0];
+    } catch (error) {
+      console.error('Erro ao formatar data:', timestamp, error);
+      return '';
     }
-
-    const dataInicio = project.dataInicio || project.montagem?.dataInicio || project.evento?.dataInicio;
-    if (dataInicio) {
-      const inicio = startOfDaySP(dataInicio);
-      if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
-    }
-    return { label: 'Finalizado', color: 'gray' };
   };
 
-  const statusInfo = getStatusInfo();
-
-  return (
-    <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelect(project.id)}
-            className="h-4 w-4"
-            aria-label="Selecionar projeto"
-          />
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-1 break-words">{project.nome}</h3>
-            <p className="text-sm text-gray-600">{project.feira} • {project.local}</p>
-          </div>
-        </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-          statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
-          statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
-          statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {statusInfo.label}
-        </span>
-      </div>
-
-      <div className="space-y-2 mb-4 text-sm text-gray-600">
-        <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
-        <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
-        <div className="text-xs text-gray-500">
-          <div>Início: {formatDate(project.dataInicio)}</div>
-          <div>Fim: {formatDate(project.dataFim)}</div>
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)} // <- DETALHES (rota singular)
-          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          👁️ Ver
-        </button>
-
-        {userRole === 'administrador' && (
-          <>
-            <button
-              onClick={() => navigate(`/projetos/editar/${project.id}${currentSearch}`)}
-              className="bg-gray-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition-colors"
-              title="Editar"
-            >
-              ✏️
-            </button>
-            <button
-              onClick={() => onArchive(project.id)}
-              className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
-              title="Encerrar"
-            >
-              🗑️
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/* =========================================================================
-   Página
-   ========================================================================= */
-const ProjectsPage = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { user, userProfile, authInitialized } = useAuth();
-
-  const [allProjects, setAllProjects] = useState([]);
-  const [filteredProjects, setFilteredProjects] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState('todos');
-  const [activeTab, setActiveTab] = useState('ativos');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  // seleção em massa
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-
-  // query atual para repassar na navegação
-  const currentSearch = useMemo(() => location.search || '', [location.search]);
-
-  /* Persistência de filtros na URL (carregar) */
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const eventFromUrl = params.get('evento');
-    const tabFromUrl = params.get('tab');
-    const qFromUrl = params.get('q') || '';
-    if (eventFromUrl) setSelectedEvent(eventFromUrl);
-    if (tabFromUrl) setActiveTab(tabFromUrl);
-    setSearchTerm(qFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* Persistência de filtros na URL (salvar) */
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    params.set('evento', selectedEvent);
-    params.set('tab', activeTab);
-    params.set('q', searchTerm); // <- mantém a busca na URL
-    const newSearch = `?${params.toString()}`;
-    if (newSearch !== location.search) {
-      navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
+  // Função segura para formatar data para exibição
+  const formatDateForDisplay = (timestamp) => {
+    if (!timestamp) return '-';
+    
+    try {
+      let date;
+      
+      if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+        date = new Date(timestamp.seconds * 1000);
+      } else if (typeof timestamp === 'string') {
+        date = new Date(timestamp);
+      } else if (timestamp instanceof Date) {
+        date = timestamp;
+      } else if (typeof timestamp === 'number') {
+        date = new Date(timestamp);
+      } else {
+        return '-';
+      }
+      
+      if (isNaN(date.getTime())) {
+        return '-';
+      }
+      
+      return date.toLocaleDateString('pt-BR');
+    } catch (error) {
+      console.error('Erro ao formatar data para exibição:', timestamp, error);
+      return '-';
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEvent, activeTab, searchTerm]);
+  };
 
-  /* Carregar projetos */
-  useEffect(() => {
-    if (!authInitialized) return;
-    if (!user) {
-      navigate('/login');
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setFormError('');
+
+      console.log('🔄 Carregando dados...');
+      
+      // Carregar usuários e eventos em paralelo
+      const [usersData, eventsData] = await Promise.all([
+        userService.getAllUsers().catch(() => []),
+        eventService.getAllEvents().catch(() => [])
+      ]);
+      
+      console.log('👥 Usuários carregados:', usersData?.length || 0);
+      console.log('📅 Eventos carregados:', eventsData?.length || 0);
+      
+      setUsers(usersData || []);
+      setEvents(eventsData || []);
+
+      // Se é modo edição, carregar dados do projeto
+      if (isEditMode && projectId) {
+        console.log('📝 Carregando projeto para edição:', projectId);
+        const projectData = await projectService.getProjectById(projectId);
+        
+        if (projectData) {
+          console.log('✅ Projeto carregado:', projectData.nome);
+
+          // Preencher formulário com dados do projeto
+          setFormData({
+            nome: projectData.nome || '',
+            feira: projectData.feira || '',
+            local: projectData.local || '',
+            metragem: projectData.metragem || '',
+            tipoMontagem: projectData.tipoMontagem || '',
+            pavilhao: projectData.pavilhao || '',
+            eventoId: projectData.eventoId || '',
+            montagem: {
+              dataInicio: formatDateForInput(projectData.montagem?.dataInicio),
+              dataFim: formatDateForInput(projectData.montagem?.dataFim)
+            },
+            evento: {
+              dataInicio: formatDateForInput(projectData.evento?.dataInicio),
+              dataFim: formatDateForInput(projectData.evento?.dataFim)
+            },
+            desmontagem: {
+              dataInicio: formatDateForInput(projectData.desmontagem?.dataInicio),
+              dataFim: formatDateForInput(projectData.desmontagem?.dataFim)
+            },
+            dataInicio: formatDateForInput(projectData.dataInicio),
+            dataFim: formatDateForInput(projectData.dataFim),
+            produtorId: projectData.produtorId || '',
+            consultorId: projectData.consultorId || '',
+            descricao: projectData.descricao || '',
+            observacoes: projectData.observacoes || '',
+            linkDrive: projectData.linkDrive || '',
+            equipesEmpreiteiras: {
+              marcenaria: projectData.equipesEmpreiteiras?.marcenaria || '',
+              tapecaria: projectData.equipesEmpreiteiras?.tapecaria || '',
+              limpeza: projectData.equipesEmpreiteiras?.limpeza || '',
+              eletrica: projectData.equipesEmpreiteiras?.eletrica || '',
+              pintura: projectData.equipesEmpreiteiras?.pintura || '',
+              serralheria: projectData.equipesEmpreiteiras?.serralheria || ''
+            }
+          });
+
+          // Se projeto tem evento associado, carregar dados do evento
+          if (projectData.eventoId && eventsData.length > 0) {
+            const event = eventsData.find(e => e.id === projectData.eventoId);
+            if (event) {
+              setSelectedEvent(event);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+      setFormError('Erro ao carregar dados. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Função para filtrar usuários por função
+  const getFilteredUsers = (role) => {
+    if (!users || !Array.isArray(users)) return [];
+    return users.filter(user => 
+      user && 
+      user.id && 
+      user.nome && 
+      user.funcao === role
+    );
+  };
+
+  const producers = getFilteredUsers('produtor');
+  const consultants = getFilteredUsers('consultor');
+
+  // Função para lidar com seleção de evento
+  const handleEventSelect = (eventId) => {
+    console.log('📅 Evento selecionado:', eventId);
+    
+    if (eventId === 'manual') {
+      // Modo manual - limpar evento selecionado
+      setSelectedEvent(null);
+      setFormData(prev => ({
+        ...prev,
+        eventoId: '',
+        feira: prev.feira, // Manter feira se já preenchida
+        pavilhao: prev.pavilhao // Manter pavilhão se já preenchido
+      }));
       return;
     }
 
-    (async () => {
+    const event = events.find(e => e.id === eventId);
+    if (event) {
+      console.log('✅ Dados do evento:', event);
+      setSelectedEvent(event);
+      
       try {
-        setLoading(true);
-        setError('');
-        const projectsData = await projectService.getAllProjects();
-        const sortedProjects = projectsData.sort((a, b) => {
-          const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
-          const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
-          return bDate - aDate;
+        // Preencher automaticamente os campos baseados no evento
+        setFormData(prev => {
+          const newData = {
+            ...prev,
+            eventoId: eventId,
+            feira: event.nome || prev.feira,
+            pavilhao: event.pavilhao || prev.pavilhao
+          };
+
+          // Preencher datas se disponíveis no evento - COM VALIDAÇÃO
+          if (event.dataInicioMontagem) {
+            const dataFormatada = formatDateForInput(event.dataInicioMontagem);
+            if (dataFormatada) {
+              newData.montagem.dataInicio = dataFormatada;
+            }
+          }
+          
+          if (event.dataFimMontagem) {
+            const dataFormatada = formatDateForInput(event.dataFimMontagem);
+            if (dataFormatada) {
+              newData.montagem.dataFim = dataFormatada;
+            }
+          }
+          
+          if (event.dataInicioEvento) {
+            const dataFormatada = formatDateForInput(event.dataInicioEvento);
+            if (dataFormatada) {
+              newData.evento.dataInicio = dataFormatada;
+            }
+          }
+          
+          if (event.dataFimEvento) {
+            const dataFormatada = formatDateForInput(event.dataFimEvento);
+            if (dataFormatada) {
+              newData.evento.dataFim = dataFormatada;
+            }
+          }
+          
+          if (event.dataInicioDesmontagem) {
+            const dataFormatada = formatDateForInput(event.dataInicioDesmontagem);
+            if (dataFormatada) {
+              newData.desmontagem.dataInicio = dataFormatada;
+            }
+          }
+          
+          if (event.dataFimDesmontagem) {
+            const dataFormatada = formatDateForInput(event.dataFimDesmontagem);
+            if (dataFormatada) {
+              newData.desmontagem.dataFim = dataFormatada;
+            }
+          }
+
+          // Calcular datas gerais
+          newData.dataInicio = newData.montagem.dataInicio || newData.evento.dataInicio || '';
+          newData.dataFim = newData.desmontagem.dataFim || newData.evento.dataFim || '';
+          
+          return newData;
         });
-        setAllProjects(sortedProjects);
-        const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
-        setEvents(uniqueEvents);
-      } catch (err) {
-        console.error('Erro ao carregar projetos:', err);
-        setError('Não foi possível carregar os projetos.');
-      } finally {
-        setLoading(false);
+      } catch (error) {
+        console.error('Erro ao processar dados do evento:', error);
+        setFormError('Erro ao processar dados do evento. Tente novamente.');
       }
-    })();
-  }, [authInitialized, user, navigate]);
+    }
+  };
 
-  /* Filtragem por papéis + tabs + evento + busca */
-  useEffect(() => {
-    if (!userProfile) return;
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
-    let projectsToDisplay = [...allProjects];
-    const userRole = userProfile.funcao;
-    const userId = userProfile.id || user?.uid;
+  const handleNestedInputChange = (section, field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [field]: value
+      }
+    }));
+  };
 
-    if (userRole === 'consultor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.consultorId === userId ||
-        project.consultorUid === userId ||
-        project.consultorEmail === userProfile.email ||
-        project.consultorNome === userProfile.nome
-      ));
-    } else if (userRole === 'produtor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.produtorId === userId ||
-        project.produtorUid === userId ||
-        project.produtorEmail === userProfile.email ||
-        project.produtorNome === userProfile.nome
-      ));
-    } else if (!['administrador', 'gerente', 'operador'].includes(userRole)) {
-      projectsToDisplay = [];
+  const validateForm = () => {
+    if (!formData.nome.trim()) {
+      setFormError('Nome do projeto é obrigatório');
+      return false;
+    }
+    if (!formData.feira.trim()) {
+      setFormError('Nome da feira é obrigatório');
+      return false;
+    }
+    if (!formData.local.trim()) {
+      setFormError('Local é obrigatório');
+      return false;
+    }
+    if (!formData.metragem.trim()) {
+      setFormError('Metragem é obrigatória');
+      return false;
+    }
+    if (!formData.tipoMontagem.trim()) {
+      setFormError('Tipo de montagem é obrigatório');
+      return false;
+    }
+    
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
     }
 
-    if (activeTab === 'ativos') {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status !== 'encerrado');
-    } else {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status === 'encerrado');
-    }
-
-    if (selectedEvent && selectedEvent !== 'todos') {
-      projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
-    }
-
-    // Busca
-    const term = (searchTerm || '').trim().toLowerCase();
-    if (term) {
-      const hit = (v) => (v || '').toString().toLowerCase().includes(term);
-      projectsToDisplay = projectsToDisplay.filter(p =>
-        hit(p.nome) ||
-        hit(p.feira || p.evento) ||
-        hit(p.local) ||
-        hit(p.consultorNome) ||
-        hit(p.produtorNome) ||
-        hit(p.pavilhao) ||
-        hit(p.tipoMontagem)
-      );
-    }
-
-    setFilteredProjects(projectsToDisplay);
-    setSelectedIds(new Set()); // limpa seleção ao mudar filtros
-  }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
-
-  /* Encerrar individual e em massa */
-  const handleArchiveProject = async (projectId) => {
-    if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
     try {
-      await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
-      const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
-    } catch (error) {
-      console.error('Erro ao encerrar projeto:', error);
-      setError('Erro ao encerrar projeto. Tente novamente.');
-    }
-  };
+      setFormLoading(true);
+      setFormError('');
 
-  const toggleSelect = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+      // Função para converter data string para Date ou null
+      const parseDate = (dateString) => {
+        if (!dateString || dateString.trim() === '') return null;
+        try {
+          return new Date(dateString);
+        } catch (error) {
+          console.error('Erro ao converter data:', dateString, error);
+          return null;
+        }
+      };
 
-  const allVisibleIds = useMemo(() => filteredProjects.map(p => p.id), [filteredProjects]);
+      // Preparar dados do projeto - REMOVENDO CAMPOS UNDEFINED
+      const projectData = {
+        nome: formData.nome.trim(),
+        feira: formData.feira.trim(),
+        local: formData.local.trim(),
+        metragem: formData.metragem.trim(),
+        tipoMontagem: formData.tipoMontagem.trim(),
+        pavilhao: formData.pavilhao.trim(),
+        descricao: formData.descricao.trim(),
+        observacoes: formData.observacoes.trim(),
+        linkDrive: formData.linkDrive.trim(),
+        equipesEmpreiteiras: formData.equipesEmpreiteiras,
+        status: 'ativo',
+        atualizadoEm: new Date()
+      };
 
-  const toggleSelectAll = () => {
-    setSelectedIds(prev => {
-      if (prev.size === allVisibleIds.length) return new Set();
-      return new Set(allVisibleIds);
-    });
-  };
+      // Adicionar eventoId apenas se não estiver vazio
+      if (formData.eventoId && formData.eventoId.trim() !== '') {
+        projectData.eventoId = formData.eventoId;
+      }
 
-  const handleBulkArchive = async () => {
-    if (selectedIds.size === 0) return;
-    if (!window.confirm(`Encerrar ${selectedIds.size} projeto(s)?`)) return;
-    setBulkBusy(true);
-    try {
-      await Promise.all(Array.from(selectedIds).map(id =>
-        projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
-      ));
-      const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
-      setSelectedIds(new Set());
-    } catch (e) {
-      console.error('Erro no encerramento em massa:', e);
-      setError('Alguns projetos podem não ter sido encerrados. Tente novamente.');
-    } finally {
-      setBulkBusy(false);
-    }
-  };
+      // Adicionar datas apenas se não forem null
+      const montagemInicio = parseDate(formData.montagem.dataInicio);
+      const montagemFim = parseDate(formData.montagem.dataFim);
+      const eventoInicio = parseDate(formData.evento.dataInicio);
+      const eventoFim = parseDate(formData.evento.dataFim);
+      const desmontagemInicio = parseDate(formData.desmontagem.dataInicio);
+      const desmontagemFim = parseDate(formData.desmontagem.dataFim);
+      const dataInicio = parseDate(formData.dataInicio);
+      const dataFim = parseDate(formData.dataFim);
 
-  const canCreateProject = userProfile?.funcao === 'administrador';
+      // Adicionar objetos de datas apenas se tiverem pelo menos uma data válida
+      if (montagemInicio || montagemFim) {
+        projectData.montagem = {};
+        if (montagemInicio) projectData.montagem.dataInicio = montagemInicio;
+        if (montagemFim) projectData.montagem.dataFim = montagemFim;
+      }
 
-  /* Resumo por fase (com filteredProjects já filtrados) */
-  const phaseCounts = useMemo(() => {
-    const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (eventoInicio || eventoFim) {
+        projectData.evento = {};
+        if (eventoInicio) projectData.evento.dataInicio = eventoInicio;
+        if (eventoFim) projectData.evento.dataFim = eventoFim;
+      }
 
-    const inRange = (s, e) => {
-      const S = startOfDaySP(s), E = endOfDaySP(e);
-      return S && E && today >= S && today <= E;
-    };
+      if (desmontagemInicio || desmontagemFim) {
+        projectData.desmontagem = {};
+        if (desmontagemInicio) projectData.desmontagem.dataInicio = desmontagemInicio;
+        if (desmontagemFim) projectData.desmontagem.dataFim = desmontagemFim;
+      }
 
-    for (const p of filteredProjects) {
-      let phase = 'finalizado';
-      const statusLower = (p.status || '').toLowerCase();
+      if (dataInicio) projectData.dataInicio = dataInicio;
+      if (dataFim) projectData.dataFim = dataFim;
 
-      if (statusLower === 'encerrado' || statusLower === 'finalizado' || statusLower === 'arquivado') {
-        phase = 'finalizado';
-      } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
-        phase = 'desmontagem';
-      } else if (
-        inRange(p.montagem?.dataInicio, p.montagem?.dataFim) ||
-        inRange(p.evento?.dataInicio, p.evento?.dataFim)
-      ) {
-        phase = 'andamento';
+      // Adicionar informações do produtor se selecionado
+      if (formData.produtorId && formData.produtorId !== 'sem_produtor') {
+        const producer = users.find(u => u.id === formData.produtorId);
+        if (producer) {
+          projectData.produtorId = formData.produtorId;
+          projectData.produtorUid = producer.uid || '';
+          projectData.produtorNome = producer.nome || '';
+          projectData.produtorEmail = producer.email || '';
+        }
+      }
+
+      // Adicionar informações do consultor se selecionado
+      if (formData.consultorId && formData.consultorId !== 'sem_consultor') {
+        const consultant = users.find(u => u.id === formData.consultorId);
+        if (consultant) {
+          projectData.consultorId = formData.consultorId;
+          projectData.consultorUid = consultant.uid || '';
+          projectData.consultorNome = consultant.nome || '';
+          projectData.consultorEmail = consultant.email || '';
+        }
+      }
+
+      // Adicionar criadoEm apenas para novos projetos
+      if (!isEditMode) {
+        projectData.criadoEm = new Date();
+      }
+
+      console.log('💾 Salvando projeto:', projectData);
+
+      if (isEditMode) {
+        await projectService.updateProject(projectId, projectData);
+        console.log('✅ Projeto atualizado com sucesso');
       } else {
-        const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
-        const S = startOfDaySP(start);
-        phase = (S && today < S) ? 'futuro' : 'finalizado';
+        await projectService.createProject(projectData);
+        console.log('✅ Projeto criado com sucesso');
       }
 
-      counts[phase] = (counts[phase] || 0) + 1;
+      // Redirecionar para lista de projetos
+      navigate('/projetos');
+    } catch (error) {
+      console.error('Erro ao salvar projeto:', error);
+      setFormError('Erro ao salvar projeto. Tente novamente.');
+    } finally {
+      setFormLoading(false);
     }
-    return counts;
-  }, [filteredProjects]);
-
-  /* =========================
-     Exportação CSV (selecionados ou filtrados)
-     ========================= */
-  const toCSVRow = (obj) => {
-    const escape = (v) => {
-      if (v === null || v === undefined) return '';
-      const s = String(v).replace(/"/g, '""');
-      return `"${s}"`;
-    };
-    return [
-      escape(obj.id),
-      escape(obj.nome),
-      escape(obj.feira || obj.evento),
-      escape(obj.local),
-      escape(obj.pavilhao),
-      escape(obj.tipoMontagem),
-      escape(obj.metragem),
-      escape(obj.consultorNome),
-      escape(obj.produtorNome),
-      escape(obj.status),
-    ].join(',');
   };
 
-  const downloadCSV = (rows, filename = 'projetos.csv') => {
-    const header = [
-      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
-    ].join(',');
-    const body = rows.map(toCSVRow).join('\n');
-    const csv = header + '\n' + body;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportSelected = () => {
-    const setIds = new Set(selectedIds);
-    const rows = filteredProjects.filter(p => setIds.has(p.id));
-    if (rows.length === 0) return;
-    downloadCSV(rows, 'projetos_selecionados.csv');
-  };
-
-  const exportFiltered = () => {
-    if (filteredProjects.length === 0) return;
-    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
-  };
-
-  /* UI */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Carregando projetos...</p>
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Carregando...</p>
         </div>
       </div>
     );
@@ -458,185 +524,524 @@ const ProjectsPage = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate('/dashboard')}
-        className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Voltar ao Dashboard
-      </button>
-
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Projetos</h1>
-          <p className="text-gray-600 mt-1">
-            {['administrador','gerente','operador'].includes(userProfile?.funcao)
-              ? 'Gerencie todos os projetos do sistema'
-              : 'Seus projetos vinculados'}
-          </p>
-        </div>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={handleBulkArchive}
-            disabled={selectedIds.size === 0 || bulkBusy}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${selectedIds.size === 0 || bulkBusy ? 'bg-gray-200 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-            title={selectedIds.size ? `Encerrar ${selectedIds.size} selecionado(s)` : 'Selecione projetos para encerrar'}
-          >
-            {bulkBusy ? 'Encerrando...' : `Encerrar selecionados (${selectedIds.size})`}
-          </button>
-
-          {/* Exportações */}
-          <button
-            onClick={exportSelected}
-            disabled={selectedIds.size === 0}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar projetos selecionados (CSV)"
-          >
-            <Download className="h-4 w-4" /> Exportar selecionados
-          </button>
-          <button
-            onClick={exportFiltered}
-            disabled={filteredProjects.length === 0}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar lista filtrada (CSV)"
-          >
-            <Download className="h-4 w-4" /> Exportar filtrados
-          </button>
-
-          {/* Novo Projeto */}
-          {userProfile?.funcao === 'administrador' && (
-            <button
-              onClick={() => navigate(`/projetos/novo${currentSearch}`)}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/projetos')}
+              className="mr-4"
             >
-              ➕ Novo Projeto
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-        <div className="flex flex-wrap gap-4 items-center">
-          {/* Tabs de Status */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setActiveTab('ativos')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ativos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Ativos ({allProjects.filter(p => p.status !== 'encerrado').length})
-            </button>
-            <button
-              onClick={() => setActiveTab('encerrados')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'encerrados' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Encerrados ({allProjects.filter(p => p.status === 'encerrado').length})
-            </button>
-          </div>
-
-          {/* Filtro por Evento */}
-          {events.length > 0 && (
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Feira:</label>
-              <select
-                value={selectedEvent}
-                onChange={(e) => setSelectedEvent(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="todos">Todas as feiras</option>
-                {events.map(event => (
-                  <option key={event} value={event}>{event}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Busca */}
-          <div className="w-full md:w-96 ml-auto">
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome, feira, local, consultor, produtor…"
-                className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Voltar
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold">
+                {isEditMode ? 'Editar Projeto' : 'Novo Projeto'}
+              </h1>
+              <p className="text-gray-600 mt-1">
+                {isEditMode ? 'Atualize as informações do projeto' : 'Preencha as informações para criar um novo projeto'}
+              </p>
             </div>
           </div>
-
-          {/* Selecionar todos */}
-          <button
-            onClick={toggleSelectAll}
-            className="text-sm px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200"
-          >
-            {selectedIds.size === allVisibleIds.length && allVisibleIds.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
-          </button>
         </div>
+
+        {formError && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{formError}</AlertDescription>
+          </Alert>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Informações Básicas */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Building className="h-5 w-5 mr-2" />
+                Informações Básicas
+              </CardTitle>
+              <CardDescription>
+                Dados principais do projeto
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Seleção de Evento */}
+              {events.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="evento">Feira/Evento</Label>
+                  <Select value={formData.eventoId || 'manual'} onValueChange={handleEventSelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar evento ou preencher manualmente" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">✏️ Preencher manualmente</SelectItem>
+                      {events.filter(event => event.ativo !== false).map(event => (
+                        <SelectItem key={event.id} value={event.id}>
+                          🎯 {event.nome} - {event.pavilhao || 'Sem pavilhão'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  
+                  {selectedEvent && (
+                    <div className="mt-3 p-4 bg-blue-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-blue-800">📅 Evento Selecionado</h4>
+                        <Badge variant="secondary">Datas preenchidas automaticamente</Badge>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <p className="font-medium text-blue-600">Montagem</p>
+                          <p>
+                            {formatDateForDisplay(selectedEvent.dataInicioMontagem)} - {formatDateForDisplay(selectedEvent.dataFimMontagem)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-green-600">Evento</p>
+                          <p>
+                            {formatDateForDisplay(selectedEvent.dataInicioEvento)} - {formatDateForDisplay(selectedEvent.dataFimEvento)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-orange-600">Desmontagem</p>
+                          <p>
+                            {formatDateForDisplay(selectedEvent.dataInicioDesmontagem)} - {formatDateForDisplay(selectedEvent.dataFimDesmontagem)}
+                          </p>
+                        </div>
+                      </div>
+                      {selectedEvent.linkManual && (
+                        <div className="mt-3">
+                          <a 
+                            href={selectedEvent.linkManual} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm"
+                          >
+                            <FileText className="h-4 w-4 mr-1" />
+                            Manual da Feira
+                            <ExternalLink className="h-3 w-3 ml-1" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="nome">Nome do Projeto *</Label>
+                  <Input
+                    id="nome"
+                    value={formData.nome}
+                    onChange={(e) => handleInputChange('nome', e.target.value)}
+                    placeholder="Ex: Stand LABACE 20m²"
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="feira">Nome da Feira *</Label>
+                  <Input
+                    id="feira"
+                    value={formData.feira}
+                    onChange={(e) => handleInputChange('feira', e.target.value)}
+                    placeholder="Ex: LABACE 2024"
+                    required
+                    disabled={!!selectedEvent}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="local">Localização (Rua/Stand) *</Label>
+                  <Input
+                    id="local"
+                    value={formData.local}
+                    onChange={(e) => handleInputChange('local', e.target.value)}
+                    placeholder="Ex: Rua A, Stand 15"
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="metragem">Metragem *</Label>
+                  <Input
+                    id="metragem"
+                    value={formData.metragem}
+                    onChange={(e) => handleInputChange('metragem', e.target.value)}
+                    placeholder="Ex: 20m²"
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="tipoMontagem">Tipo de Montagem *</Label>
+                  <Select value={formData.tipoMontagem} onValueChange={(value) => handleInputChange('tipoMontagem', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USET">USET</SelectItem>
+                      <SelectItem value="SP GROUP">SP GROUP</SelectItem>
+                      <SelectItem value="COSTUMER">COSTUMER</SelectItem>
+                      <SelectItem value="CENOGRAFIA">CENOGRAFIA</SelectItem>
+                      <SelectItem value="simples">Simples</SelectItem>
+                      <SelectItem value="complexa">Complexa</SelectItem>
+                      <SelectItem value="premium">Premium</SelectItem>
+                      <SelectItem value="personalizada">Personalizada</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="pavilhao">Pavilhão</Label>
+                <Input
+                  id="pavilhao"
+                  value={formData.pavilhao}
+                  onChange={(e) => handleInputChange('pavilhao', e.target.value)}
+                  placeholder="Ex: Pavilhão Azul"
+                  disabled={!!selectedEvent}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Responsáveis */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Users className="h-5 w-5 mr-2" />
+                Responsáveis
+              </CardTitle>
+              <CardDescription>
+                Defina os responsáveis pelo projeto
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="produtor">Produtor Responsável</Label>
+                  <Select value={formData.produtorId} onValueChange={(value) => handleInputChange('produtorId', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar produtor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sem_produtor">Sem produtor</SelectItem>
+                      {producers.map(producer => (
+                        <SelectItem key={producer.id} value={producer.id}>
+                          {producer.nome} ({producer.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="consultor">Consultor Responsável</Label>
+                  <Select value={formData.consultorId} onValueChange={(value) => handleInputChange('consultorId', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar consultor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sem_consultor">Sem consultor</SelectItem>
+                      {consultants.map(consultant => (
+                        <SelectItem key={consultant.id} value={consultant.id}>
+                          {consultant.nome} ({consultant.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Cronograma Detalhado */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <CalendarDays className="h-5 w-5 mr-2" />
+                Cronograma Detalhado
+              </CardTitle>
+              <CardDescription>
+                {selectedEvent ? 'Datas preenchidas automaticamente baseadas no evento selecionado' : 'Defina as datas específicas de cada fase'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Montagem */}
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h4 className="font-medium text-blue-800 mb-3 flex items-center">
+                  <Wrench className="h-4 w-4 mr-2" />
+                  Fase de Montagem
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="montagemInicio">Data de Início</Label>
+                    <Input
+                      id="montagemInicio"
+                      type="date"
+                      value={formData.montagem.dataInicio}
+                      onChange={(e) => handleNestedInputChange('montagem', 'dataInicio', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="montagemFim">Data de Fim</Label>
+                    <Input
+                      id="montagemFim"
+                      type="date"
+                      value={formData.montagem.dataFim}
+                      onChange={(e) => handleNestedInputChange('montagem', 'dataFim', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Evento */}
+              <div className="bg-green-50 p-4 rounded-lg">
+                <h4 className="font-medium text-green-800 mb-3 flex items-center">
+                  <PartyPopper className="h-4 w-4 mr-2" />
+                  Fase do Evento
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="eventoInicio">Data de Início</Label>
+                    <Input
+                      id="eventoInicio"
+                      type="date"
+                      value={formData.evento.dataInicio}
+                      onChange={(e) => handleNestedInputChange('evento', 'dataInicio', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="eventoFim">Data de Fim</Label>
+                    <Input
+                      id="eventoFim"
+                      type="date"
+                      value={formData.evento.dataFim}
+                      onChange={(e) => handleNestedInputChange('evento', 'dataFim', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Desmontagem */}
+              <div className="bg-orange-50 p-4 rounded-lg">
+                <h4 className="font-medium text-orange-800 mb-3 flex items-center">
+                  <Truck className="h-4 w-4 mr-2" />
+                  Fase de Desmontagem
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="desmontagemInicio">Data de Início</Label>
+                    <Input
+                      id="desmontagemInicio"
+                      type="date"
+                      value={formData.desmontagem.dataInicio}
+                      onChange={(e) => handleNestedInputChange('desmontagem', 'dataInicio', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="desmontagemFim">Data de Fim</Label>
+                    <Input
+                      id="desmontagemFim"
+                      type="date"
+                      value={formData.desmontagem.dataFim}
+                      onChange={(e) => handleNestedInputChange('desmontagem', 'dataFim', e.target.value)}
+                      disabled={!!selectedEvent}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Datas Gerais */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-medium text-gray-800 mb-3 flex items-center">
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Período Geral do Projeto
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="dataInicio">Data de Início Geral</Label>
+                    <Input
+                      id="dataInicio"
+                      type="date"
+                      value={formData.dataInicio}
+                      onChange={(e) => handleInputChange('dataInicio', e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dataFim">Data de Fim Geral</Label>
+                    <Input
+                      id="dataFim"
+                      type="date"
+                      value={formData.dataFim}
+                      onChange={(e) => handleInputChange('dataFim', e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Equipes Terceirizadas */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Users className="h-5 w-5 mr-2" />
+                Equipes Terceirizadas
+              </CardTitle>
+              <CardDescription>
+                Defina as empresas responsáveis por cada área
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="marcenaria">Marcenaria</Label>
+                  <Input
+                    id="marcenaria"
+                    value={formData.equipesEmpreiteiras.marcenaria}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'marcenaria', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="tapecaria">Tapeçaria</Label>
+                  <Input
+                    id="tapecaria"
+                    value={formData.equipesEmpreiteiras.tapecaria}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'tapecaria', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="limpeza">Limpeza</Label>
+                  <Input
+                    id="limpeza"
+                    value={formData.equipesEmpreiteiras.limpeza}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'limpeza', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="eletrica">Elétrica</Label>
+                  <Input
+                    id="eletrica"
+                    value={formData.equipesEmpreiteiras.eletrica}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'eletrica', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="pintura">Pintura</Label>
+                  <Input
+                    id="pintura"
+                    value={formData.equipesEmpreiteiras.pintura}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'pintura', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="serralheria">Serralheria</Label>
+                  <Input
+                    id="serralheria"
+                    value={formData.equipesEmpreiteiras.serralheria}
+                    onChange={(e) => handleNestedInputChange('equipesEmpreiteiras', 'serralheria', e.target.value)}
+                    placeholder="Nome da empresa"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Informações Adicionais */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <FileText className="h-5 w-5 mr-2" />
+                Informações Adicionais
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="descricao">Descrição do Projeto</Label>
+                <Textarea
+                  id="descricao"
+                  value={formData.descricao}
+                  onChange={(e) => handleInputChange('descricao', e.target.value)}
+                  placeholder="Descreva os detalhes do projeto..."
+                  rows={3}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="observacoes">Observações</Label>
+                <Textarea
+                  id="observacoes"
+                  value={formData.observacoes}
+                  onChange={(e) => handleInputChange('observacoes', e.target.value)}
+                  placeholder="Observações importantes..."
+                  rows={3}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="linkDrive">Link do Drive</Label>
+                <Input
+                  id="linkDrive"
+                  type="url"
+                  value={formData.linkDrive}
+                  onChange={(e) => handleInputChange('linkDrive', e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Botões de Ação */}
+          <div className="flex justify-end space-x-4 pt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate('/projetos')}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={formLoading}>
+              {formLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  {isEditMode ? 'Atualizar Projeto' : 'Criar Projeto'}
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
       </div>
-
-      {/* Sidebox: Resumo por Fase */}
-      <div className="bg-white rounded-lg shadow-sm p-5 mb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <BarChart3 className="h-5 w-5 text-gray-700" />
-          <h3 className="font-semibold text-gray-800">Resumo por Fase (após filtros e busca)</h3>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Futuro</div>
-            <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Andamento</div>
-            <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Desmontagem</div>
-            <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Finalizado</div>
-            <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Mensagem de Erro */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-600">{error}</p>
-        </div>
-      )}
-
-      {/* Lista */}
-      {filteredProjects.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum projeto encontrado</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {activeTab === 'ativos'
-              ? (['consultor','produtor'].includes(userProfile?.funcao) ? 'Você não possui projetos vinculados no momento.' : 'Tente alterar os filtros ou crie um novo projeto.')
-              : 'Projetos encerrados aparecerão aqui.'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              userRole={userProfile?.funcao}
-              onArchive={handleArchiveProject}
-              selected={selectedIds.has(project.id)}
-              onToggleSelect={toggleSelect}
-              currentSearch={currentSearch}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 };
 
-export default ProjectsPage;
+export default ProjectFormPage;
+
