@@ -177,11 +177,13 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
       <div className="flex gap-2">
         <button
-          onClick={() => navigate(`/projeto/${project.id}${currentSearch}`)} // <- DETALHES (rota singular)
-          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          👁️ Ver
-        </button>
+  type="button"
+  onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
+  className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+>
+  👁️ Ver
+</button>
+
 
         {userRole === 'administrador' && (
           <>
