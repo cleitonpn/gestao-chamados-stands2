@@ -1,3 +1,4 @@
+// src/pages/ProjectsPage.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -107,15 +108,45 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
   const statusInfo = getStatusInfo();
 
-  // === NOVO: extrai nomes únicos das equipes terceirizadas (sem alterar lógica/serviços)
-  const terceirizadas = useMemo(() => {
-    const eq = project?.equipesEmpreiteiras;
-    if (!eq || typeof eq !== 'object') return [];
-    const nomes = Object.values(eq)
-      .filter(v => typeof v === 'string' && v.trim())
-      .map(v => v.trim());
-    return Array.from(new Set(nomes)); // únicos
-  }, [project?.equipesEmpreiteiras]);
+  /* =========================================================
+     Empreiteiras no card:
+     - Tenta usar o que veio no payload da lista.
+     - Se não vier, faz fallback buscando o projeto por id.
+     (Sem alterar regras de permissão/negócio, apenas UI)
+     ========================================================= */
+  const [terceirizadas, setTerceirizadas] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const extract = (eq) => {
+      if (!eq || typeof eq !== 'object') return [];
+      const nomes = Object.values(eq)
+        .filter(v => typeof v === 'string' && v.trim())
+        .map(v => v.trim());
+      return Array.from(new Set(nomes));
+    };
+
+    // 1) do payload da lista
+    const fromList = extract(project?.equipesEmpreiteiras);
+    if (fromList.length > 0) {
+      setTerceirizadas(fromList);
+      return () => { alive = false; };
+    }
+
+    // 2) fallback: buscar detalhe
+    (async () => {
+      try {
+        const full = await projectService.getProjectById(project.id);
+        if (!alive) return;
+        setTerceirizadas(extract(full?.equipesEmpreiteiras));
+      } catch {
+        // silencioso; se falhar, só não mostra os chips
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [project?.id, project?.equipesEmpreiteiras]);
 
   return (
     <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
@@ -148,7 +179,7 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
         <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
         <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
 
-        {/* === NOVO: Equipes terceirizadas visíveis no card */}
+        {/* Empreiteiras (chips) */}
         {terceirizadas.length > 0 && (
           <div className="flex items-start">
             <span className="w-20">👷 Equipes:</span>
@@ -177,13 +208,12 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
 
       <div className="flex gap-2">
         <button
-  type="button"
-  onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
-  className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
->
-  👁️ Ver
-</button>
-
+          type="button"
+          onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
+          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          👁️ Ver
+        </button>
 
         {userRole === 'administrador' && (
           <>
@@ -539,7 +569,7 @@ const ProjectsPage = () => {
           </button>
 
           {/* Novo Projeto */}
-          {userProfile?.funcao === 'administrador' && (
+          {canCreateProject && (
             <button
               onClick={() => navigate(`/projetos/novo${currentSearch}`)}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
