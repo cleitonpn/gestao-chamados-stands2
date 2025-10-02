@@ -1,12 +1,51 @@
-// src/pages/ProjectsPage.jsx
+// src/pages/ProjectDetailPage.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
-import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
+import { userService } from '../services/userService';
+import { ticketService } from '../services/ticketService';
+
+import { db } from '../config/firebase';
+import {
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  where,
+  getDocs,
+  deleteDoc,
+  doc,
+} from 'firebase/firestore';
+import { diaryService } from '../services/diaryService';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+import {
+  ArrowLeft,
+  Calendar,
+  MapPin,
+  Users,
+  ExternalLink,
+  Loader2,
+  Clock,
+  Wrench,
+  PartyPopper,
+  Truck,
+  FileText,
+  Building,
+  AlertCircle,
+  Send,
+  Trash2,
+  BarChart3,
+  ClipboardList,
+  TrendingUp,
+} from 'lucide-react';
 
 /* =========================================================================
-   Helpers de data / fuso e formatação
+   Helpers de data
    ========================================================================= */
 const isDateOnly = (value) => {
   if (typeof value === 'string') {
@@ -35,22 +74,38 @@ const normalizeDateInput = (value) => {
 };
 
 const formatDate = (value) => {
-  if (!value) return 'N/A';
+  if (!value) return 'Não definido';
   const date = normalizeDateInput(value);
-  if (!date) return 'N/A';
+  if (!date) return 'Data inválida';
   try {
     if (isDateOnly(value)) {
       const dd = String(date.getUTCDate()).padStart(2, '0');
       const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const yyyy = String(date.getUTCFullYear());
-      return `${dd}-${mm}-${yyyy}`;
+      const yy = String(date.getUTCFullYear()).slice(-2);
+      return `${dd}/${mm}/${yy}`;
     }
-    const dd = date.toLocaleString('pt-BR', { day: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const mm = date.toLocaleString('pt-BR', { month: '2-digit', timeZone: 'America/Sao_Paulo' });
-    const yyyy = date.toLocaleString('pt-BR', { year: 'numeric', timeZone: 'America/Sao_Paulo' });
-    return `${dd}-${mm}-${yyyy}`;
+    return date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+      timeZone: 'America/Sao_Paulo',
+    });
   } catch {
-    return 'N/A';
+    return 'Data inválida';
+  }
+};
+
+const formatDateTimeSP = (isoOrDate) => {
+  try {
+    const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : (isoOrDate || new Date());
+    if (isNaN(d?.getTime())) return '—';
+    return d.toLocaleString('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'America/Sao_Paulo',
+    });
+  } catch {
+    return '—';
   }
 };
 
@@ -61,7 +116,6 @@ const startOfDaySP = (value) => {
   copy.setHours(0, 0, 0, 0);
   return copy;
 };
-
 const endOfDaySP = (value) => {
   const d = normalizeDateInput(value);
   if (!d) return null;
@@ -71,23 +125,205 @@ const endOfDaySP = (value) => {
 };
 
 /* =========================================================================
-   Util: empreiteiros
+   Página
    ========================================================================= */
-const extractEmpreiteiros = (equipesEmpreiteiras) => {
-  if (!equipesEmpreiteiras || typeof equipesEmpreiteiras !== 'object') return [];
-  const arr = Object.values(equipesEmpreiteiras)
-    .filter(v => typeof v === 'string' && v.trim())
-    .map(v => v.trim());
-  return Array.from(new Set(arr));
-};
-
-/* =========================================================================
-   Card do Projeto (UI somente)
-   ========================================================================= */
-const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, currentSearch }) => {
+const ProjectDetailPage = () => {
+  const { projectId } = useParams();
   const navigate = useNavigate();
+  const { user, userProfile, authInitialized } = useAuth();
+
+  const [project, setProject] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // ====== Diário (subcoleção)
+  const [diaryEntries, setDiaryEntries] = useState([]);
+  const [newDiaryText, setNewDiaryText] = useState('');
+  const [newDiaryLink, setNewDiaryLink] = useState('');
+  const [savingDiary, setSavingDiary] = useState(false);
+  const [diaryError, setDiaryError] = useState('');
+
+  // ====== Chamados (para o resumo da sidebox)
+  const [tickets, setTickets] = useState([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [ticketsErr, setTicketsErr] = useState('');
+
+  useEffect(() => {
+    if (authInitialized && user && userProfile) {
+      loadProjectData();
+    } else if (authInitialized && !user) {
+      navigate('/login');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, user, userProfile, authInitialized]);
+
+  const loadProjectData = async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      const [projectData, usersData] = await Promise.all([
+        projectService.getProjectById(projectId),
+        userService.getAllUsers().catch(() => []),
+      ]);
+
+      if (!projectData) {
+        setError('Projeto não encontrado');
+        return;
+      }
+
+      // ====== Permissões ======
+      const role = userProfile?.funcao;
+      const uid = userProfile?.id || user?.uid;
+
+      if (role === 'consultor') {
+        const ok =
+          projectData.consultorId === uid ||
+          projectData.consultorUid === uid ||
+          projectData.consultorEmail === userProfile?.email ||
+          projectData.consultorNome === userProfile?.nome;
+        if (!ok) {
+          setError('Você não tem permissão para visualizar este projeto');
+          return;
+        }
+      } else if (role === 'produtor') {
+        const ok =
+          projectData.produtorId === uid ||
+          projectData.produtorUid === uid ||
+          projectData.produtorEmail === userProfile?.email ||
+          projectData.produtorNome === userProfile?.nome;
+        if (!ok) {
+          setError('Você não tem permissão para visualizar este projeto');
+          return;
+        }
+      } else if (!['administrador', 'gerente', 'operador'].includes(role)) {
+        setError('Você não tem permissão para visualizar projetos');
+        return;
+      }
+
+      setProject(projectData);
+      setUsers(usersData || []);
+
+      // ====== Chamados do projeto (para resumo)
+      await loadTicketsForProject(projectData.id || projectId);
+    } catch (err) {
+      console.error('Erro ao carregar projeto:', err);
+      setError('Erro ao carregar dados do projeto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ====== Diário (subcoleção em tempo real)
+  useEffect(() => {
+    const pid = project?.id || projectId;
+    if (!pid) return;
+    const q = query(
+      collection(db, 'projetos', pid, 'diary'),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setDiaryEntries(arr);
+    });
+    return () => unsub();
+  }, [project?.id, projectId]);
+
+  const loadTicketsForProject = async (pid) => {
+    try {
+      setLoadingTickets(true);
+      setTicketsErr('');
+      if (!pid) {
+        setTickets([]);
+        return;
+      }
+      if (typeof ticketService?.getTicketsByProject !== 'function') {
+        setTickets([]);
+        return;
+      }
+      const list = await ticketService.getTicketsByProject(pid);
+      setTickets(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error('Erro ao carregar chamados do projeto:', e);
+      setTicketsErr('Não foi possível carregar o resumo de chamados.');
+      setTickets([]);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
+
+  // ====== Diário (ações - NOVO fluxo com diaryService + feed)
+  const handleAddDiaryEntry = async () => {
+    setDiaryError('');
+    const textVal = (newDiaryText || '').trim();
+    const linkVal = (newDiaryLink || '').trim();
+    if (!textVal) return;
+
+    if (linkVal && !/^https?:\/\//i.test(linkVal)) {
+      setDiaryError('Informe um link válido (http/https).');
+      return;
+    }
+
+    try {
+      setSavingDiary(true);
+
+      await diaryService.addEntryWithFeed(
+        project.id || projectId,
+        {
+          authorId: userProfile?.id || user?.uid || null,
+          authorName: userProfile?.nome || user?.displayName || user?.email || 'Usuário',
+          authorRole: userProfile?.funcao || 'usuário',
+          text: textVal,
+          area: null,
+          atribuidoA: null,
+          linkUrl: linkVal || null,
+          attachments: [],
+        },
+        { projectName: project?.nome || projectId }
+      );
+
+      setNewDiaryText('');
+      setNewDiaryLink('');
+    } catch (e) {
+      console.error('Erro ao salvar observação do diário:', e);
+      setDiaryError('Não foi possível salvar a observação. Tente novamente.');
+    } finally {
+      setSavingDiary(false);
+    }
+  };
+
+  // Excluir diário (admin): apaga subcoleção e feed relacionado (sourceDiaryId)
+  const handleDeleteDiaryEntry = async (entryId) => {
+    setDiaryError('');
+    if ((userProfile?.funcao || '').toLowerCase() !== 'administrador') {
+      setDiaryError('Apenas administradores podem excluir observações.');
+      return;
+    }
+    try {
+      // 1) deletar feed(s) vinculado(s) a este entry (sourceDiaryId)
+      const feedSnap = await getDocs(
+        query(
+          collection(db, 'diary_feed'),
+          where('projectId', '==', project.id || projectId),
+          where('sourceDiaryId', '==', entryId)
+        )
+      );
+      for (const d of feedSnap.docs) {
+        await deleteDoc(doc(db, 'diary_feed', d.id));
+      }
+
+      // 2) deletar o doc da subcoleção
+      await deleteDoc(doc(db, 'projetos', project.id || projectId, 'diary', entryId));
+    } catch (e) {
+      console.error('Erro ao excluir observação do diário:', e);
+      setDiaryError('Não foi possível excluir a observação. Tente novamente.');
+    }
+  };
 
   const getStatusInfo = () => {
+    if (!project) return { label: 'Carregando...', color: 'gray' };
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -114,596 +350,586 @@ const ProjectCard = ({ project, onArchive, userRole, selected, onToggleSelect, c
       const inicio = startOfDaySP(dataInicio);
       if (inicio && today < inicio) return { label: 'Futuro', color: 'yellow' };
     }
+
     return { label: 'Finalizado', color: 'gray' };
   };
 
-  const statusInfo = getStatusInfo();
+  const canEdit = (userProfile?.funcao || '').toLowerCase() === 'administrador';
 
-  // Estado local para empreiteiros carregados via botão "Equipes"
-  const [terceirizadas, setTerceirizadas] = useState(extractEmpreiteiros(project.equipesEmpreiteiras));
-  const [loadingEq, setLoadingEq] = useState(false);
-  const [loadedEq, setLoadedEq] = useState(terceirizadas.length > 0);
+  // ====== Métricas de chamados (memo)
+  const ticketMetrics = useMemo(() => {
+    const total = tickets.length;
 
-  const handleLoadEquipes = async () => {
-    if (loadedEq || loadingEq) return;
+    // ✅ Conta concluído + arquivado na taxa de conclusão
+    const closedStatuses = new Set(['concluido', 'concluído', 'arquivado']);
+    const notOpenStatuses = new Set(['concluido', 'concluído', 'cancelado', 'arquivado']);
+
+    const closed = tickets.filter(t => closedStatuses.has((t.status || '').toLowerCase())).length;
+    const open = tickets.filter(t => !notOpenStatuses.has((t.status || '').toLowerCase())).length;
+    const completion = total > 0 ? Math.round((closed / total) * 100) : 0;
+
+    // Top áreas
+    const counts = {};
+    for (const t of tickets) {
+      const area = (t.area || t.areaAtual || 'Não informada').toString();
+      if (!counts[area]) counts[area] = 0;
+      counts[area] += 1;
+    }
+    const topAreas = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    return { total, open, closed, completion, topAreas };
+  }, [tickets]);
+
+  // Linkar para a lista filtrada (usa página /admin/chamados-filtrados)
+  const goToFilteredTickets = () => {
     try {
-      setLoadingEq(true);
-      const full = await projectService.getProjectById(project.id);
-      const nomes = extractEmpreiteiros(full?.equipesEmpreiteiras);
-      setTerceirizadas(nomes);
-      setLoadedEq(true);
+      const payload = {
+        chamados: tickets,
+        titulo: `Chamados do projeto: ${project?.nome || projectId}`,
+        filtro: `Projeto: ${project?.nome || projectId}`,
+      };
+      localStorage.setItem('chamadosFiltrados', JSON.stringify(payload));
+      navigate('/admin/chamados-filtrados');
     } catch (e) {
-      // silencioso; se falhar, não quebra o card
-    } finally {
-      setLoadingEq(false);
+      console.error('Falha ao preparar a lista filtrada:', e);
+      // fallback: vai para dashboard
+      navigate('/dashboard');
     }
   };
-
-  return (
-    <div className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${selected ? 'ring-2 ring-blue-500' : ''}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelect(project.id)}
-            className="h-4 w-4"
-            aria-label="Selecionar projeto"
-          />
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-1 break-words">{project.nome}</h3>
-            <p className="text-sm text-gray-600">{project.feira} • {project.local}</p>
-          </div>
-        </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-          statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
-          statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
-          statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {statusInfo.label}
-        </span>
-      </div>
-
-      <div className="space-y-2 mb-4 text-sm text-gray-600">
-        <div className="flex items-center"><span className="w-20">📍 Local:</span><span>{project.local || 'N/A'}</span></div>
-        <div className="flex items-center"><span className="w-20">📏 Área:</span><span>{project.metragem || 'N/A'}</span></div>
-
-        {/* Empreiteiras (chips) — aparecem quando já existem no payload ou após clicar em "Equipes" */}
-        {terceirizadas.length > 0 && (
-          <div className="flex items-start">
-            <span className="w-20">👷 Equipes:</span>
-            <div className="flex flex-wrap gap-1">
-              {terceirizadas.slice(0, 8).map((nome) => (
-                <span
-                  key={nome}
-                  className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-gray-700 bg-gray-50"
-                  title={nome}
-                >
-                  {nome}
-                </span>
-              ))}
-              {terceirizadas.length > 8 && (
-                <span className="text-xs text-gray-500">+{terceirizadas.length - 8}</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="text-xs text-gray-500">
-          <div>Início: {formatDate(project.dataInicio)}</div>
-          <div>Fim: {formatDate(project.dataFim)}</div>
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        {/* Ver: volta a abrir a página de detalhe do projeto */}
-        <button
-          type="button"
-          onClick={() => navigate(`/projetos/${project.id}${currentSearch}`)}
-          className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          👁️ Ver
-        </button>
-
-        {/* Equipes: carrega nomes dos empreiteiros no card */}
-        <button
-          type="button"
-          onClick={handleLoadEquipes}
-          disabled={loadingEq || loadedEq}
-          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${loadedEq ? 'bg-gray-200 text-gray-600' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-          title={loadedEq ? 'Equipes carregadas' : 'Carregar equipes deste projeto'}
-        >
-          {loadingEq ? 'Carregando…' : 'Equipes'}
-        </button>
-
-        {userRole === 'administrador' && (
-          <>
-            <button
-              onClick={() => navigate(`/projetos/editar/${project.id}${currentSearch}`)}
-              className="bg-gray-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition-colors"
-              title="Editar"
-            >
-              ✏️
-            </button>
-            <button
-              onClick={() => onArchive(project.id)}
-              className="bg-red-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
-              title="Encerrar"
-            >
-              🗑️
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/* =========================================================================
-   Página
-   ========================================================================= */
-const ProjectsPage = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { user, userProfile, authInitialized } = useAuth();
-
-  const [allProjects, setAllProjects] = useState([]);
-  const [filteredProjects, setFilteredProjects] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState('todos');
-  const [activeTab, setActiveTab] = useState('ativos');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  // seleção em massa
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-
-  // query atual para repassar na navegação
-  const currentSearch = useMemo(() => location.search || '', [location.search]);
-
-  /* Persistência de filtros na URL (carregar) */
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const eventFromUrl = params.get('evento');
-    const tabFromUrl = params.get('tab');
-    const qFromUrl = params.get('q') || '';
-    if (eventFromUrl) setSelectedEvent(eventFromUrl);
-    if (tabFromUrl) setActiveTab(tabFromUrl);
-    setSearchTerm(qFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* Persistência de filtros na URL (salvar) */
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    params.set('evento', selectedEvent);
-    params.set('tab', activeTab);
-    params.set('q', searchTerm);
-    const newSearch = `?${params.toString()}`;
-    if (newSearch !== location.search) {
-      navigate({ pathname: location.pathname, search: newSearch }, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEvent, activeTab, searchTerm]);
-
-  /* Carregar projetos (sem alterar serviços/regras) */
-  useEffect(() => {
-    if (!authInitialized) return;
-    if (!user) {
-      navigate('/login');
-      return;
-    }
-
-    (async () => {
-      try {
-        setLoading(true);
-        setError('');
-        const projectsData = await projectService.getAllProjects();
-        const sortedProjects = projectsData.sort((a, b) => {
-          const aDate = normalizeDateInput(a.dataInicio || 0) || new Date(0);
-          const bDate = normalizeDateInput(b.dataInicio || 0) || new Date(0);
-          return bDate - aDate;
-        });
-        setAllProjects(sortedProjects);
-        const uniqueEvents = [...new Set(sortedProjects.map(p => p.feira || p.evento).filter(Boolean))];
-        setEvents(uniqueEvents);
-      } catch (err) {
-        console.error('Erro ao carregar projetos:', err);
-        setError('Não foi possível carregar os projetos.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [authInitialized, user, navigate]);
-
-  /* Filtragem por papéis + tabs + evento + busca */
-  useEffect(() => {
-    if (!userProfile) return;
-
-    let projectsToDisplay = [...allProjects];
-    const userRole = userProfile.funcao;
-    const userId = userProfile.id || user?.uid;
-
-    if (userRole === 'consultor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.consultorId === userId ||
-        project.consultorUid === userId ||
-        project.consultorEmail === userProfile.email ||
-        project.consultorNome === userProfile.nome
-      ));
-    } else if (userRole === 'produtor') {
-      projectsToDisplay = projectsToDisplay.filter(project => (
-        project.produtorId === userId ||
-        project.produtorUid === userId ||
-        project.produtorEmail === userProfile.email ||
-        project.produtorNome === userProfile.nome
-      ));
-    } else if (!['administrador', 'gerente', 'operador'].includes(userRole)) {
-      projectsToDisplay = [];
-    }
-
-    if (activeTab === 'ativos') {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status !== 'encerrado');
-    } else {
-      projectsToDisplay = projectsToDisplay.filter(p => p.status === 'encerrado');
-    }
-
-    if (selectedEvent && selectedEvent !== 'todos') {
-      projectsToDisplay = projectsToDisplay.filter(p => (p.feira || p.evento) === selectedEvent);
-    }
-
-    // Busca (mantida conforme já existia; não mexe nas regras)
-    const term = (searchTerm || '').trim().toLowerCase();
-    if (term) {
-      const hit = (v) => (v || '').toString().toLowerCase().includes(term);
-      projectsToDisplay = projectsToDisplay.filter(p =>
-        hit(p.nome) ||
-        hit(p.feira || p.evento) ||
-        hit(p.local) ||
-        hit(p.consultorNome) ||
-        hit(p.produtorNome) ||
-        hit(p.pavilhao) ||
-        hit(p.tipoMontagem)
-      );
-    }
-
-    setFilteredProjects(projectsToDisplay);
-    setSelectedIds(new Set()); // limpa seleção ao mudar filtros
-  }, [allProjects, selectedEvent, activeTab, searchTerm, userProfile, user]);
-
-  /* Encerrar individual e em massa — não alterado */
-  const handleArchiveProject = async (projectId) => {
-    if (!window.confirm('Tem certeza que deseja encerrar este projeto?')) return;
-    try {
-      await projectService.updateProject(projectId, { status: 'encerrado', dataEncerramento: new Date() });
-      const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
-    } catch (error) {
-      console.error('Erro ao encerrar projeto:', error);
-      setError('Erro ao encerrar projeto. Tente novamente.');
-    }
-  };
-
-  const toggleSelect = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const allVisibleIds = useMemo(() => filteredProjects.map(p => p.id), [filteredProjects]);
-
-  const toggleSelectAll = () => {
-    setSelectedIds(prev => {
-      if (prev.size === allVisibleIds.length) return new Set();
-      return new Set(allVisibleIds);
-    });
-  };
-
-  const handleBulkArchive = async () => {
-    if (selectedIds.size === 0) return;
-    if (!window.confirm(`Encerrar ${selectedIds.size} projeto(s)?`)) return;
-    setBulkBusy(true);
-    try {
-      await Promise.all(Array.from(selectedIds).map(id =>
-        projectService.updateProject(id, { status: 'encerrado', dataEncerramento: new Date() })
-      ));
-      const projectsData = await projectService.getAllProjects();
-      setAllProjects(projectsData);
-      setSelectedIds(new Set());
-    } catch (e) {
-      console.error('Erro no encerramento em massa:', e);
-      setError('Alguns projetos podem não ter sido encerrados. Tente novamente.');
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
-  const canCreateProject = userProfile?.funcao === 'administrador';
-
-  /* Resumo por fase (com filteredProjects já filtrados) */
-  const phaseCounts = useMemo(() => {
-    const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-
-    const inRange = (s, e) => {
-      const S = startOfDaySP(s), E = endOfDaySP(e);
-      return S && E && today >= S && today <= E;
-    };
-
-    for (const p of filteredProjects) {
-      let phase = 'finalizado';
-      const statusLower = (p.status || '').toLowerCase();
-
-      if (statusLower === 'encerrado' || statusLower === 'finalizado' || statusLower === 'arquivado') {
-        phase = 'finalizado';
-      } else if (inRange(p.desmontagem?.dataInicio, p.desmontagem?.dataFim)) {
-        phase = 'desmontagem';
-      } else if (
-        inRange(p.montagem?.dataInicio, p.montagem?.dataFim) ||
-        inRange(p.evento?.dataInicio, p.evento?.dataFim)
-      ) {
-        phase = 'andamento';
-      } else {
-        const start = p.dataInicio || p.montagem?.dataInicio || p.evento?.dataInicio;
-        const S = startOfDaySP(start);
-        phase = (S && today < S) ? 'futuro' : 'finalizado';
-      }
-
-      counts[phase] = (counts[phase] || 0) + 1;
-    }
-    return counts;
-  }, [filteredProjects]);
 
   /* =========================
-     Exportação CSV (mantida)
+     Loading/Erro
      ========================= */
-  const toCSVRow = (obj) => {
-    const escape = (v) => {
-      if (v === null || v === undefined) return '';
-      const s = String(v).replace(/"/g, '""');
-      return `"${s}"`;
-    };
-    return [
-      escape(obj.id),
-      escape(obj.nome),
-      escape(obj.feira || obj.evento),
-      escape(obj.local),
-      escape(obj.pavilhao),
-      escape(obj.tipoMontagem),
-      escape(obj.metragem),
-      escape(obj.consultorNome),
-      escape(obj.produtorNome),
-      escape(obj.status),
-    ].join(',');
-  };
-
-  const downloadCSV = (rows, filename = 'projetos.csv') => {
-    const header = [
-      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
-    ].join(',');
-    const body = rows.map(toCSVRow).join('\n');
-    const csv = header + '\n' + body;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportSelected = () => {
-    const setIds = new Set(selectedIds);
-    const rows = filteredProjects.filter(p => setIds.has(p.id));
-    if (rows.length === 0) return;
-    downloadCSV(rows, 'projetos_selecionados.csv');
-  };
-
-  const exportFiltered = () => {
-    if (filteredProjects.length === 0) return;
-    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
-  };
-
-  /* UI */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Carregando projetos...</p>
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Carregando projeto...</p>
         </div>
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Erro</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => navigate('/projetos')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar para Projetos
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Projeto não encontrado</h2>
+        </div>
+      </div>
+    );
+  }
+
+  const statusInfo = getStatusInfo();
+
+  /* =========================
+     Render
+     ========================= */
   return (
     <div className="container mx-auto px-4 py-8">
-      <button
-        onClick={() => navigate('/dashboard')}
-        className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 bg-gray-100 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Voltar ao Dashboard
-      </button>
-
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Projetos</h1>
-          <p className="text-gray-600 mt-1">
-            {['administrador','gerente','operador'].includes(userProfile?.funcao)
-              ? 'Gerencie todos os projetos do sistema'
-              : 'Seus projetos vinculados'}
-          </p>
-        </div>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={handleBulkArchive}
-            disabled={selectedIds.size === 0 || bulkBusy}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${selectedIds.size === 0 || bulkBusy ? 'bg-gray-200 text-gray-500' : 'bg-red-600 text-white hover:bg-red-700'}`}
-            title={selectedIds.size ? `Encerrar ${selectedIds.size} selecionado(s)` : 'Selecione projetos para encerrar'}
-          >
-            {bulkBusy ? 'Encerrando...' : `Encerrar selecionados (${selectedIds.size})`}
-          </button>
-
-          {/* Exportações */}
-          <button
-            onClick={exportSelected}
-            disabled={selectedIds.size === 0}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar projetos selecionados (CSV)"
-          >
-            <Download className="h-4 w-4" /> Exportar selecionados
-          </button>
-          <button
-            onClick={exportFiltered}
-            disabled={filteredProjects.length === 0}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar lista filtrada (CSV)"
-          >
-            <Download className="h-4 w-4" /> Exportar filtrados
-          </button>
-
-          {/* Novo Projeto */}
-          {canCreateProject && (
-            <button
-              onClick={() => navigate(`/projetos/novo${currentSearch}`)}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/projetos')}
+              className="mr-4"
             >
-              ➕ Novo Projeto
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-        <div className="flex flex-wrap gap-4 items-center">
-          {/* Tabs de Status */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setActiveTab('ativos')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ativos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Ativos ({allProjects.filter(p => p.status !== 'encerrado').length})
-            </button>
-            <button
-              onClick={() => setActiveTab('encerrados')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'encerrados' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              Encerrados ({allProjects.filter(p => p.status === 'encerrado').length})
-            </button>
-          </div>
-
-          {/* Filtro por Evento */}
-          {events.length > 0 && (
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Feira:</label>
-              <select
-                value={selectedEvent}
-                onChange={(e) => setSelectedEvent(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="todos">Todas as feiras</option>
-                {events.map(event => (
-                  <option key={event} value={event}>{event}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Busca */}
-          <div className="w-full md:w-96 ml-auto">
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome, feira, local, consultor, produtor…"
-                className="pl-9 w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Voltar
+            </Button>
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-3xl font-bold text-gray-900">
+                  {project.nome}
+                </h1>
+                <Badge
+                  variant="secondary"
+                  className={`${
+                    statusInfo.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+                    statusInfo.color === 'green' ? 'bg-green-100 text-green-800' :
+                    statusInfo.color === 'orange' ? 'bg-orange-100 text-orange-800' :
+                    statusInfo.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}
+                >
+                  {statusInfo.label}
+                </Badge>
+              </div>
+              <p className="text-gray-600">
+                {project.feira} • {project.local}
+              </p>
             </div>
           </div>
 
-          {/* Selecionar todos */}
-          <button
-            onClick={toggleSelectAll}
-            className="text-sm px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200"
-          >
-            {selectedIds.size === allVisibleIds.length && allVisibleIds.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}
-          </button>
+          {canEdit && (
+            <Button
+              onClick={() => navigate(`/projetos/editar/${project.id}`)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Editar Projeto
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Coluna Principal (esquerda) */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Informações Básicas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Building className="h-5 w-5 mr-2" />
+                  Informações Básicas
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Nome do Projeto</label>
+                    <p className="text-lg font-semibold">{project.nome}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Feira</label>
+                    <p className="text-lg">{project.feira}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Localização</label>
+                    <p className="flex items-center">
+                      <MapPin className="h-4 w-4 mr-1" />
+                      {project.local}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Metragem</label>
+                    <p>{project.metragem}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Tipo de Montagem</label>
+                    <p>{project.tipoMontagem}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Pavilhão</label>
+                    <p>{project.pavilhao || 'Não especificado'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Diário do Projeto — FORM (mantém posição) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Diário do Projeto
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Adicionar observação</label>
+                  <textarea
+                    className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                    value={newDiaryText}
+                    onChange={(e) => setNewDiaryText(e.target.value)}
+                    placeholder="Ex.: Rita (consultora) definiu as cores do bagum: grafite e preto."
+                  />
+                  <div className="mt-2">
+                    <input
+                      type="url"
+                      className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Link do Drive (opcional): https://drive.google.com/…"
+                      value={newDiaryLink}
+                      onChange={(e) => setNewDiaryLink(e.target.value)}
+                    />
+                  </div>
+                  {diaryError && <p className="text-sm text-red-600 mt-2">{diaryError}</p>}
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={handleAddDiaryEntry} disabled={savingDiary || !newDiaryText.trim()}>
+                      {savingDiary ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                      Salvar no diário
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Cronograma */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Calendar className="h-5 w-5 mr-2" />
+                  Cronograma
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {(project.montagem?.dataInicio || project.montagem?.dataFim) && (
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-blue-800 mb-2 flex items-center">
+                      <Wrench className="h-4 w-4 mr-2" />
+                      Montagem
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.montagem?.dataInicio) || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.montagem?.dataFim) || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(project.evento?.dataInicio || project.evento?.dataFim) && (
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-green-800 mb-2 flex items-center">
+                      <PartyPopper className="h-4 w-4 mr-2" />
+                      Evento
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.evento?.dataInicio) || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.evento?.dataFim) || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(project.desmontagem?.dataInicio || project.desmontagem?.dataFim) && (
+                  <div className="bg-orange-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-orange-800 mb-2 flex items-center">
+                      <Truck className="h-4 w-4 mr-2" />
+                      Desmontagem
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.desmontagem?.dataInicio) || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.desmontagem?.dataFim) || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(project.periodoGeral?.dataInicio || project.periodoGeral?.dataFim) && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-gray-800 mb-2 flex items-center">
+                      <Clock className="h-4 w-4 mr-2" />
+                      Período Geral
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Início:</span>
+                        <p className="font-medium">{formatDate(project.periodoGeral?.dataInicio) || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fim:</span>
+                        <p className="font-medium">{formatDate(project.periodoGeral?.dataFim) || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Detalhes Adicionais */}
+            {project.descricao && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <FileText className="h-5 w-5 mr-2" />
+                    Detalhes Adicionais
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="whitespace-pre-wrap text-sm">{project.descricao}</pre>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Coluna Lateral (direita) */}
+          <div className="space-y-6">
+            {/* Responsáveis */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Users className="h-5 w-5 mr-2" />
+                  Responsáveis
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div>
+                  <span className="font-medium">Produtor:</span>
+                  <p>{project.produtorNome || 'Não atribuído'}</p>
+                  {project.produtorEmail && (
+                    <a
+                      href={`mailto:${project.produtorEmail}`}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      {project.produtorEmail}
+                    </a>
+                  )}
+                </div>
+                <div className="pt-2">
+                  <span className="font-medium">Consultor:</span>
+                  <p>{project.consultorNome || 'Não atribuído'}</p>
+                  {project.consultorEmail && (
+                    <a
+                      href={`mailto:${project.consultorEmail}`}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      {project.consultorEmail}
+                    </a>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Equipes Terceirizadas */}
+            {project.equipesEmpreiteiras && Object.values(project.equipesEmpreiteiras).some(Boolean) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Equipes Terceirizadas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {Object.entries(project.equipesEmpreiteiras).map(([area, empresa]) => (
+                    empresa && (
+                      <div key={area}>
+                        <label className="text-sm font-medium text-gray-500 capitalize">
+                          {area}
+                        </label>
+                        <p className="text-gray-900">{empresa}</p>
+                      </div>
+                    )
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Documentos */}
+            {project.linkDrive && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <ExternalLink className="h-5 w-5 mr-2" />
+                    Documentos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <a
+                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                    href={project.linkDrive}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Acessar Drive
+                    <ExternalLink className="h-3 w-3 ml-1" />
+                  </a>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Informações do Sistema */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <AlertCircle className="h-5 w-5 mr-2" />
+                  Informações do Sistema
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div>
+                  Criado em:{' '}
+                  <span className="font-medium">
+                    {formatDateTimeSP(project.createdAt || project.criadoEm || project.criadoem)}
+                  </span>
+                </div>
+                <div>
+                  Atualizado em:{' '}
+                  <span className="font-medium">
+                    {formatDateTimeSP(project.updatedAt || project.atualizadoEm || project.atualizadoem)}
+                  </span>
+                </div>
+                <div> Status: <span className="font-medium capitalize">{project.status || 'ativo'}</span></div>
+                <div> Ativo: <span className="font-medium">{project.ativo ? 'Sim' : 'Não'}</span></div>
+              </CardContent>
+            </Card>
+
+            {/* Observações do Projeto (Diário - lista) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Observações do Projeto
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Array.isArray(diaryEntries) && diaryEntries.length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhuma observação por enquanto.</p>
+                ) : (
+                  (diaryEntries || []).map((e) => (
+                    <div key={e.id} className="rounded-lg border p-3 bg-gray-50">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">{e.authorName || '—'}</span>
+                            {e.authorRole ? ` (${e.authorRole})` : ''} deixou a seguinte observação:
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-gray-900 break-words">{e.text}</p>
+                          {e.linkUrl && (
+                            <div className="mt-2 text-sm">
+                              <a
+                                href={e.linkUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                                Abrir link
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                        {(userProfile?.funcao || '').toLowerCase() === 'administrador' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteDiaryEntry(e.id)}
+                            title="Excluir observação"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500">
+                        {formatDateTimeSP(e.createdAt)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            {/* =========================
+                NOVA SIDEBOX: Resumo de Chamados
+               ========================= */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <BarChart3 className="h-5 w-5 mr-2" />
+                  Resumo de Chamados
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                {loadingTickets ? (
+                  <div className="text-gray-500 flex items-center">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando...
+                  </div>
+                ) : ticketsErr ? (
+                  <p className="text-red-600">{ticketsErr}</p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ClipboardList className="h-4 w-4" />
+                        <span>Total de chamados</span>
+                      </div>
+                      <span className="font-semibold">{ticketMetrics.total}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>Abertos</span>
+                      </div>
+                      <span className="font-semibold">{ticketMetrics.open}</span>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4" />
+                          <span>Taxa de conclusão</span>
+                        </div>
+                        <span className="font-semibold">{ticketMetrics.completion}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-200 rounded">
+                        <div
+                          className="h-2 bg-green-500 rounded"
+                          style={{ width: `${ticketMetrics.completion}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Top áreas envolvidas</p>
+                      {ticketMetrics.topAreas.length === 0 ? (
+                        <p className="text-gray-500">—</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {ticketMetrics.topAreas.map(([area, qty]) => (
+                            <li key={area} className="flex items-center justify-between">
+                              <span className="capitalize">{area}</span>
+                              <span className="font-medium">{qty}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div className="pt-2">
+                      <Button
+                        onClick={goToFilteredTickets}
+                        className="w-full"
+                        variant="outline"
+                        disabled={tickets.length === 0}
+                        title="Ver lista de chamados do projeto"
+                      >
+                        Ver todos os chamados
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
-
-      {/* Sidebox: Resumo por Fase */}
-      <div className="bg-white rounded-lg shadow-sm p-5 mb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <BarChart3 className="h-5 w-5 text-gray-700" />
-          <h3 className="font-semibold text-gray-800">Resumo por Fase (após filtros e busca)</h3>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Futuro</div>
-            <div className="text-2xl font-bold">{phaseCounts.futuro}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Andamento</div>
-            <div className="text-2xl font-bold">{phaseCounts.andamento}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Desmontagem</div>
-            <div className="text-2xl font-bold">{phaseCounts.desmontagem}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-gray-500">Finalizado</div>
-            <div className="text-2xl font-bold">{phaseCounts.finalizado}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Mensagem de Erro */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-600">{error}</p>
-        </div>
-      )}
-
-      {/* Lista */}
-      {filteredProjects.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="mx-auto h-12 w-12 text-gray-400 mb-4">⚠️</div>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum projeto encontrado</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {activeTab === 'ativos'
-              ? (['consultor','produtor'].includes(userProfile?.funcao) ? 'Você não possui projetos vinculados no momento.' : 'Tente alterar os filtros ou crie um novo projeto.')
-              : 'Projetos encerrados aparecerão aqui.'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              userRole={userProfile?.funcao}
-              onArchive={handleArchiveProject}
-              selected={selectedIds.has(project.id)}
-              onToggleSelect={toggleSelect}
-              currentSearch={currentSearch}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 };
 
-export default ProjectsPage;
+export default ProjectDetailPage;
