@@ -194,6 +194,11 @@ const EventsPage = () => {
     setShowForm(true);
   };
 
+  // 🔁 NOVA REGRA: datas mais flexíveis
+  // - Mantemos apenas a validação de presença dos campos
+  // - Permite mesma data em início/fim dentro de cada fase (>=)
+  // - Remove a obrigatoriedade de ordem entre fases (montagem → evento → desmontagem)
+  // - Ainda evita intervalos negativos (início > fim)
   const validateForm = () => {
     if (!formData.nome.trim()) { setError('Nome do evento é obrigatório'); return false; }
     if (!formData.ano) { setError('Ano do evento é obrigatório'); return false; }
@@ -217,12 +222,12 @@ const EventsPage = () => {
       fimDesmontagem: createDateFromString(formData.dataFimDesmontagem)
     };
 
-    if (dates.inicioMontagem >= dates.fimMontagem) { setError('Data de fim da montagem deve ser posterior ao início'); return false; }
-    if (dates.fimMontagem > dates.inicioEvento) { setError('Data de início do evento deve ser posterior ao fim da montagem'); return false; }
-    if (dates.inicioEvento >= dates.fimEvento) { setError('Data de fim do evento deve ser posterior ao início'); return false; }
-    if (dates.fimEvento > dates.inicioDesmontagem) { setError('Data de início da desmontagem deve ser posterior ao fim do evento'); return false; }
-    if (dates.inicioDesmontagem >= dates.fimDesmontagem) { setError('Data de fim da desmontagem deve ser posterior ao início'); return false; }
+    // ✅ Permite datas iguais dentro da mesma fase; apenas impede intervalos negativos
+    if (dates.inicioMontagem > dates.fimMontagem) { setError('Na montagem, a data final não pode ser anterior à inicial'); return false; }
+    if (dates.inicioEvento > dates.fimEvento) { setError('No evento, a data final não pode ser anterior à inicial'); return false; }
+    if (dates.inicioDesmontagem > dates.fimDesmontagem) { setError('Na desmontagem, a data final não pode ser anterior à inicial'); return false; }
 
+    // ❌ Removido: obrigatoriedade de ordem entre fases (antes exigia montagem < evento < desmontagem)
     return true;
   };
 
@@ -491,7 +496,11 @@ const EventsPage = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingEvent ? `🕐 Editar Evento: ${editingEvent.nome}` : '🕐 Novo Evento'}</DialogTitle>
-            <DialogDescription>{editingEvent ? 'Modifique as informações do evento. As datas serão salvas considerando o fuso horário local (UTC-3).' : 'Preencha as informações do evento. As datas serão salvas considerando o fuso horário local (UTC-3).'}</DialogDescription>
+            <DialogDescription>
+              {editingEvent
+                ? 'Modifique as informações do evento. Datas flexíveis: é permitido usar a mesma data dentro e entre fases (ex.: realização e desmontagem no mesmo dia).'
+                : 'Preencha as informações do evento. Datas flexíveis: é permitido usar a mesma data dentro e entre fases (ex.: realização e desmontagem no mesmo dia).'}
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -533,7 +542,10 @@ const EventsPage = () => {
 
             {/* Cronograma */}
             <div className="space-y-4">
-              <h4 className="font-medium">Cronograma (Fuso Horário: UTC-3)</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Cronograma (Fuso Horário: UTC-3)</h4>
+                <Badge variant="outline" className="text-xs">Datas flexíveis (aceita mesma data)</Badge>
+              </div>
 
               {/* Montagem */}
               <div className="bg-blue-50 p-4 rounded-lg">
