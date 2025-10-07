@@ -63,14 +63,19 @@ const statusColor = (st) => {
   if (s === "em_tratativa") return "border-l-4 border-cyan-400";
   if (s === "executado_aguardando_validacao" || s === "executado_aguardando_validacao_operador") return "border-l-4 border-yellow-400";
   if (s === "concluido") return "border-l-4 border-green-400";
-  if (s === "cancelado" || s === "arquivado") return "border-l-4 border-zinc-500";
+  if (s.includes("arquiv") || s.includes("archiv") || s === "cancelado") return "border-l-4 border-zinc-500";
   return "border-l-4 border-zinc-400";
+};
+
+const isArchived = (st) => {
+  const s = norm(st);
+  return s.includes("arquiv") || s.includes("archiv");
 };
 
 /* ============================ componente ============================ */
 export default function TVPanel() {
   // KPIs (Chamados)
-  const [stats, setStats] = useState({ total: 0, abertos: 0, emAndamento: 0, concluidos: 0 });
+  const [stats, setStats] = useState({ total: 0, abertos: 0, emAndamento: 0, concluidos: 0, arquivados: 0 });
   const [awaitingValidation, setAwaitingValidation] = useState(0);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [openedToday, setOpenedToday] = useState(0);
@@ -85,6 +90,7 @@ export default function TVPanel() {
 
   // Projetos
   const [projectStats, setProjectStats] = useState({ ativos: 0 });
+  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventName}
 
   // Users map por ID e por email
   const [usersById, setUsersById] = useState({});
@@ -141,14 +147,30 @@ export default function TVPanel() {
       setUsersByEmail(byEmail);
     });
 
-    // Projetos
+    // Projetos (contagem + mapa para nomes de projeto/evento)
     const unsubProjects = onSnapshot(collection(db, "projetos"), (snap) => {
       let ativos = 0;
+      const map = {};
       snap.forEach((d) => {
         const data = d.data() || {};
-        if (data?.status !== "arquivado" && data?.status !== "cancelado") ativos += 1;
+        const status = norm(data?.status);
+        if (status !== "arquivado" && status !== "cancelado") ativos += 1;
+        const projectName = data.nome || data.name || data.titulo || data.title || data.projeto || data.project || d.id;
+        const ev =
+          data.eventName ||
+          data.event_title ||
+          data.eventTitle ||
+          data.evento ||
+          data.event ||
+          data?.event?.name ||
+          data?.event?.nome ||
+          data?.evento?.nome ||
+          data?.evento?.name ||
+          "";
+        map[d.id] = { projectName, eventName: ev };
       });
       setProjectStats({ ativos });
+      setProjectsMap(map);
     });
 
     // Chamados
@@ -164,7 +186,8 @@ export default function TVPanel() {
         const abertos = tickets.filter((t) => norm(t.status) === "aberto").length;
         const emAndamento = tickets.filter((t) => norm(t.status) === "em_tratativa").length;
         const concluidos = tickets.filter((t) => norm(t.status) === "concluido").length;
-        setStats({ total, abertos, emAndamento, concluidos });
+        const arquivados = tickets.filter((t) => isArchived(t.status)).length;
+        setStats({ total, abertos, emAndamento, concluidos, arquivados });
 
         setAwaitingValidation(
           tickets.filter((t) => ["executado_aguardando_validacao", "executado_aguardando_validacao_operador"].includes(norm(t.status))).length
@@ -192,7 +215,7 @@ export default function TVPanel() {
           risk = 0;
         const violatedList = [];
         tickets
-          .filter((t) => !["concluido", "cancelado", "arquivado"].includes(norm(t.status)))
+          .filter((t) => !["concluido", "cancelado"].includes(norm(t.status)) && !isArchived(t.status))
           .forEach((t) => {
             const prio = SLA_HOURS[norm(t.prioridade)];
             const created = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
@@ -254,6 +277,22 @@ export default function TVPanel() {
             t.responsavel_atual_nome ||
             "—";
 
+          // ==== Projeto e Evento no ticket ====
+          const projId = t.projectId || t.projetoId || t.project_id || t.projeto_id || t.idProjeto || t.id_projeto;
+          const projLabelFromDoc = t.projectName || t.projetoNome || t.projeto || t.project || t.project_title || t.titleProject;
+          const evLabelFromDoc =
+            t.eventName ||
+            t.evento ||
+            t.event ||
+            t.event_title ||
+            t.eventTitle ||
+            t?.event?.name ||
+            t?.event?.nome;
+          const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+          const evFromMap = projId ? projectsMap[projId]?.eventName : undefined;
+          const projectLabel = projLabelFromDoc || projFromMap || (projId ? String(projId) : "");
+          const eventLabel = evLabelFromDoc || evFromMap || "";
+
           const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
           const when = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
 
@@ -265,6 +304,8 @@ export default function TVPanel() {
             responsavel,
             areaAtual,
             openedAt: when,
+            projectLabel,
+            eventLabel,
           };
         });
         setActivityFeed(latest);
@@ -310,7 +351,10 @@ export default function TVPanel() {
   }, []);
 
   const RESOLUTION_GOAL = 95;
-  const resolutionRate = useMemo(() => (stats.total ? (stats.concluidos / stats.total) * 100 : 0), [stats]);
+  const resolutionRate = useMemo(() => {
+    const { total, concluidos, arquivados } = stats;
+    return total ? ((concluidos + arquivados) / total) * 100 : 0;
+  }, [stats]);
 
   const slaByArea = useMemo(() => {
     const map = {};
@@ -353,8 +397,11 @@ export default function TVPanel() {
                 ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
                 : [];
               const thumbs = images.slice(0, 3);
-              const proj = d.projectName || d.projectId || "Projeto";
-              const evt = d.eventName || d.event || d.evento || d.event_title || d.eventTitle;
+              const projId = d.projectId || d.projetoId || d.project_id || d.projeto_id || d.idProjeto || d.id_projeto;
+              const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+              const evFromMap = projId ? projectsMap[projId]?.eventName : undefined;
+              const proj = d.projectName || d.project || d.projetoNome || d.projeto || projFromMap || "Projeto";
+              const evt = d.eventName || d.event || d.evento || d.event_title || d.eventTitle || d?.event?.name || d?.event?.nome || evFromMap;
               const header = evt ? `${proj} / ${evt}` : proj;
               return (
                 <div key={d.id} className="bg-black/25 border border-white/10 rounded-xl p-2 min-h-[86px]">
@@ -385,7 +432,6 @@ export default function TVPanel() {
 
         {/* CENTRO – CARDS AGRUPADOS */}
         <main className="col-span-6 flex flex-col gap-3 overflow-hidden">
-          {/* Banner crítico (se houver SLA violado ou escalados) */}
           {(slaStats.violated > 0 || escalatedCount > 0) && (
             <div className="bg-red-500/15 border border-red-400/40 rounded-xl px-3 py-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -399,7 +445,6 @@ export default function TVPanel() {
           {/* Grupo: Chamados */}
           <section className="bg-black/20 border border-white/15 rounded-2xl p-3">
             <h2 className="text-base font-bold mb-2 flex items-center"><Activity className="h-5 w-5 mr-2 text-cyan-300"/>Chamados</h2>
-            {/* KPIs linha 1 */}
             <div className="grid grid-cols-5 gap-2">
               <Kpi title="Total" value={stats.total} icon={<BarChart3 className="h-5 w-5" />} />
               <Kpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-5 w-5 text-orange-400" />} />
@@ -408,7 +453,6 @@ export default function TVPanel() {
               <Kpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-5 w-5 text-green-400" />} />
             </div>
 
-            {/* KPIs linha 2 */}
             <div className="grid grid-cols-5 gap-2 mt-2">
               <Kpi title="Projetos Ativos" value={projectStats.ativos} icon={<FolderOpen className="h-5 w-5" />} />
               <Kpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-5 w-5 text-indigo-400" />} />
@@ -417,7 +461,6 @@ export default function TVPanel() {
               <Kpi title="Abertos no Mês" value={openedThisMonth} icon={<Calendar className="h-5 w-5" />} />
             </div>
 
-            {/* Blocos médios */}
             <div className="grid grid-cols-4 gap-2 mt-2">
               {/* SLA – rotativo */}
               <div className="bg-black/20 border border-red-500/40 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
@@ -470,7 +513,7 @@ export default function TVPanel() {
                 </div>
               </div>
 
-              {/* Taxa de Resolução */}
+              {/* Taxa de Resolução (inclui arquivados) */}
               <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
                 <h3 className="text-md font-bold mb-1">Taxa de Resolução</h3>
                 <div className="flex items-center justify-between mb-1">
@@ -520,6 +563,12 @@ export default function TVPanel() {
                       <span className="mx-1">·</span>
                       Resp. <span className="text-white">{it.responsavel}</span>
                     </div>
+                    {(it.projectLabel || it.eventLabel) && (
+                      <div className="text-[11px] text-white/70 truncate">
+                        <span className="text-white/80">{it.projectLabel || ""}</span>
+                        {it.eventLabel ? <span> / {it.eventLabel}</span> : null}
+                      </div>
+                    )}
                   </div>
                   <div className="text-[11px] text-white/60 whitespace-nowrap ml-2">{formatTimeAgo(it.openedAt)}</div>
                 </div>
