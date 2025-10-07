@@ -9,7 +9,7 @@ import {
   BarChart3,
   Calendar,
   CheckCircle,
-  Clock,
+  Clock as ClockIcon,
   FileText,
   Flag,
   FolderOpen,
@@ -18,7 +18,6 @@ import {
   TrendingDown,
   TrendingUp,
   UserCheck,
-  Users,
   Zap,
 } from "lucide-react";
 
@@ -43,6 +42,17 @@ const formatTimeAgo = (d) => {
     if (n >= 1) return `há ${n} ${label}${n > 1 ? "s" : ""}`;
   }
   return `há ${sec} seg`;
+};
+
+const formatClock = (now) => {
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mi = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  const week = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"][now.getDay()];
+  return { time: `${hh}:${mi}:${ss}`, date: `${week}, ${dd}/${mm}/${yyyy}` };
 };
 
 const SLA_HOURS = { baixa: 240, media: 24, alta: 12, urgente: 2 };
@@ -76,17 +86,18 @@ export default function TVPanel() {
   // Projetos
   const [projectStats, setProjectStats] = useState({ ativos: 0 });
 
-  // Users map
-  const [users, setUsers] = useState({});
+  // Users map por ID e por email
+  const [usersById, setUsersById] = useState({});
+  const [usersByEmail, setUsersByEmail] = useState({});
 
   // Diário e Feed
   const [diaryFeed, setDiaryFeed] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
 
-  // Relógio (se precisar mostrar hora em algum canto futuramente)
-  const [, setCurrentTime] = useState(new Date());
+  // Relógio
+  const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const id = setInterval(() => setCurrentTime(new Date()), 1000);
+    const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -118,12 +129,16 @@ export default function TVPanel() {
   useEffect(() => {
     // Usuários
     const unsubUsers = onSnapshot(collection(db, "usuarios"), (snap) => {
-      const map = {};
+      const byId = {};
+      const byEmail = {};
       snap.forEach((d) => {
         const data = d.data() || {};
-        map[d.id] = { id: d.id, ...data };
+        const email = (data.email || data.mail || "").toLowerCase();
+        byId[d.id] = { id: d.id, ...data };
+        if (email) byEmail[email] = { id: d.id, ...data };
       });
-      setUsers(map);
+      setUsersById(byId);
+      setUsersByEmail(byEmail);
     });
 
     // Projetos
@@ -136,7 +151,7 @@ export default function TVPanel() {
       setProjectStats({ ativos });
     });
 
-    // Chamados (para KPIs e feed)
+    // Chamados
     const unsubTickets = onSnapshot(
       query(collection(db, "chamados"), orderBy("createdAt", "desc")),
       (snap) => {
@@ -166,13 +181,13 @@ export default function TVPanel() {
         // Foco de atenção (abertos por área)
         const openTickets = tickets.filter((t) => norm(t.status) === "aberto");
         const byArea = openTickets.reduce((acc, t) => {
-          const a = t?.area_atual || t?.area || "Não definida";
+          const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
           acc[a] = (acc[a] || 0) + 1;
           return acc;
         }, {});
         setUntreatedByArea(byArea);
 
-        // SLA (violado e risco) + lista p/ rotação
+        // SLA
         let violated = 0,
           risk = 0;
         const violatedList = [];
@@ -193,28 +208,68 @@ export default function TVPanel() {
         setSlaStats({ violated, risk });
         setSlaViolationsList(violatedList);
 
-        // ====== Feed de chamados (somente últimos N, sem scroll) ======
-        const FEED_LIMIT = 12; // Ajustável (10–15). Mantemos 12 para caber na TV.
-        const latest = tickets
-          .slice(0, FEED_LIMIT)
-          .map((t) => {
-            const openedBy = users?.[t.createdBy]?.nome || t.openedByName || "—";
-            const responsavel = users?.[t.atribuido_a]?.nome || t.atribuido_a_nome || "—";
-            const areaAtual = t?.area_atual || t?.area || "—";
-            const when = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
-            return {
-              id: t.id,
-              titulo: t.titulo || t.title || "(sem título)",
-              status: norm(t.status),
-              openedBy,
-              responsavel,
-              areaAtual,
-              openedAt: when,
-            };
-          });
+        // ====== Feed de chamados (sem scroll) ======
+        const FEED_LIMIT = 10; // cabe na TV sem rolagem
+        const latest = tickets.slice(0, FEED_LIMIT).map((t) => {
+          // ==== Quem abriu (robusto) ====
+          const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
+          const emailCandidates = [
+            t.openedByEmail,
+            t.createdByEmail,
+            t.criadoPorEmail,
+            t.abertoPorEmail,
+            t.aberto_por_email,
+            t.solicitanteEmail,
+            t.emailCriador,
+            t.userEmail,
+          ].filter(Boolean);
+          const openedByFromId = idCandidates.map((id) => usersById[id]?.nome).find(Boolean);
+          const openedByFromEmail = emailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmail[e]?.nome)
+            .find(Boolean);
+          const openedBy =
+            openedByFromId ||
+            openedByFromEmail ||
+            t.openedByName ||
+            t.criadoPorNome ||
+            t.aberto_por_nome ||
+            t.solicitanteNome ||
+            t.solicitante?.nome ||
+            "—";
+
+          // ==== Responsável atual (robusto) ====
+          const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
+          const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
+          const responsavelFromId = respIdCandidates.map((id) => usersById[id]?.nome).find(Boolean);
+          const responsavelFromEmail = respEmailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmail[e]?.nome)
+            .find(Boolean);
+          const responsavel =
+            responsavelFromId ||
+            responsavelFromEmail ||
+            t.atribuido_a_nome ||
+            t.responsavelNome ||
+            t.responsavel_atual_nome ||
+            "—";
+
+          const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
+          const when = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
+
+          return {
+            id: t.id,
+            titulo: t.titulo || t.title || "(sem título)",
+            status: norm(t.status),
+            openedBy,
+            responsavel,
+            areaAtual,
+            openedAt: when,
+          };
+        });
         setActivityFeed(latest);
 
-        // ====== Som para novos "aberto" ======
+        // Som para novos "aberto"
         const onlyOpens = tickets.filter((t) => norm(t.status) === "aberto");
         if (!initializedOpens.current) {
           onlyOpens.forEach((t) => seenOpenIds.current.add(t.id));
@@ -227,7 +282,7 @@ export default function TVPanel() {
       }
     );
 
-    // Diário (ficará na esquerda; limitamos para caber sem scroll)
+    // Diário (esquerda; 10 itens)
     const unsubDiaries = onSnapshot(
       query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10)),
       (snap) => {
@@ -246,7 +301,7 @@ export default function TVPanel() {
         audioCtx.current && audioCtx.current.close();
       } catch {}
     };
-  }, [users?.__len]);
+  }, [usersById, usersByEmail]);
 
   // Rotação do card de SLA a cada 10s
   useEffect(() => {
@@ -260,7 +315,7 @@ export default function TVPanel() {
   const slaByArea = useMemo(() => {
     const map = {};
     slaViolationsList.forEach((t) => {
-      const a = t?.area_atual || t?.area || "Não definida";
+      const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
       map[a] = (map[a] || 0) + 1;
     });
     return Object.entries(map)
@@ -268,10 +323,22 @@ export default function TVPanel() {
       .slice(0, 5);
   }, [slaViolationsList]);
 
+  const { time, date } = formatClock(now);
+
   /* ============================ layout ============================ */
   return (
     <div className="w-full h-screen bg-zinc-950 text-white p-4 overflow-hidden">
-      <div className="grid grid-cols-12 gap-3 h-full">
+      {/* Header com relógio */}
+      <div className="mb-3 flex items-center justify-between">
+        <h1 className="text-xl font-bold">Painel Operacional</h1>
+        <div className="flex items-baseline gap-3">
+          <ClockIcon className="h-5 w-5 text-cyan-300" />
+          <span className="text-2xl font-bold tabular-nums">{time}</span>
+          <span className="text-sm text-white/70">{date}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-3 h-[calc(100%-2.5rem)]">
         {/* ESQUERDA – DIÁRIO */}
         <aside className="col-span-3 bg-black/20 border border-white/15 rounded-2xl p-3 flex flex-col overflow-hidden">
           <div className="sticky top-0 z-10 bg-transparent/40 backdrop-blur-sm -m-3 mb-2 p-3 rounded-t-2xl flex items-center justify-between">
@@ -286,10 +353,13 @@ export default function TVPanel() {
                 ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
                 : [];
               const thumbs = images.slice(0, 3);
+              const proj = d.projectName || d.projectId || "Projeto";
+              const evt = d.eventName || d.event || d.evento || d.event_title || d.eventTitle;
+              const header = evt ? `${proj} / ${evt}` : proj;
               return (
                 <div key={d.id} className="bg-black/25 border border-white/10 rounded-xl p-2 min-h-[86px]">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-cyan-300 truncate">{d.projectName || d.projectId || "Projeto"}</div>
+                    <div className="text-xs text-cyan-300 truncate">{header}</div>
                     <div className="text-[11px] text-white/60 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
                   </div>
                   <div className="mt-0.5 text-sm font-medium truncate">
@@ -360,7 +430,7 @@ export default function TVPanel() {
                       <span className="ml-2 text-sm">Violado(s)</span>
                     </div>
                     <div className="flex items-center">
-                      <Clock className="h-5 w-5 mr-2 text-yellow-300" />
+                      <ClockIcon className="h-5 w-5 mr-2 text-yellow-300" />
                       <span className="text-sm">{slaStats.risk} em risco</span>
                     </div>
                   </>
@@ -412,7 +482,7 @@ export default function TVPanel() {
                 </div>
               </div>
 
-              {/* Reconhecimentos/Ranking simples (placeholder leve) */}
+              {/* Destaques placeholder */}
               <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
                 <h3 className="text-md font-bold mb-1 flex items-center"><Award className="h-5 w-5 mr-2 text-emerald-300"/>Destaques</h3>
                 <p className="text-sm text-white/70">Métricas internas / ranking por área podem entrar aqui futuramente.</p>
@@ -420,7 +490,7 @@ export default function TVPanel() {
             </div>
           </section>
 
-          {/* Grupo: Projetos (simples por enquanto) */}
+          {/* Grupo: Projetos (simples) */}
           <section className="bg-black/20 border border-white/15 rounded-2xl p-3">
             <h2 className="text-base font-bold mb-2 flex items-center"><FolderOpen className="h-5 w-5 mr-2"/>Projetos</h2>
             <div className="grid grid-cols-3 gap-2">
@@ -435,7 +505,7 @@ export default function TVPanel() {
         <aside className="col-span-3 bg-black/20 border border-white/15 rounded-2xl p-3 flex flex-col overflow-hidden">
           <div className="sticky top-0 z-10 bg-transparent/40 backdrop-blur-sm -m-3 mb-2 p-3 rounded-t-2xl flex items-center justify-between">
             <h3 className="text-lg font-bold flex items-center"><Activity className="h-5 w-5 mr-2 text-cyan-300"/>Feed de Chamados</h3>
-            <span className="text-xs text-white/60">últimos 12</span>
+            <span className="text-xs text-white/60">últimos 10</span>
           </div>
           <div className="grid grid-cols-1 gap-2 overflow-hidden">
             {activityFeed.map((it) => (
