@@ -23,6 +23,8 @@ import {
 
 /* ============================ helpers ============================ */
 const norm = (s) => (s || "").toString().trim().toLowerCase();
+const isText = (v) => typeof v === "string" && v.trim().length > 0;
+const pickText = (...vals) => vals.find(isText) || "";
 
 const formatTimeAgo = (d) => {
   if (!d) return "";
@@ -88,9 +90,10 @@ export default function TVPanel() {
   const [slaViolationsList, setSlaViolationsList] = useState([]);
   const [slaView, setSlaView] = useState("summary");
 
-  // Projetos
+  // Projetos / Eventos
   const [projectStats, setProjectStats] = useState({ ativos: 0 });
-  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventName}
+  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventId?, eventName?}
+  const [eventsMap, setEventsMap] = useState({}); // id -> {name}
 
   // Users map por ID e por email
   const [usersById, setUsersById] = useState({});
@@ -147,6 +150,23 @@ export default function TVPanel() {
       setUsersByEmail(byEmail);
     });
 
+    // Eventos (para mapear eventId -> nome)
+    const unsubEvents = onSnapshot(collection(db, "eventos"), (snap) => {
+      const map = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        const name = pickText(
+          data.nome,
+          data.name,
+          data.titulo,
+          data.title,
+          data.feira
+        );
+        map[d.id] = { id: d.id, name: name || d.id };
+      });
+      setEventsMap(map);
+    });
+
     // Projetos (contagem + mapa para nomes de projeto/evento)
     const unsubProjects = onSnapshot(collection(db, "projetos"), (snap) => {
       let ativos = 0;
@@ -155,19 +175,36 @@ export default function TVPanel() {
         const data = d.data() || {};
         const status = norm(data?.status);
         if (status !== "arquivado" && status !== "cancelado") ativos += 1;
-        const projectName = data.nome || data.name || data.titulo || data.title || data.projeto || data.project || d.id;
-        const ev =
-          data.eventName ||
-          data.event_title ||
-          data.eventTitle ||
-          data.evento ||
-          data.event ||
-          data?.event?.name ||
-          data?.event?.nome ||
-          data?.evento?.nome ||
-          data?.evento?.name ||
-          "";
-        map[d.id] = { projectName, eventName: ev };
+        const projectName = pickText(
+          data.nome,
+          data.name,
+          data.titulo,
+          data.title,
+          data.projeto,
+          data.project
+        ) || d.id;
+        const eventId = pickText(
+          data.eventId,
+          data.event_id,
+          data?.evento?.eventoId,
+          data?.event?.eventoId,
+          data?.eventoId
+        );
+        const evLocalName = pickText(
+          data.eventName,
+          data.event_title,
+          data.eventTitle,
+          data.evento,
+          data.event,
+          data?.event?.name,
+          data?.event?.nome,
+          data?.event?.feira,
+          data?.evento?.name,
+          data?.evento?.nome,
+          data?.evento?.feira
+        );
+        const eventName = evLocalName || (eventId && eventsMap[eventId]?.name) || "";
+        map[d.id] = { projectName, eventId, eventName };
       });
       setProjectStats({ ativos });
       setProjectsMap(map);
@@ -246,52 +283,63 @@ export default function TVPanel() {
             t.emailCriador,
             t.userEmail,
           ].filter(Boolean);
-          const openedByFromId = idCandidates.map((id) => usersById[id]?.nome).find(Boolean);
+          const openedByFromId = idCandidates.map((id) => usersById[id]?.nome).find(isText);
           const openedByFromEmail = emailCandidates
             .map((e) => (e || "").toLowerCase())
             .map((e) => usersByEmail[e]?.nome)
-            .find(Boolean);
-          const openedBy =
-            openedByFromId ||
-            openedByFromEmail ||
-            t.openedByName ||
-            t.criadoPorNome ||
-            t.aberto_por_nome ||
-            t.solicitanteNome ||
-            t.solicitante?.nome ||
-            "—";
+            .find(isText);
+          const openedBy = pickText(
+            openedByFromId,
+            openedByFromEmail,
+            t.openedByName,
+            t.criadoPorNome,
+            t.aberto_por_nome,
+            t.solicitanteNome,
+            t?.solicitante?.nome
+          ) || "—";
 
           // ==== Responsável atual (robusto) ====
           const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
           const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
-          const responsavelFromId = respIdCandidates.map((id) => usersById[id]?.nome).find(Boolean);
+          const responsavelFromId = respIdCandidates.map((id) => usersById[id]?.nome).find(isText);
           const responsavelFromEmail = respEmailCandidates
             .map((e) => (e || "").toLowerCase())
             .map((e) => usersByEmail[e]?.nome)
-            .find(Boolean);
-          const responsavel =
-            responsavelFromId ||
-            responsavelFromEmail ||
-            t.atribuido_a_nome ||
-            t.responsavelNome ||
-            t.responsavel_atual_nome ||
-            "—";
+            .find(isText);
+          const responsavel = pickText(
+            responsavelFromId,
+            responsavelFromEmail,
+            t.atribuido_a_nome,
+            t.responsavelNome,
+            t.responsavel_atual_nome
+          ) || "—";
 
           // ==== Projeto e Evento no ticket ====
-          const projId = t.projectId || t.projetoId || t.project_id || t.projeto_id || t.idProjeto || t.id_projeto;
-          const projLabelFromDoc = t.projectName || t.projetoNome || t.projeto || t.project || t.project_title || t.titleProject;
-          const evLabelFromDoc =
-            t.eventName ||
-            t.evento ||
-            t.event ||
-            t.event_title ||
-            t.eventTitle ||
-            t?.event?.name ||
-            t?.event?.nome;
+          const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
           const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
-          const evFromMap = projId ? projectsMap[projId]?.eventName : undefined;
-          const projectLabel = projLabelFromDoc || projFromMap || (projId ? String(projId) : "");
-          const eventLabel = evLabelFromDoc || evFromMap || "";
+          const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
+          const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
+
+          const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
+          const evFromMapByProj = projId ? projectsMap[projId]?.eventName : undefined;
+          const evFromEvents = pickText(
+            eventsMap[eventIdFromTicket]?.name,
+            eventsMap[projectsMap[projId]?.eventId || ""]?.name
+          );
+          const evLabelFromDoc = pickText(
+            t.eventName,
+            t.event_title,
+            t.eventTitle,
+            t.evento,
+            t.event,
+            t?.event?.name,
+            t?.event?.nome,
+            t?.event?.feira,
+            t?.evento?.name,
+            t?.evento?.nome,
+            t?.evento?.feira
+          );
+          const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
 
           const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
           const when = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
@@ -335,6 +383,7 @@ export default function TVPanel() {
 
     return () => {
       unsubUsers();
+      unsubEvents();
       unsubProjects();
       unsubTickets();
       unsubDiaries();
@@ -342,7 +391,7 @@ export default function TVPanel() {
         audioCtx.current && audioCtx.current.close();
       } catch {}
     };
-  }, [usersById, usersByEmail]);
+  }, [usersById, usersByEmail, eventsMap]);
 
   // Rotação do card de SLA a cada 10s
   useEffect(() => {
@@ -397,12 +446,30 @@ export default function TVPanel() {
                 ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
                 : [];
               const thumbs = images.slice(0, 3);
-              const projId = d.projectId || d.projetoId || d.project_id || d.projeto_id || d.idProjeto || d.id_projeto;
+
+              // Projeto / Evento robusto
+              const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
               const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
-              const evFromMap = projId ? projectsMap[projId]?.eventName : undefined;
-              const proj = d.projectName || d.project || d.projetoNome || d.projeto || projFromMap || "Projeto";
-              const evt = d.eventName || d.event || d.evento || d.event_title || d.eventTitle || d?.event?.name || d?.event?.nome || evFromMap;
+              const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
+
+              const eventId = pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId, projectsMap[projId]?.eventId);
+              const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[eventId]?.name);
+              const evLocal = pickText(
+                d.eventName,
+                d.event_title,
+                d.eventTitle,
+                d.eventoName,
+                d.evento_title,
+                d?.event?.name,
+                d?.event?.nome,
+                d?.event?.feira,
+                d?.evento?.name,
+                d?.evento?.nome,
+                d?.evento?.feira
+              );
+              const evt = pickText(evLocal, evFromMap);
               const header = evt ? `${proj} / ${evt}` : proj;
+
               return (
                 <div key={d.id} className="bg-black/25 border border-white/10 rounded-xl p-2 min-h-[86px]">
                   <div className="flex items-center justify-between">
