@@ -26,6 +26,18 @@ const norm = (s) => (s || "").toString().trim().toLowerCase();
 const isText = (v) => typeof v === "string" && v.trim().length > 0;
 const pickText = (...vals) => vals.find(isText) || "";
 
+const parseMaybeDate = (v) => {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v?.toDate === "function") return v.toDate();
+  if (typeof v === "number") return new Date(v);
+  if (typeof v === "string") {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+};
+
 const formatTimeAgo = (d) => {
   if (!d) return "";
   const date = d instanceof Date ? d : d?.toDate?.() ?? null;
@@ -94,6 +106,7 @@ export default function TVPanel() {
   const [projectStats, setProjectStats] = useState({ ativos: 0 });
   const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventId?, eventName?}
   const [eventsMap, setEventsMap] = useState({}); // id -> {name}
+  const [phaseCounts, setPhaseCounts] = useState({ futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 });
 
   // Users map por ID e por email
   const [usersById, setUsersById] = useState({});
@@ -155,41 +168,27 @@ export default function TVPanel() {
       const map = {};
       snap.forEach((d) => {
         const data = d.data() || {};
-        const name = pickText(
-          data.nome,
-          data.name,
-          data.titulo,
-          data.title,
-          data.feira
-        );
+        const name = pickText(data.nome, data.name, data.titulo, data.title, data.feira);
         map[d.id] = { id: d.id, name: name || d.id };
       });
       setEventsMap(map);
     });
 
-    // Projetos (contagem + mapa para nomes de projeto/evento)
+    // Projetos (contagem + mapa para nomes e fases)
     const unsubProjects = onSnapshot(collection(db, "projetos"), (snap) => {
       let ativos = 0;
-      const map = {};
+      const projMap = {};
+      const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
+      const now = new Date();
+
       snap.forEach((d) => {
         const data = d.data() || {};
         const status = norm(data?.status);
         if (status !== "arquivado" && status !== "cancelado") ativos += 1;
-        const projectName = pickText(
-          data.nome,
-          data.name,
-          data.titulo,
-          data.title,
-          data.projeto,
-          data.project
-        ) || d.id;
-        const eventId = pickText(
-          data.eventId,
-          data.event_id,
-          data?.evento?.eventoId,
-          data?.event?.eventoId,
-          data?.eventoId
-        );
+
+        const projectName = pickText(data.nome, data.name, data.titulo, data.title, data.projeto, data.project) || d.id;
+
+        const eventId = pickText(data.eventId, data.event_id, data?.evento?.eventoId, data?.event?.eventoId, data?.eventoId);
         const evLocalName = pickText(
           data.eventName,
           data.event_title,
@@ -204,10 +203,39 @@ export default function TVPanel() {
           data?.evento?.feira
         );
         const eventName = evLocalName || (eventId && eventsMap[eventId]?.name) || "";
-        map[d.id] = { projectName, eventId, eventName };
+        projMap[d.id] = { projectName, eventId, eventName };
+
+        // ===== classificação por fase =====
+        const mStart = parseMaybeDate(data?.montagem?.dataInicio || data?.dataInicioMontagem);
+        const mEnd = parseMaybeDate(data?.montagem?.dataFim || data?.dataFimMontagem);
+        const eStart = parseMaybeDate(data?.evento?.dataInicio || data?.dataInicioEvento);
+        const eEnd = parseMaybeDate(data?.evento?.dataFim || data?.dataFimEvento);
+        const dStart = parseMaybeDate(data?.desmontagem?.dataInicio || data?.dataInicioDesmontagem);
+        const dEnd = parseMaybeDate(data?.desmontagem?.dataFim || data?.dataFimDesmontagem);
+
+        let fase = "futuro";
+        if (dEnd && now > dEnd) {
+          fase = "finalizado";
+        } else if (dStart && dEnd && now >= dStart && now <= dEnd) {
+          fase = "desmontagem";
+        } else if (
+          (mStart && mEnd && now >= mStart && now <= mEnd) ||
+          (eStart && eEnd && now >= eStart && now <= eEnd) ||
+          (mEnd && eStart && now > mEnd && now < eStart) // entre montagem e evento
+        ) {
+          fase = "andamento";
+        } else if ((mStart && now < mStart) || (!mStart && eStart && now < eStart)) {
+          fase = "futuro";
+        } else if (eEnd && now > eEnd && (!dStart || now < dStart)) {
+          // pós-evento, pré-desmontagem
+          fase = "andamento";
+        }
+        counts[fase] += 1;
       });
+
       setProjectStats({ ativos });
-      setProjectsMap(map);
+      setProjectsMap(projMap);
+      setPhaseCounts(counts);
     });
 
     // Chamados
@@ -600,13 +628,14 @@ export default function TVPanel() {
             </div>
           </section>
 
-          {/* Grupo: Projetos (simples) */}
+          {/* Grupo: Projetos (Resumo por Fase) */}
           <section className="bg-black/20 border border-white/15 rounded-2xl p-3">
             <h2 className="text-base font-bold mb-2 flex items-center"><FolderOpen className="h-5 w-5 mr-2"/>Projetos</h2>
-            <div className="grid grid-cols-3 gap-2">
-              <SmallStat title="Ativos" value={projectStats.ativos} />
-              <SmallStat title="Abertos no mês" value={openedThisMonth} />
-              <SmallStat title="Aguard. aprovação" value={pendingApprovalCount} />
+            <div className="grid grid-cols-4 gap-2">
+              <PhaseStat title="Futuro" value={phaseCounts.futuro} />
+              <PhaseStat title="Andamento" value={phaseCounts.andamento} />
+              <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
+              <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
             </div>
           </section>
         </main>
@@ -660,6 +689,15 @@ function Kpi({ title, value, icon }) {
         {icon}
       </div>
       <div className="text-4xl font-bold">{value}</div>
+    </div>
+  );
+}
+
+function PhaseStat({ title, value }) {
+  return (
+    <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex items-center justify-between">
+      <span className="text-sm text-white/80">{title}</span>
+      <span className="text-2xl font-bold tabular-nums">{value}</span>
     </div>
   );
 }
