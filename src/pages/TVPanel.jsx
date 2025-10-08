@@ -1,6 +1,6 @@
 // src/pages/TVPanel.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { collection, onSnapshot, orderBy, query, limit } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, limit, getDocs } from "firebase/firestore";
 import { db } from "../config/firebase";
 import {
   Activity,
@@ -115,6 +115,7 @@ export default function TVPanel() {
   // Diário e Feed
   const [diaryFeed, setDiaryFeed] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
+  const [diaryError, setDiaryError] = useState(null);
 
   // Relógio
   const [now, setNow] = useState(new Date());
@@ -221,13 +222,12 @@ export default function TVPanel() {
         } else if (
           (mStart && mEnd && now >= mStart && now <= mEnd) ||
           (eStart && eEnd && now >= eStart && now <= eEnd) ||
-          (mEnd && eStart && now > mEnd && now < eStart) // entre montagem e evento
+          (mEnd && eStart && now > mEnd && now < eStart)
         ) {
           fase = "andamento";
         } else if ((mStart && now < mStart) || (!mStart && eStart && now < eStart)) {
           fase = "futuro";
         } else if (eEnd && now > eEnd && (!dStart || now < dStart)) {
-          // pós-evento, pré-desmontagem
           fase = "andamento";
         }
         counts[fase] += 1;
@@ -405,7 +405,34 @@ export default function TVPanel() {
       (snap) => {
         const list = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
+        // ordena manualmente (em caso de fallback)
+        list.sort((a, b) => {
+          const da = a?.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+          const dbt = b?.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+          return dbt - da;
+        });
         setDiaryFeed(list);
+        setDiaryError(null);
+      },
+      (err) => {
+        console.error("[diary_feed] onSnapshot error", err);
+        setDiaryError(err?.code || err?.message || "erro");
+        // fallback: leitura simples (sem orderBy) — útil para navegadores de TV com limitações
+        (async () => {
+          try {
+            const altSnap = await getDocs(query(collection(db, "diary_feed"), limit(10)));
+            const list = [];
+            altSnap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
+            list.sort((a, b) => {
+              const da = a?.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+              const dbt = b?.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+              return dbt - da;
+            });
+            if (list.length) setDiaryFeed(list);
+          } catch (e) {
+            console.error("[diary_feed] fallback getDocs falhou", e);
+          }
+        })();
       }
     );
 
@@ -466,7 +493,12 @@ export default function TVPanel() {
             <h3 className="text-lg font-bold flex items-center"><FileText className="h-5 w-5 mr-2 text-cyan-300"/>Diário de Projetos</h3>
             <span className="text-xs text-white/60">10 recentes</span>
           </div>
-          <div className="grid grid-cols-1 gap-2 overflow-hidden">
+          <div className="grid grid-cols-1 gap-2">
+            {diaryError && (
+              <div className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2">
+                Erro ao carregar o Diário ({String(diaryError)}). Pode ser permissão do Firestore ou limitação do navegador da TV. Ativei um modo compatível.
+              </div>
+            )}
             {diaryFeed.map((d) => {
               const when = d?.createdAt?.toDate ? d.createdAt.toDate() : d._dt || null;
               const preview = (d.text || "").slice(0, 140) + ((d.text || "").length > 140 ? "…" : "");
@@ -522,6 +554,9 @@ export default function TVPanel() {
                 </div>
               );
             })}
+            {!diaryError && diaryFeed.length === 0 && (
+              <div className="text-xs text-white/60">Sem registros recentes.</div>
+            )}
           </div>
         </aside>
 
@@ -698,15 +733,6 @@ function PhaseStat({ title, value }) {
     <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex items-center justify-between">
       <span className="text-sm text-white/80">{title}</span>
       <span className="text-2xl font-bold tabular-nums">{value}</span>
-    </div>
-  );
-}
-
-function SmallStat({ title, value }) {
-  return (
-    <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex items-center justify-between">
-      <span className="text-sm text-white/80">{title}</span>
-      <span className="text-2xl font-bold">{value}</span>
     </div>
   );
 }
