@@ -113,6 +113,7 @@ function TVPanel() {
   const [untreatedByArea, setUntreatedByArea] = useState({});
 
   // SLA
+  the:
   const [slaStats, setSlaStats] = useState({ violated: 0, risk: 0 });
   const [slaViolationsList, setSlaViolationsList] = useState([]);
   const [slaView, setSlaView] = useState("summary");
@@ -131,6 +132,17 @@ function TVPanel() {
   const [diaryFeed, setDiaryFeed] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
   const [diaryError, setDiaryError] = useState(null);
+
+  // Refs para usar sempre os dados mais recentes dentro dos listeners
+  const usersByIdRef = useRef({});
+  const usersByEmailRef = useRef({});
+  const projectsMapRef = useRef({});
+  const eventsMapRef = useRef({});
+
+  useEffect(() => { usersByIdRef.current = usersById; }, [usersById]);
+  useEffect(() => { usersByEmailRef.current = usersByEmail; }, [usersByEmail]);
+  useEffect(() => { projectsMapRef.current = projectsMap; }, [projectsMap]);
+  useEffect(() => { eventsMapRef.current = eventsMap; }, [eventsMap]);
 
   // Relógio
   const [now, setNow] = useState(new Date());
@@ -218,7 +230,8 @@ function TVPanel() {
           data?.evento?.nome,
           data?.evento?.feira
         );
-        const eventName = evLocalName || (eventId && eventsMap[eventId]?.name) || "";
+        const fallbackEv = eventId && eventsMapRef.current[eventId]?.name;
+        const eventName = evLocalName || fallbackEv || "";
         projMap[d.id] = { projectName, eventId, eventName };
 
         // fase
@@ -314,7 +327,7 @@ function TVPanel() {
         setSlaStats({ violated, risk });
         setSlaViolationsList(violatedList);
 
-        // Feed de chamados (sem scroll)
+        // Feed de chamados (sem scroll) — usando maps via refs
         const FEED_LIMIT = 10;
         const latest = tickets.slice(0, FEED_LIMIT).map((t) => {
           // Quem abriu
@@ -329,10 +342,10 @@ function TVPanel() {
             t.emailCriador,
             t.userEmail,
           ].filter(Boolean);
-          const openedByFromId = idCandidates.map((id) => usersById[id]?.nome).find(isText);
+          const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
           const openedByFromEmail = emailCandidates
             .map((e) => (e || "").toLowerCase())
-            .map((e) => usersByEmail[e]?.nome)
+            .map((e) => usersByEmailRef.current[e]?.nome)
             .find(isText);
           const openedBy =
             pickText(
@@ -348,10 +361,10 @@ function TVPanel() {
           // Responsável
           const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
           const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
-          const responsavelFromId = respIdCandidates.map((id) => usersById[id]?.nome).find(isText);
+          const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
           const responsavelFromEmail = respEmailCandidates
             .map((e) => (e || "").toLowerCase())
-            .map((e) => usersByEmail[e]?.nome)
+            .map((e) => usersByEmailRef.current[e]?.nome)
             .find(isText);
           const responsavel =
             pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome) ||
@@ -359,15 +372,15 @@ function TVPanel() {
 
           // Projeto / Evento
           const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
-          const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+          const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
           const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
           const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
 
           const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
-          const evFromMapByProj = projId ? projectsMap[projId]?.eventName : undefined;
+          const evFromMapByProj = projId ? projectsMapRef.current[projId]?.eventName : undefined;
           const evFromEvents = pickText(
-            eventsMap[eventIdFromTicket]?.name,
-            eventsMap[projectsMap[projId]?.eventId || ""]?.name
+            eventsMapRef.current[eventIdFromTicket]?.name,
+            eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
           );
           const evLabelFromDoc = pickText(
             t.eventName,
@@ -414,19 +427,16 @@ function TVPanel() {
       }
     );
 
-    // Diário (TV usa polling direto do servidor)
+    // Diário (TV usa polling direto do servidor; desktop usa tempo real)
     let unsubDiaries = () => {};
     if (isTvLike) {
       const fetchDiary = async () => {
         try {
-          const snap = await getDocsFromServer(query(collection(db, "diary_feed"), limit(10)));
+          const snap = await getDocsFromServer(
+            query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10))
+          );
           const list = [];
           snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
-          list.sort((a, b) => {
-            const da = a?.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-            const dbt = b?.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-            return dbt - da;
-          });
           setDiaryFeed(list);
           setDiaryError(null);
         } catch (e) {
@@ -451,14 +461,11 @@ function TVPanel() {
           console.error("[diary_feed] onSnapshot error", err);
           setDiaryError(err?.code || err?.message || "erro");
           try {
-            const snap = await getDocsFromServer(query(collection(db, "diary_feed"), limit(10)));
+            const snap = await getDocsFromServer(
+              query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10))
+            );
             const list = [];
             snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
-            list.sort((a, b) => {
-              const da = a?.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-              const dbt = b?.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-              return dbt - da;
-            });
             if (list.length) setDiaryFeed(list);
           } catch (e) {
             console.error("[diary_feed] fallback getDocsFromServer falhou", e);
@@ -477,7 +484,8 @@ function TVPanel() {
         audioCtx.current && audioCtx.current.close();
       } catch {}
     };
-  }, [usersById, usersByEmail, eventsMap]);
+    // ⬇️ MUITO IMPORTANTE: não dependa de states aqui (evita re-assinar em loop)
+  }, []);
 
   // Rotação do card de SLA a cada 10s
   useEffect(() => {
@@ -539,13 +547,15 @@ function TVPanel() {
                 : [];
               const thumbs = images.slice(0, 3);
 
-              // Projeto / Evento robusto
+              // Projeto / Evento (usando refs)
               const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
-              const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+              const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
               const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
 
-              const eventId = pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId, projectsMap[projId]?.eventId);
-              const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[eventId]?.name);
+              const evId =
+                pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
+                (projId ? projectsMapRef.current[projId]?.eventId : "");
+              const evFromMap = pickText(projectsMapRef.current[projId]?.eventName, eventsMapRef.current[evId]?.name);
               const evLocal = pickText(
                 d.eventName,
                 d.event_title,
@@ -645,21 +655,13 @@ function TVPanel() {
                   <>
                     <h3 className="text-md font-bold mb-1">SLA violado por área</h3>
                     <ul className="space-y-1">
-                      {Object.entries(
-                        slaViolationsList.reduce((acc, t) => {
-                          const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
-                          acc[a] = (acc[a] || 0) + 1;
-                          return acc;
-                        }, {})
-                      )
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 5)
-                        .map(([area, qtd]) => (
-                          <li key={area} className="flex items-center justify-between">
-                            <span className="text-sm text-white/90 truncate pr-2">{area}</span>
-                            <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
-                          </li>
-                        ))}
+                      {slaByArea.map(([area, qtd]) => (
+                        <li key={area} className="flex items-center justify-between">
+                          <span className="text-sm text-white/90 truncate pr-2">{area}</span>
+                          <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
+                        </li>
+                      ))}
+                      {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
                     </ul>
                   </>
                 )}
@@ -693,7 +695,7 @@ function TVPanel() {
                 <h3 className="text-md font-bold mb-1">Taxa de Resolução</h3>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-4xl font-bold text-green-400">{resolutionRate.toFixed(1)}%</span>
-                  <span className="text-xs text-white/70">Meta: {95}%</span>
+                  <span className="text-xs text-white/70">Meta: {RESOLUTION_GOAL}%</span>
                 </div>
                 <div className="w-full bg-black/20 rounded-full h-3">
                   <div className="bg-green-500 h-3 rounded-full" style={{ width: `${Math.min(100, resolutionRate)}%` }} />
