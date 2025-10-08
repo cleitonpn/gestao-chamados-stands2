@@ -113,7 +113,6 @@ function TVPanel() {
   const [untreatedByArea, setUntreatedByArea] = useState({});
 
   // SLA
-  the:
   const [slaStats, setSlaStats] = useState({ violated: 0, risk: 0 });
   const [slaViolationsList, setSlaViolationsList] = useState([]);
   const [slaView, setSlaView] = useState("summary");
