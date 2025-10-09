@@ -15,7 +15,8 @@ import {
   ArrowLeft,
   FileText,
   MapPin,
-  ExternalLink
+  ExternalLink,
+  Building, // ⬅️ novo ícone para Pavilhão
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -29,6 +30,16 @@ import { db } from '../config/firebase';
 
 // Componente para o Cronograma de Eventos
 const CronogramaPage = () => {
+
+  // ── Helpers de normalização para casar nomes com/sem ano ─────────────────────
+  const stripYear = (s) => (s || '').replace(/\b(20\d{2})\b/g, '').replace(/\s{2,}/g, ' ').trim();
+  const norm = (s) =>
+    (s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/\s+/g, ' ') // espaços
+      .trim()
+      .toLowerCase();
+
   const { user, authInitialized } = useAuth();
   const navigate = useNavigate();
 
@@ -37,8 +48,9 @@ const CronogramaPage = () => {
   const [error, setError] = useState('');
   const [archivingEvent, setArchivingEvent] = useState(null);
 
-  // 🔗 Mapa com os links (manual/planta) do evento cadastrado
-  const [eventLinksMap, setEventLinksMap] = useState({}); // { [nomeEvento]: { linkManual, linkPlanta } }
+  // 🔗 Mapa com os metadados do evento cadastrado (manual/planta/pavilhão)
+  // Mapa normalizado: chave em lowercase/sem acento/sem duplicidades
+  const [eventLinksMap, setEventLinksMap] = useState({}); // { [normalizedKey]: { linkManual, linkPlanta, pavilhao } }
 
   useEffect(() => {
     if (authInitialized && user) {
@@ -52,27 +64,34 @@ const CronogramaPage = () => {
   const loadEventLinksMap = async () => {
     const map = {};
 
-    // Função auxiliar que lê uma coleção e popula o mapa
+    const saveVariants = (nome, data) => {
+      const raw = (nome || '').trim();
+      if (!raw) return;
+      const ano = (data?.ano != null && data.ano !== '') ? String(data.ano) : '';
+      const variants = new Set([raw, stripYear(raw), ano ? `${raw} ${ano}` : null].filter(Boolean));
+      const payload = {
+        linkManual: (data?.linkManual || '').trim(),
+        linkPlanta: (data?.linkPlanta || '').trim(),
+        pavilhao: (data?.pavilhao || '').trim(), // ⬅️ inclui pavilhão
+      };
+      variants.forEach(v => {
+        map[norm(v)] = payload;
+      });
+    };
+
     const readCollectionIntoMap = async (colName) => {
       try {
         const colRef = collection(db, colName);
         const snap = await getDocs(colRef);
         snap.forEach((d) => {
           const data = d.data() || {};
-          const nome = (data.nome || '').trim();
-          if (!nome) return;
-          // Último write vence em caso de duplicata entre coleções
-          map[nome] = {
-            linkManual: (data.linkManual || '').trim(),
-            linkPlanta: (data.linkPlanta || '').trim()
-          };
+          saveVariants(data.nome, data);
         });
       } catch {
-        // Ignora se a coleção não existir nesse projeto
+        // coleção pode não existir; ignora
       }
     };
 
-    // Tenta nas duas convenções mais comuns do seu código
     await readCollectionIntoMap('eventos');
     await readCollectionIntoMap('events');
 
@@ -101,7 +120,7 @@ const CronogramaPage = () => {
 
       if (projetos.length === 0) {
         setEventos([]);
-        // Mesmo sem projetos, ainda vale montar o mapa de links
+        // Mesmo sem projetos, ainda vale montar o mapa de links/metas
         await loadEventLinksMap();
         return;
       }
@@ -171,7 +190,7 @@ const CronogramaPage = () => {
       eventosProcessados.sort((a, b) => a.dataOrdenacao - b.dataOrdenacao);
       setEventos(eventosProcessados);
 
-      // Carrega o mapa de links após descobrir os nomes de eventos
+      // Carrega o mapa de links/metadados após descobrir os nomes de eventos
       await loadEventLinksMap();
     } catch (err) {
       console.error('Erro ao carregar eventos:', err);
@@ -251,9 +270,13 @@ const CronogramaPage = () => {
       ) : (
         <div className="flex overflow-x-auto space-x-6 pb-4">
           {eventos.map((evento) => {
-            const links = eventLinksMap[evento.nome] || {};
-            const hasManual = !!links.linkManual;
-            const hasPlanta = !!links.linkPlanta;
+            const meta =
+              eventLinksMap[norm(evento.nome)] ||
+              eventLinksMap[norm(stripYear(evento.nome))] ||
+              {};
+            const hasManual = !!meta.linkManual;
+            const hasPlanta = !!meta.linkPlanta;
+            const pavilhao = meta.pavilhao || '';
 
             return (
               <div key={evento.nome} className="flex-shrink-0 w-80">
@@ -263,6 +286,16 @@ const CronogramaPage = () => {
                     <CardDescription>
                       {evento.projetos.length} projeto(s) neste evento
                     </CardDescription>
+
+                    {/* ⬇️ NOVO: Pavilhão logo abaixo do nome e da contagem */}
+                    {pavilhao && (
+                      <div className="mt-1 flex items-center text-sm text-gray-700">
+                        <Building className="h-4 w-4 mr-2 text-gray-500" />
+                        <span>
+                          Pavilhão: <span className="font-semibold">{pavilhao}</span>
+                        </span>
+                      </div>
+                    )}
                   </CardHeader>
 
                   <CardContent className="flex-grow space-y-4">
@@ -302,7 +335,7 @@ const CronogramaPage = () => {
                     {hasManual && (
                       <Button variant="secondary" size="sm" className="w-full" asChild>
                         <a
-                          href={links.linkManual}
+                          href={meta.linkManual}
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Abrir Manual da Feira (Drive)"
@@ -316,7 +349,7 @@ const CronogramaPage = () => {
                     {hasPlanta && (
                       <Button variant="secondary" size="sm" className="w-full" asChild>
                         <a
-                          href={links.linkPlanta}
+                          href={meta.linkPlanta}
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Abrir Planta da Feira (Drive)"
