@@ -1,4 +1,4 @@
-// src/pages/TVPanel.jsx
+// src/pages/TVPanel.jsx — atualização 13/10/2025
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
@@ -414,7 +414,7 @@ function TVPanel() {
     return norm(st) === "finalizado" || norm(st) === "arquivado";
   };
 
-  // Diário (últimos 90 dias, 20 cards, exclui projetos finalizados)
+  // Diário (últimos 90 dias, **12 cards**, exclui projetos finalizados)
   const diaryItems = useMemo(() => {
     const cutoff = addDays(startOfDay(new Date()), -90);
     const out = [];
@@ -424,7 +424,7 @@ function TVPanel() {
       const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
       if (projId && projectIsFinalizado(projId)) continue;
       out.push(d);
-      if (out.length >= 20) break;
+      if (out.length >= 12) break; // aumentamos o tamanho do card → menos itens
     }
     return out;
   }, [diaryRaw, projectsMap]);
@@ -465,6 +465,10 @@ function TVPanel() {
     const { total, concluidos, arquivados } = stats;
     return total ? ((concluidos + arquivados) / total) * 100 : 0;
   }, [stats]);
+
+  const activeTickets = useMemo(() => {
+    return tickets.filter((t) => !["concluido", "cancelado"].includes(norm(t.status)) && !isArchived(t.status)).length;
+  }, [tickets]);
 
   const slaByArea = useMemo(() => {
     const map = {};
@@ -569,6 +573,8 @@ function TVPanel() {
           phaseCounts={phaseCounts}
           trends={trends}
           backlogAging={backlogAging}
+          diaryCount={diaryItems.length}
+          activeTickets={activeTickets}
         />
       )}
       {screen === 2 && (
@@ -586,65 +592,72 @@ function TVPanel() {
 
 /* ============================ TELAS ============================ */
 
-// TELA 1 — DIÁRIO (4×5 cards)
+// TELA 1 — DIÁRIO (3×4 cards maiores)
 function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
   return (
-    <div className="grid grid-cols-4 grid-rows-5 gap-3 h-[calc(100%-0rem)]">
-      {/* título lateral opcional já está no header; aqui só os cards */}
+    <div className="h-[calc(100%-0rem)] flex flex-col gap-3">
+      {/* Cabeçalho explícito da tela */}
+      <div className="text-lg font-bold">Diários — exibindo atualizações (últimos 90 dias)</div>
+
       {diaryError && (
-        <div className="col-span-4 text-[12px] text-red-300 bg-red-500/10 border border-red-400/40 rounded-xl p-2">
+        <div className="text-[12px] text-red-300 bg-red-500/10 border border-red-400/40 rounded-xl p-2">
           Erro ao carregar o Diário ({String(diaryError)}). Modo compatível ativado.
         </div>
       )}
-      {Array.from({ length: 20 }).map((_, idx) => {
-        const d = diaryItems[idx];
-        if (!d) {
-          return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
-        }
-        const when = d?.createdAt?.toDate ? d.createdAt.toDate() : null;
 
-        const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
-        const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
-        const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
+      <div className="grid grid-cols-3 grid-rows-4 gap-3 flex-1">
+        {Array.from({ length: 12 }).map((_, idx) => {
+          const d = diaryItems[idx];
+          if (!d) {
+            return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+          }
+          const when = d?.createdAt?.toDate ? d.createdAt.toDate() : null;
 
-        const evId =
-          pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
-          (projId ? projectsMap[projId]?.eventId : "");
-        const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[evId]?.name);
-        const evLocal = pickText(
-          d.eventName, d.event_title, d.eventTitle,
-          d?.event?.name, d?.event?.nome, d?.event?.feira,
-          d?.evento?.name, d?.evento?.nome, d?.evento?.feira
-        );
-        const header = pickText(evLocal, evFromMap) ? `${proj} / ${pickText(evLocal, evFromMap)}` : proj;
+          const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
+          const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+          const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
 
-        const preview = (d.text || "").slice(0, 200) + ((d.text || "").length > 200 ? "…" : "");
-        const imgs = Array.isArray(d.attachments)
-          ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
-          : [];
-        const thumb = imgs[0]?.url;
+          const evId =
+            pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
+            (projId ? projectsMap[projId]?.eventId : "");
+          const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[evId]?.name);
+          const evLocal = pickText(
+            d.eventName, d.event_title, d.eventTitle,
+            d?.event?.name, d?.event?.nome, d?.event?.feira,
+            d?.evento?.name, d?.evento?.nome, d?.evento?.feira
+          );
+          const header = pickText(evLocal, evFromMap) ? `${proj} / ${pickText(evLocal, evFromMap)}` : proj;
 
-        return (
-          <div key={d.id} className="rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col">
-            <div className="flex items-center justify-between">
-              <div className="text-[15px] font-semibold text-cyan-300 truncate">{header}</div>
-              <div className="text-[12px] text-white/70 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
-            </div>
-            <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
-            <div className="mt-1 text-[14px] text-white/90 line-clamp-3">{preview}</div>
-            {thumb && (
-              <div className="mt-2 h-24 rounded-xl overflow-hidden bg-black/30">
-                <img src={thumb} alt="thumb" className="w-full h-full object-cover" loading="lazy" />
+          const preview = (d.text || "").slice(0, 280) + ((d.text || "").length > 280 ? "…" : "");
+          const imgs = Array.isArray(d.attachments)
+            ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
+            : [];
+          const thumb = imgs[0]?.url;
+
+          return (
+            <div key={d.id} className="rounded-2xl border border-white/15 bg-black/25 p-0 flex flex-col overflow-hidden">
+              {thumb && (
+                <div className="w-full h-40 bg-black/30">
+                  <img src={thumb} alt="miniatura do diário" className="w-full h-full object-cover" loading="lazy" />
+                </div>
+              )}
+              <div className="p-3 flex-1 flex flex-col">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[15px] font-semibold text-cyan-300 truncate" title={header}>{header}</div>
+                  <div className="text-[12px] text-white/70 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
+                </div>
+                <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
+                <div className="mt-1 text-[14px] text-white/90 line-clamp-4">{preview}</div>
               </div>
-            )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// TELA 2 — ESTATÍSTICAS
+// TELA 2 — ESTATÍSTICAS (seções separadas)
 function ScreenStats({
   stats,
   awaitingValidation,
@@ -660,189 +673,253 @@ function ScreenStats({
   phaseCounts,
   trends,
   backlogAging,
+  diaryCount,
+  activeTickets,
 }) {
   const rateColor =
     resolutionRate >= RESOLUTION_GOAL ? "text-green-400" : resolutionRate >= 80 ? "text-amber-400" : "text-red-400";
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100%-0rem)]">
-      {/* KPIs grandes */}
-      <div className="grid grid-cols-6 gap-3">
-        <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-7 w-7" />} />
-        <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-7 w-7 text-orange-300" />} />
-        <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-7 w-7 text-cyan-300" />} />
-        <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-7 w-7 text-green-300" />} />
-        <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-7 w-7 text-zinc-300" />} />
-        <BigKpi title="Projetos ativos" value={projectActives} icon={<FolderOpen className="h-7 w-7" />} />
-      </div>
+    <div className="flex flex-col gap-4 h-[calc(100%-0rem)] overflow-hidden">
+      {/* ===== Seção: Chamados ===== */}
+      <div>
+        <div className="text-lg font-bold mb-2">Estatísticas — Chamados</div>
+        <div className="grid grid-cols-6 gap-3">
+          <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-7 w-7" />} />
+          <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-7 w-7 text-orange-300" />} />
+          <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-7 w-7 text-cyan-300" />} />
+          <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-7 w-7 text-yellow-300" />} />
+          <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-7 w-7 text-indigo-300" />} />
+          <BigKpi title="Ativos" value={activeTickets} icon={<Activity className="h-7 w-7" />} />
+        </div>
+        <div className="grid grid-cols-6 gap-3 mt-3">
+          <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-7 w-7 text-green-300" />} />
+          <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-7 w-7 text-zinc-300" />} />
+          <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-7 w-7 text-purple-300" />} />
+          <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-7 w-7" />} />
+          <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-7 w-7" />} />
+          <div className="rounded-2xl border border-white/15 bg-black/25 p-4 flex flex-col justify-center">
+            <div className="text-lg font-bold">Taxa de Resolução</div>
+            <div className="flex items-baseline gap-3">
+              <span className={`text-6xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
+              <span className="text-white/70">Meta: {RESOLUTION_GOAL}%</span>
+            </div>
+            <div className="w-full bg-black/30 rounded-full h-4 mt-2">
+              <div className={`h-4 rounded-full ${rateColor.replace("text-", "bg-")}`} style={{ width: `${Math.min(100, resolutionRate)}%` }} />
+            </div>
+          </div>
+        </div>
 
-      <div className="grid grid-cols-6 gap-3">
-        <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-7 w-7 text-yellow-300" />} />
-        <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-7 w-7 text-purple-300" />} />
-        <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-7 w-7" />} />
-        <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-7 w-7" />} />
-        <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-7 w-7 text-indigo-300" />} />
-        <div className="rounded-2xl border border-white/15 bg-black/25 p-4 flex flex-col justify-center">
-          <div className="text-lg font-bold">Taxa de Resolução</div>
-          <div className="flex items-baseline gap-3">
-            <span className={`text-6xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
-            <span className="text-white/70">Meta: {RESOLUTION_GOAL}%</span>
-          </div>
-          <div className="w-full bg-black/30 rounded-full h-4 mt-2">
-            <div
-              className={`h-4 rounded-full ${rateColor.replace("text-", "bg-")}`}
-              style={{ width: `${Math.min(100, resolutionRate)}%` }}
-            />
-          </div>
+        {/* gráficos */}
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Panel title="Tendência (30 dias) — Entradas x Saídas">
+            <MiniLines opens={trends.opens} closes={trends.closes} />
+          </Panel>
+          <Panel title="Backlog (acumulado 30 dias)">
+            <MiniArea series={trends.backlog} />
+          </Panel>
+          <Panel title="SLA violado — Top 5 áreas">
+            <ul className="space-y-1 mt-1">
+              {slaByArea.map(([area, qtd]) => (
+                <li key={area} className="flex items-center justify-between">
+                  <span className={`text-base ${areaHue(area)} truncate pr-2`}>{area}</span>
+                  <span className="text-xl font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
+                </li>
+              ))}
+              {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
+            </ul>
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Panel title="Foco de atenção (abertos por área)">
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(untreatedByArea)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 6)
+                .map(([area, count]) => (
+                  <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-3 flex justify-between">
+                    <span className={`font-medium ${areaHue(area)} truncate pr-2`}>{area}</span>
+                    <span className="font-bold text-lg text-black bg-yellow-400 rounded-md px-2">{count}</span>
+                  </div>
+                ))}
+            </div>
+          </Panel>
+
+          <Panel title="Idade do backlog">
+            <div className="grid grid-cols-4 gap-2">
+              {Object.entries(backlogAging).map(([k, v]) => (
+                <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-3 text-center">
+                  <div className="text-sm text-white/70">{k}</div>
+                  <div className="text-3xl font-bold">{v}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          {/* Espaço para equilíbrio visual */}
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
         </div>
       </div>
 
-      {/* gráficos simples */}
-      <div className="grid grid-cols-3 gap-3 flex-1">
-        <Panel title="Tendência (30 dias) — Entradas x Saídas">
-          <MiniLines opens={trends.opens} closes={trends.closes} />
-        </Panel>
-
-        <Panel title="Backlog (acumulado 30 dias)">
-          <MiniArea series={trends.backlog} />
-        </Panel>
-
-        <Panel title="SLA violado — Top 5 áreas">
-          <ul className="space-y-1 mt-1">
-            {slaByArea.map(([area, qtd]) => (
-              <li key={area} className="flex items-center justify-between">
-                <span className={`text-base ${areaHue(area)} truncate pr-2`}>{area}</span>
-                <span className="text-xl font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
-              </li>
-            ))}
-            {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
-          </ul>
-        </Panel>
+      {/* ===== Seção: Projetos ===== */}
+      <div>
+        <div className="text-lg font-bold mb-2">Estatísticas — Projetos</div>
+        <div className="grid grid-cols-6 gap-3">
+          <BigKpi title="Projetos ativos" value={projectActives} icon={<FolderOpen className="h-7 w-7" />} />
+          {/* preenchimento para manter grade estável */}
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Panel title="Projetos — resumo por fase">
+            <div className="grid grid-cols-4 gap-2">
+              <PhaseStat title="Futuro" value={phaseCounts.futuro} />
+              <PhaseStat title="Andamento" value={phaseCounts.andamento} />
+              <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
+              <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
+            </div>
+          </Panel>
+          {/* preenchimentos para manter grid 3 colunas */}
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <Panel title="Foco de atenção (abertos por área)">
-          <div className="grid grid-cols-3 gap-2">
-            {Object.entries(untreatedByArea)
-              .sort(([, a], [, b]) => b - a)
-              .slice(0, 6)
-              .map(([area, count]) => (
-                <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-3 flex justify-between">
-                  <span className={`font-medium ${areaHue(area)} truncate pr-2`}>{area}</span>
-                  <span className="font-bold text-lg text-black bg-yellow-400 rounded-md px-2">{count}</span>
-                </div>
-              ))}
-          </div>
-        </Panel>
-
-        <Panel title="Idade do backlog">
-          <div className="grid grid-cols-4 gap-2">
-            {Object.entries(backlogAging).map(([k, v]) => (
-              <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-3 text-center">
-                <div className="text-sm text-white/70">{k}</div>
-                <div className="text-3xl font-bold">{v}</div>
+      {/* ===== Seção: Diários ===== */}
+      <div className="pb-1">
+        <div className="text-lg font-bold mb-2">Estatísticas — Diários</div>
+        <div className="grid grid-cols-6 gap-3">
+          <BigKpi title="Diários (90d)" value={diaryCount} icon={<FileText className="h-7 w-7" />} />
+          <BigKpi title="Chamados ativos" value={activeTickets} icon={<Activity className="h-7 w-7" />} />
+          {/* preenchimento para completar 6 colunas */}
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Panel title="Diários × Chamados ativos (relação)">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm text-white/80">
+                <span>Diários (90d)</span>
+                <span className="font-bold">{diaryCount}</span>
               </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Projetos — resumo por fase">
-          <div className="grid grid-cols-4 gap-2">
-            <PhaseStat title="Futuro" value={phaseCounts.futuro} />
-            <PhaseStat title="Andamento" value={phaseCounts.andamento} />
-            <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
-            <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
-          </div>
-        </Panel>
+              <div className="flex items-center justify-between text-sm text-white/80">
+                <span>Chamados ativos</span>
+                <span className="font-bold">{activeTickets}</span>
+              </div>
+              <div className="mt-2">
+                <div className="w-full bg-black/30 rounded-full h-4" title="Proporção de diários / chamados">
+                  <div
+                    className="h-4 rounded-full bg-cyan-400"
+                    style={{ width: `${Math.min(100, (diaryCount / Math.max(1, activeTickets)) * 100)}%` }}
+                  />
+                </div>
+                <div className="text-xs text-white/60 mt-1">Quanto mais próximo de 100%, mais registros de diário por chamado ativo.</div>
+              </div>
+            </div>
+          </Panel>
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+          <div className="rounded-2xl border border-white/15 bg-black/10" />
+        </div>
       </div>
     </div>
   );
 }
 
-// TELA 3 — CHAMADOS (4×5 cards)
+// TELA 3 — CHAMADOS
 function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMapRef, eventsMapRef }) {
   return (
-    <div className="grid grid-cols-4 grid-rows-5 gap-3 h-[calc(100%-0rem)]">
-      {Array.from({ length: 20 }).map((_, idx) => {
-        const t = ticketsFeed[idx];
-        if (!t) return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+    <div className="h-[calc(100%-0rem)] flex flex-col gap-3">
+      {/* Cabeçalho explícito da tela */}
+      <div className="text-lg font-bold">Chamados — últimas atualizações</div>
 
-        const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
-        const emailCandidates = [
-          t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail
-        ].filter(Boolean);
+      <div className="grid grid-cols-4 grid-rows-5 gap-3 flex-1">
+        {Array.from({ length: 20 }).map((_, idx) => {
+          const t = ticketsFeed[idx];
+          if (!t) return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
 
-        const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-        const openedByFromEmail = emailCandidates
-          .map((e) => (e || "").toLowerCase())
-          .map((e) => usersByEmailRef.current[e]?.nome)
-          .find(isText);
-        const openedBy = obfuscate(
-          pickText(openedByFromId, openedByFromEmail, t.openedByName, t.criadoPorNome, t.aberto_por_nome, t.solicitanteNome, t?.solicitante?.nome)
-        );
+          const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
+          const emailCandidates = [
+            t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail
+          ].filter(Boolean);
 
-        const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
-        const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
-        const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-        const responsavelFromEmail = respEmailCandidates
-          .map((e) => (e || "").toLowerCase())
-          .map((e) => usersByEmailRef.current[e]?.nome)
-          .find(isText);
-        const responsavel = obfuscate(
-          pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome)
-        );
+          const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
+          const openedByFromEmail = emailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmailRef.current[e]?.nome)
+            .find(isText);
+          const openedBy = obfuscate(
+            pickText(openedByFromId, openedByFromEmail, t.openedByName, t.criadoPorNome, t.aberto_por_nome, t.solicitanteNome, t?.solicitante?.nome)
+          );
 
-        const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
-        const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
-        const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
-        const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
+          const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
+          const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
+          const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
+          const responsavelFromEmail = respEmailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmailRef.current[e]?.nome)
+            .find(isText);
+          const responsavel = obfuscate(
+            pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome)
+          );
 
-        const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
-        const evFromMapByProj = projId ? projectsMapRef.current[projId]?.eventName : undefined;
-        const evFromEvents = pickText(
-          eventsMapRef.current[eventIdFromTicket]?.name,
-          eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
-        );
-        const evLabelFromDoc = pickText(
-          t.eventName, t.event_title, t.eventTitle,
-          t?.event?.name, t?.event?.nome, t?.event?.feira,
-          t?.evento?.name, t?.evento?.nome, t?.evento?.feira
-        );
-        const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
+          const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
+          const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
+          const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
+          const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
 
-        const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
-        const when = t?.updatedAt?.toDate ? t.updatedAt.toDate()
-          : t?.createdAt?.toDate ? t.createdAt.toDate() : null;
+          const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
+          const evFromMapByProj = projId ? projectsMapRef.current[projId]?.eventName : undefined;
+          const evFromEvents = pickText(
+            eventsMapRef.current[eventIdFromTicket]?.name,
+            eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
+          );
+          const evLabelFromDoc = pickText(
+            t.eventName, t.event_title, t.eventTitle,
+            t?.event?.name, t?.event?.nome, t?.event?.feira,
+            t?.evento?.name, t?.evento?.nome, t?.evento?.feira
+          );
+          const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
 
-        return (
-          <div key={t.id} className={`rounded-2xl border border-white/15 bg-black/25 p-3 ${statusColor(t.status)}`}>
-            <div className="flex items-start justify-between">
-              <div className="min-w-0 pr-2">
-                <div className="text-[16px] font-semibold truncate" title={t.titulo || t.title}>
-                  {t.titulo || t.title || "(sem título)"}
-                </div>
-                <div className="text-[13px] text-white/80 truncate">
-                  Aberto por <span className="text-white">{openedBy}</span>
-                  <span className="mx-1">·</span>
-                  Área <span className={`text-white ${areaHue(areaAtual)}`}>{areaAtual}</span>
-                  <span className="mx-1">·</span>
-                  Resp. <span className="text-white">{responsavel}</span>
-                </div>
-                {(projectLabel || eventLabel) && (
-                  <div className="text-[13px] text-white/70 truncate">
-                    <span className="text-white/80">{projectLabel || ""}</span>
-                    {eventLabel ? <span> / {eventLabel}</span> : null}
+          const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
+          const when = t?.updatedAt?.toDate ? t.updatedAt.toDate()
+            : t?.createdAt?.toDate ? t.createdAt.toDate() : null;
+
+          return (
+            <div key={t.id} className={`rounded-2xl border border-white/15 bg-black/25 p-3 ${statusColor(t.status)}`}>
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 pr-2">
+                  <div className="text-[16px] font-semibold truncate" title={t.titulo || t.title}>
+                    {t.titulo || t.title || "(sem título)"}
                   </div>
-                )}
+                  <div className="text-[13px] text-white/80 truncate">
+                    Aberto por <span className="text-white">{openedBy}</span>
+                    <span className="mx-1">·</span>
+                    Área <span className={`text-white ${areaHue(areaAtual)}`}>{areaAtual}</span>
+                    <span className="mx-1">·</span>
+                    Resp. <span className="text-white">{responsavel}</span>
+                  </div>
+                  {(projectLabel || eventLabel) && (
+                    <div className="text-[13px] text-white/70 truncate">
+                      <span className="text-white/80">{projectLabel || ""}</span>
+                      {eventLabel ? <span> / {eventLabel}</span> : null}
+                    </div>
+                  )}
+                </div>
+                <div className="text-[12px] text-white/60 whitespace-nowrap ml-2">{formatTimeAgo(when)}</div>
               </div>
-              <div className="text-[12px] text-white/60 whitespace-nowrap ml-2">{formatTimeAgo(when)}</div>
+              <div className="mt-2">
+                <StatusBadge status={t.status} />
+              </div>
             </div>
-            <div className="mt-2">
-              <StatusBadge status={t.status} />
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
