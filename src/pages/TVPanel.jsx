@@ -177,7 +177,7 @@ function TVPanel() {
   const [screen, setScreen] = useState(0);
   useEffect(() => {
     const id1 = setInterval(() => setNow(new Date()), 1000);
-    const id2 = setInterval(() => setScreen((s) => (s + 1) % 3), 45000);
+    const id2 = setInterval(() => setScreen((s) => (s + 1) % 4), 45000);
     return () => { clearInterval(id1); clearInterval(id2); };
   }, []);
 
@@ -558,21 +558,17 @@ function TVPanel() {
         />
       )}
       {screen === 1 && (
-        <ScreenStats
+        <ScreenStatsTickets
           stats={stats}
           awaitingValidation={awaitingValidation}
           pendingApprovalCount={pendingApprovalCount}
           openedToday={openedToday}
           openedThisMonth={openedThisMonth}
           escalatedCount={escalatedCount}
-          projectActives={projectActives}
           slaStats={slaStats}
           slaByArea={slaByArea}
-          untreatedByArea={untreatedByArea}
           resolutionRate={resolutionRate}
-          phaseCounts={phaseCounts}
           trends={trends}
-          backlogAging={backlogAging}
           diaryCount={diaryItems.length}
           activeTickets={activeTickets}
         />
@@ -584,6 +580,12 @@ function TVPanel() {
           usersByEmailRef={usersByEmailRef}
           projectsMapRef={projectsMapRef}
           eventsMapRef={eventsMapRef}
+        />
+      )}
+      {screen === 3 && (
+        <ScreenProjects
+          projectActives={projectActives}
+          phaseCounts={phaseCounts}
         />
       )}
     </div>
@@ -658,186 +660,122 @@ function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
 }
 
 // TELA 2 — ESTATÍSTICAS (seções separadas)
-function ScreenStats({
+function ScreenStatsTickets({
   stats,
   awaitingValidation,
   pendingApprovalCount,
   openedToday,
   openedThisMonth,
   escalatedCount,
-  projectActives,
   slaStats,
   slaByArea,
-  untreatedByArea,
   resolutionRate,
-  phaseCounts,
   trends,
-  backlogAging,
   diaryCount,
   activeTickets,
 }) {
   const rateColor =
     resolutionRate >= RESOLUTION_GOAL ? "text-green-400" : resolutionRate >= 80 ? "text-amber-400" : "text-red-400";
 
-  // ===== Auto-fit para TV: escala conteúdo para caber sem rolagem =====
-  const wrapRef = React.useRef(null);
-  const innerRef = React.useRef(null);
-  const [scale, setScale] = React.useState(1);
-
-  React.useEffect(() => {
-    const fit = () => {
-      if (!wrapRef.current || !innerRef.current) return;
-      const H = wrapRef.current.clientHeight;
-      const h = innerRef.current.scrollHeight;
-      const s = H && h ? Math.min(1, H / h) : 1;
-      setScale(s);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    try { wrapRef.current && ro.observe(wrapRef.current); } catch {}
-    try { innerRef.current && ro.observe(innerRef.current); } catch {}
-    window.addEventListener("resize", fit);
-    const id = setInterval(fit, 300); // conteúdo chega assíncrono
-    return () => { ro.disconnect(); window.removeEventListener("resize", fit); clearInterval(id); };
-  }, [
-    stats,
-    awaitingValidation,
-    pendingApprovalCount,
-    openedToday,
-    openedThisMonth,
-    escalatedCount,
-    projectActives,
-    slaStats,
-    slaByArea,
-    untreatedByArea,
-    resolutionRate,
-    phaseCounts,
-    trends,
-    backlogAging,
-    diaryCount,
-    activeTickets,
-  ]);
-
   return (
-    <div ref={wrapRef} className="h-[calc(100%-0rem)] overflow-hidden">
-      <div
-        ref={innerRef}
-        className="origin-top-left space-y-2"
-        style={{ transform: `scale(${scale})`, width: scale < 1 ? `${100 / scale}%` : "100%" }}
-      >
-        {/* ===== Seção: Chamados (compacta) ===== */}
-        <div>
-          <div className="text-base font-bold mb-1">Estatísticas — Chamados</div>
-          <div className="grid grid-cols-6 gap-2">
-            <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-6 w-6" />} />
-            <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-6 w-6 text-orange-300" />} />
-            <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-6 w-6 text-cyan-300" />} />
-            <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-6 w-6 text-yellow-300" />} />
-            <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-6 w-6 text-indigo-300" />} />
-            <BigKpi title="Ativos" value={activeTickets} icon={<Activity className="h-6 w-6" />} />
-          </div>
-          <div className="grid grid-cols-6 gap-2 mt-2">
-            <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-6 w-6 text-green-300" />} />
-            <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-6 w-6 text-zinc-300" />} />
-            <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-6 w-6 text-purple-300" />} />
-            <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-6 w-6" />} />
-            <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-6 w-6" />} />
-            <div className="rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col justify-center">
-              <div className="text-base font-bold">Taxa de Resolução</div>
-              <div className="flex items-baseline gap-2">
-                <span className={`text-4xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
-                <span className="text-white/70 text-sm">Meta: {RESOLUTION_GOAL}%</span>
-              </div>
-              <div className="w-full bg-black/30 rounded-full h-3 mt-1">
-                <div className={`${rateColor.replace("text-", "bg-")} h-3 rounded-full`} style={{ width: `${Math.min(100, resolutionRate)}%` }} />
-              </div>
+    <div className="flex flex-col gap-2 h-[calc(100%-0rem)] overflow-hidden">
+      {/* ===== Seção: Chamados (compacta e única tela) ===== */}
+      <div>
+        <div className="text-lg font-bold mb-2">Estatísticas — Chamados</div>
+        <div className="grid grid-cols-6 gap-2">
+          <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-6 w-6" />} />
+          <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-6 w-6 text-orange-300" />} />
+          <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-6 w-6 text-cyan-300" />} />
+          <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-6 w-6 text-yellow-300" />} />
+          <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-6 w-6 text-indigo-300" />} />
+          <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-6 w-6 text-green-300" />} />
+        </div>
+        <div className="grid grid-cols-6 gap-2 mt-2">
+          <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-6 w-6 text-zinc-300" />} />
+          <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-6 w-6 text-purple-300" />} />
+          <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-6 w-6" />} />
+          <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-6 w-6" />} />
+          <div className="col-span-2 rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col justify-center">
+            <div className="text-base font-bold">Taxa de Resolução</div>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-4xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
+              <span className="text-white/70 text-sm">Meta: {RESOLUTION_GOAL}%</span>
             </div>
-          </div>
-
-          {/* gráficos compactos */}
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            <Panel title="Tendência (30 dias) — Entradas x Saídas">
-              <MiniLines opens={trends.opens} closes={trends.closes} />
-            </Panel>
-            <Panel title="Backlog (acumulado 30 dias)">
-              <MiniArea series={trends.backlog} />
-            </Panel>
-            <Panel title="SLA violado — Top 5 áreas">
-              <ul className="space-y-1 mt-1">
-                {slaByArea.map(([area, qtd]) => (
-                  <li key={area} className="flex items-center justify-between">
-                    <span className={`text-sm ${areaHue(area)} truncate pr-2`}>{area}</span>
-                    <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
-                  </li>
-                ))}
-                {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
-              </ul>
-            </Panel>
+            <div className="w-full bg-black/30 rounded-full h-3 mt-1">
+              <div className={`${rateColor.replace("text-", "bg-")} h-3 rounded-full`} style={{ width: `${Math.min(100, resolutionRate)}%` }} />
+            </div>
           </div>
         </div>
 
-        {/* ===== Linha final: Foco / Idade / Projetos & Diários ===== */}
-        <div className="grid grid-cols-3 gap-2">
-          <Panel title="Foco de atenção (abertos por área)">
-            <div className="grid grid-cols-3 gap-2">
-              {Object.entries(untreatedByArea)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 6)
-                .map(([area, count]) => (
-                  <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-2 flex justify-between">
-                    <span className={`font-medium ${areaHue(area)} truncate pr-2 text-sm`}>{area}</span>
-                    <span className="font-bold text-base text-black bg-yellow-400 rounded-md px-2">{count}</span>
-                  </div>
-                ))}
-            </div>
+        {/* linha final: 3 painéis enxutos */}
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          <Panel title="Tendência (30 dias) — Entradas x Saídas">
+            <MiniLines opens={trends.opens} closes={trends.closes} height={110} />
           </Panel>
-
-          <Panel title="Idade do backlog">
-            <div className="grid grid-cols-4 gap-2">
-              {Object.entries(backlogAging).map(([k, v]) => (
-                <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-2 text-center">
-                  <div className="text-xs text-white/70">{k}</div>
-                  <div className="text-2xl font-bold">{v}</div>
-                </div>
+          <Panel title="SLA violado — Top 5 áreas">
+            <ul className="space-y-1 mt-1">
+              {slaByArea.map(([area, qtd]) => (
+                <li key={area} className="flex items-center justify-between">
+                  <span className={`text-sm ${areaHue(area)} truncate pr-2`}>{area}</span>
+                  <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
+                </li>
               ))}
-            </div>
+              {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
+            </ul>
           </Panel>
-
-          <Panel title="Projetos & Diários (compacto)">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-sm text-white/80 mb-1">Projetos ativos</div>
-                <div className="text-4xl font-extrabold">{projectActives}</div>
-                <div className="grid grid-cols-4 gap-1 mt-2">
-                  <PhaseStat title="Futuro" value={phaseCounts.futuro} />
-                  <PhaseStat title="Andamento" value={phaseCounts.andamento} />
-                  <PhaseStat title="Desmont." value={phaseCounts.desmontagem} />
-                  <PhaseStat title="Final." value={phaseCounts.finalizado} />
-                </div>
+          <Panel title="Diários × Chamados ativos (relação)">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-sm text-white/80">
+                <span>Diários (90d)</span>
+                <span className="font-bold">{diaryCount}</span>
               </div>
-              <div>
-                <div className="text-sm text-white/80 mb-1">Diários × Chamados ativos</div>
-                <div className="flex items-center justify-between text-sm text-white/80">
-                  <span>Diários (90d)</span>
-                  <span className="font-bold">{diaryCount}</span>
+              <div className="flex items-center justify-between text-sm text-white/80">
+                <span>Chamados ativos</span>
+                <span className="font-bold">{activeTickets}</span>
+              </div>
+              <div className="mt-1">
+                <div className="w-full bg-black/30 rounded-full h-3" title="Proporção de diários / chamados">
+                  <div
+                    className="h-3 rounded-full bg-cyan-400"
+                    style={{ width: `${Math.min(100, (diaryCount / Math.max(1, activeTickets)) * 100)}%` }}
+                  />
                 </div>
-                <div className="flex items-center justify-between text-sm text-white/80">
-                  <span>Chamados ativos</span>
-                  <span className="font-bold">{activeTickets}</span>
-                </div>
-                <div className="mt-1">
-                  <div className="w-full bg-black/30 rounded-full h-3" title="Proporção de diários / chamados">
-                    <div
-                      className="h-3 rounded-full bg-cyan-400"
-                      style={{ width: `${Math.min(100, (diaryCount / Math.max(1, activeTickets)) * 100)}%` }}
-                    />
-                  </div>
-                  <div className="text-[11px] text-white/60 mt-1">Quanto mais próximo de 100%, mais registros de diário por chamado ativo.</div>
-                </div>
+                <div className="text-[11px] text-white/60 mt-1">Quanto mais próximo de 100%, mais registros de diário por chamado ativo.</div>
               </div>
             </div>
           </Panel>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// TELA 3 — CHAMADOS
+
+// TELA 4 — ESTATÍSTICAS DE PROJETOS
+function ScreenProjects({ projectActives, phaseCounts }) {
+  return (
+    <div className="h-[calc(100%-0rem)] flex flex-col gap-2 overflow-hidden">
+      <div className="text-lg font-bold">Estatísticas — Projetos</div>
+      <div className="grid grid-cols-6 gap-2">
+        <BigKpi title="Projetos ativos" value={projectActives} icon={<FolderOpen className="h-6 w-6" />} />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+      </div>
+      <div className="grid grid-cols-3 gap-2 mt-2">
+        <Panel title="Projetos — resumo por fase">
+          <div className="grid grid-cols-4 gap-2">
+            <PhaseStat title="Futuro" value={phaseCounts.futuro} />
+            <PhaseStat title="Andamento" value={phaseCounts.andamento} />
+            <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
+            <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
+          </div>
+        </Panel>
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
+        <div className="rounded-2xl border border-white/15 bg-black/10" />
       </div>
     </div>
   );
@@ -995,8 +933,8 @@ function Panel({ title, children }) {
 }
 
 /* Mini gráficos SVG sem dependências */ SVG sem dependências */
-function MiniLines({ opens, closes }) {
-  const w = 520, h = 140, p = 10;
+function MiniLines({ opens, closes, width = 520, height = 140, padding = 10 }) {
+  const w = width, h = height, p = padding;
   const max = Math.max(1, ...opens, ...closes);
   const toXY = (arr, idx) => {
     const x = p + (idx * (w - 2 * p)) / (arr.length - 1 || 1);
@@ -1012,7 +950,22 @@ function MiniLines({ opens, closes }) {
     </svg>
   );
 }
-function MiniArea({ series }) {
+function MiniArea({ series, width = 520, height = 140, padding = 10 }) {
+  const w = width, h = height, p = padding;
+  const max = Math.max(1, ...series);
+  const points = series.map((v, i) => {
+    const x = p + (i * (w - 2 * p)) / (series.length - 1 || 1);
+    const y = h - p - (v / max) * (h - 2 * p);
+    return `${x},${y}`;
+  });
+  const d = `M ${p},${h - p} L ${points.join(" L ")} L ${w - p},${h - p} Z`;
+  return (
+    <svg width={w} height={h} className="block">
+      <rect x="0" y="0" width={w} height={h} fill="none" className="stroke-white/10" />
+      <path d={d} className="fill-cyan-300/20 stroke-cyan-300" strokeWidth="2" />
+    </svg>
+  );
+}
   const w = 520, h = 140, p = 10;
   const max = Math.max(1, ...series);
   const points = series.map((v, i) => {
