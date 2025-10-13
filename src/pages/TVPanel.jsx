@@ -1,15 +1,28 @@
-// src/pages/TVPanel.jsx — versão final saneada (13/10/2025)
+// src/pages/TVPanel.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { collection, onSnapshot, orderBy, query, limit, getDocs } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  limit,
+  getDocsFromServer,
+} from "firebase/firestore";
 import { db } from "../config/firebase";
 import {
+  Activity,
   AlertOctagon,
+  Award,
   BarChart3,
   Calendar,
   CheckCircle,
   Clock as ClockIcon,
+  FileText,
+  Flag,
   FolderOpen,
   GitPullRequest,
+  Target,
+  TrendingDown,
   TrendingUp,
   UserCheck,
   Zap,
@@ -69,6 +82,7 @@ const formatClock = (now) => {
 };
 
 const SLA_HOURS = { baixa: 240, media: 24, alta: 12, urgente: 2 };
+
 const statusColor = (st) => {
   const s = norm(st);
   if (s === "aberto") return "border-l-4 border-blue-400";
@@ -76,19 +90,25 @@ const statusColor = (st) => {
   if (s === "executado_aguardando_validacao" || s === "executado_aguardando_validacao_operador")
     return "border-l-4 border-yellow-400";
   if (s === "concluido") return "border-l-4 border-green-400";
-  if (s.includes("arquiv") || s === "cancelado") return "border-l-4 border-zinc-500";
+  if (s.includes("arquiv") || s.includes("archiv") || s === "cancelado") return "border-l-4 border-zinc-500";
   return "border-l-4 border-zinc-400";
 };
+
 const isArchived = (st) => {
   const s = norm(st);
   return s.includes("arquiv") || s.includes("archiv");
 };
-const RESOLUTION_GOAL = 90;
+
+const RESOLUTION_GOAL = 90; // meta 90%
+
+// Detecta WebViews de TV/TV Box com limitações
 const isTvLike = (() => {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";
   return /Tizen|Web0S|SmartTV|Android\s?TV|; wv;|AFT|MiBOX|HBBTV|DTV/i.test(ua);
 })();
+
+// Paleta por área
 const areaHue = (area) => {
   const a = norm(area);
   if (a.includes("logist")) return "text-teal-300";
@@ -100,6 +120,8 @@ const areaHue = (area) => {
   if (a.includes("comunicacao") || a.includes("visual")) return "text-emerald-300";
   return "text-white/80";
 };
+
+// Nome → “Nome S.”
 const obfuscate = (nameOrEmail) => {
   const raw = (nameOrEmail || "").toString().trim();
   if (!raw) return "—";
@@ -110,20 +132,22 @@ const obfuscate = (nameOrEmail) => {
     const last = parts[1] ? parts[1][0].toUpperCase() + "." : "";
     return `${first} ${last}`.trim();
   }
-  const parts = raw split(/\s+/).filter(Boolean);
+  const parts = raw.split(/\s+/).filter(Boolean);
   if (parts.length === 1) return parts[0];
   return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
 };
 
 /* ============================ componente ============================ */
 function TVPanel() {
+  /* -------- estados de dados brutos -------- */
   const [tickets, setTickets] = useState([]);
   const [diaryRaw, setDiaryRaw] = useState([]);
-  const [projectsMap, setProjectsMap] = useState({});
-  const [eventsMap, setEventsMap] = useState({});
+  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventId?, eventName?, status}
+  const [eventsMap, setEventsMap] = useState({}); // id -> {name}
   const [usersById, setUsersById] = useState({});
   const [usersByEmail, setUsersByEmail] = useState({});
 
+  /* -------- derivados -------- */
   const [stats, setStats] = useState({ total: 0, abertos: 0, emAndamento: 0, concluidos: 0, arquivados: 0 });
   const [awaitingValidation, setAwaitingValidation] = useState(0);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
@@ -135,8 +159,11 @@ function TVPanel() {
   const [slaViolationsList, setSlaViolationsList] = useState([]);
   const [phaseCounts, setPhaseCounts] = useState({ futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 });
   const [projectActives, setProjectActives] = useState(0);
+  const [projectInativos, setProjectInativos] = useState(0);
+
   const [diaryError, setDiaryError] = useState(null);
 
+  // Refs para listeners
   const usersByIdRef = useRef({});
   const usersByEmailRef = useRef({});
   const projectsMapRef = useRef({});
@@ -146,6 +173,7 @@ function TVPanel() {
   useEffect(() => { projectsMapRef.current = projectsMap; }, [projectsMap]);
   useEffect(() => { eventsMapRef.current = eventsMap; }, [eventsMap]);
 
+  // Relógio + rotação (1→2→3→4 a cada 45s)
   const [now, setNow] = useState(new Date());
   const [screen, setScreen] = useState(0);
   useEffect(() => {
@@ -154,6 +182,7 @@ function TVPanel() {
     return () => { clearInterval(id1); clearInterval(id2); };
   }, []);
 
+  /* ===== Som para novos chamados "aberto" ===== */
   const seenOpenIds = useRef(new Set());
   const initializedOpens = useRef(false);
   const audioCtx = useRef(null);
@@ -177,18 +206,23 @@ function TVPanel() {
     } catch {}
   };
 
+  /* ============================ assinaturas ============================ */
   useEffect(() => {
+    // Usuários
     const unsubUsers = onSnapshot(collection(db, "usuarios"), (snap) => {
-      const byId = {}; const byEmail = {};
+      const byId = {};
+      const byEmail = {};
       snap.forEach((d) => {
         const data = d.data() || {};
         const email = (data.email || data.mail || "").toLowerCase();
         byId[d.id] = { id: d.id, ...data };
         if (email) byEmail[email] = { id: d.id, ...data };
       });
-      setUsersById(byId); setUsersByEmail(byEmail);
+      setUsersById(byId);
+      setUsersByEmail(byEmail);
     });
 
+    // Eventos
     const unsubEvents = onSnapshot(collection(db, "eventos"), (snap) => {
       const map = {};
       snap.forEach((d) => {
@@ -199,21 +233,23 @@ function TVPanel() {
       setEventsMap(map);
     });
 
+    // Projetos (status + nomes)
     const unsubProjects = onSnapshot(collection(db, "projetos"), (snap) => {
       let ativos = 0;
+      let inativos = 0;
       const projMap = {};
       const counts = { futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 };
       const now = new Date();
 
       snap.forEach((d) => {
         const data = d.data() || {};
-        const status = norm(data?.status);
-        if (status !== "arquivado" && status !== "cancelado") ativos += 1;
-        const projectName =
-          pickText(data.nome, data.name, data.titulo, data.title, data.projeto, data.project) || d.id;
-        const eventId = pickText(
-          data.eventId, data.event_id, data?.evento?.eventoId, data?.event?.eventoId, data?.eventoId
-        );
+        const status = norm(data?.status); // ex.: ativo, finalizado, arquivado, cancelado...
+        const isInativo = ["finalizado", "arquivado", "cancelado"].includes(status);
+        if (!isInativo) ativos += 1; else inativos += 1;
+
+        const projectName = pickText(data.nome, data.name, data.titulo, data.title, data.projeto, data.project) || d.id;
+
+        const eventId = pickText(data.eventId, data.event_id, data?.evento?.eventoId, data?.event?.eventoId, data?.eventoId);
         const evLocalName = pickText(
           data.eventName, data.event_title, data.eventTitle, data.evento, data.event,
           data?.event?.name, data?.event?.nome, data?.event?.feira,
@@ -221,8 +257,10 @@ function TVPanel() {
         );
         const fallbackEv = eventId && eventsMapRef.current[eventId]?.name;
         const eventName = evLocalName || fallbackEv || "";
+
         projMap[d.id] = { projectName, eventId, eventName, status: status || "" };
 
+        // fase (futuro/andamento/desmontagem/finalizado)
         const mStart = parseMaybeDate(data?.montagem?.dataInicio || data?.dataInicioMontagem);
         const mEnd   = parseMaybeDate(data?.montagem?.dataFim    || data?.dataFimMontagem);
         const eStart = parseMaybeDate(data?.evento?.dataInicio    || data?.dataInicioEvento);
@@ -250,10 +288,12 @@ function TVPanel() {
       });
 
       setProjectActives(ativos);
+      setProjectInativos(inativos);
       setProjectsMap(projMap);
       setPhaseCounts(counts);
     });
 
+    // Chamados (ordenados por createdAt desc para KPIs; usaremos updatedAt para feed)
     const unsubTickets = onSnapshot(
       query(collection(db, "chamados"), orderBy("createdAt", "desc")),
       (snap) => {
@@ -279,13 +319,10 @@ function TVPanel() {
 
         const startDay = startOfDay(now);
         const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        setOpenedToday(
-          list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startDay).length
-        );
-        setOpenedThisMonth(
-          list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startMonth).length
-        );
+        setOpenedToday(list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startDay).length);
+        setOpenedThisMonth(list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startMonth).length);
 
+        // foco de atenção: abertos por área
         const openTickets = list.filter((t) => norm(t.status) === "aberto");
         const byArea = openTickets.reduce((acc, t) => {
           const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
@@ -294,8 +331,8 @@ function TVPanel() {
         }, {});
         setUntreatedByArea(byArea);
 
-        let violated = 0,
-          risk = 0;
+        // SLA
+        let violated = 0, risk = 0;
         const violatedList = [];
         list
           .filter((t) => !["concluido", "cancelado"].includes(norm(t.status)) && !isArchived(t.status))
@@ -305,8 +342,7 @@ function TVPanel() {
             if (!prio || !created) return;
             const elapsed = (now - created) / (1000 * 60 * 60);
             if (elapsed > prio) {
-              violated += 1;
-              violatedList.push(t);
+              violated += 1; violatedList.push(t);
             } else if (elapsed > prio * 0.75) {
               risk += 1;
             }
@@ -314,6 +350,7 @@ function TVPanel() {
         setSlaStats({ violated, risk });
         setSlaViolationsList(violatedList);
 
+        // Som para novos "aberto"
         const onlyOpens = list.filter((t) => norm(t.status) === "aberto");
         if (!initializedOpens.current) {
           onlyOpens.forEach((t) => seenOpenIds.current.add(t.id));
@@ -326,18 +363,20 @@ function TVPanel() {
       }
     );
 
+    // Diário (TV: polling; desktop: realtime) — buscar vários para filtrar 90d.
     let unsubDiaries = () => {};
     if (isTvLike) {
       const fetchDiary = async () => {
         try {
-          const snap = await getDocs(
-            query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(60))
+          const snap = await getDocsFromServer(
+            query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(120))
           );
           const rows = [];
           snap.forEach((d) => rows.push({ id: d.id, ...(d.data() || {}) }));
           setDiaryRaw(rows);
           setDiaryError(null);
         } catch (e) {
+          console.error("[diary_feed] polling TV falhou", e);
           setDiaryError(e?.code || e?.message || "erro");
         }
       };
@@ -346,14 +385,17 @@ function TVPanel() {
       unsubDiaries = () => clearInterval(id);
     } else {
       unsubDiaries = onSnapshot(
-        query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(60)),
+        query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(120)),
         (snap) => {
           const rows = [];
           snap.forEach((d) => rows.push({ id: d.id, ...(d.data() || {}) }));
           setDiaryRaw(rows);
           setDiaryError(null);
         },
-        (err) => setDiaryError(err?.code || err?.message || "erro")
+        async (err) => {
+          console.error("[diary_feed] onSnapshot error", err);
+          setDiaryError(err?.code || err?.message || "erro");
+        }
       );
     }
 
@@ -363,27 +405,27 @@ function TVPanel() {
       unsubProjects();
       unsubTickets();
       unsubDiaries();
-      try {
-        audioCtx.current && audioCtx.current.close();
-      } catch {}
+      try { audioCtx.current && audioCtx.current.close(); } catch {}
     };
   }, []);
 
+  /* ============================ DERIVAÇÕES PARA TELAS ============================ */
+
+  // "Finalizado" para filtrar Diário/Chamados
   const projectIsFinalizado = (projId) => {
     if (!projId) return false;
     const st = projectsMapRef.current[projId]?.status || "";
-    return norm(st) === "finalizado" || norm(st) === "arquivado";
+    return norm(st) === "finalizado"; // apenas finalizado (conforme pedido)
   };
 
+  // Diário (últimos 90 dias, 12 cards, exclui projetos finalizados)
   const diaryItems = useMemo(() => {
     const cutoff = addDays(startOfDay(new Date()), -90);
     const out = [];
     for (const d of diaryRaw) {
       const when = parseMaybeDate(d.createdAt);
       if (!when || when < cutoff) continue;
-      const projId = pickText(
-        d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto
-      );
+      const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
       if (projId && projectIsFinalizado(projId)) continue;
       out.push(d);
       if (out.length >= 12) break;
@@ -391,6 +433,7 @@ function TVPanel() {
     return out;
   }, [diaryRaw, projectsMap]);
 
+  // Feed de chamados (últimas 20 atualizações) com estados permitidos; exclui projetos finalizados
   const ticketsFeed = useMemo(() => {
     const allowed = new Set([
       "aberto",
@@ -398,17 +441,22 @@ function TVPanel() {
       "executado_aguardando_validacao",
       "executado_aguardando_validacao_operador",
     ]);
+
     const getUpdatedAt = (t) =>
       parseMaybeDate(
-        t.updatedAt || t.resolvedAt || t.concludedAt || t.closedAt || t.createdAt
+        t.updatedAt ||
+          t.resolvedAt ||
+          t.concludedAt ||
+          t.closedAt ||
+          (["concluido"].includes(norm(t.status)) ? t.updatedAt : null) ||
+          t.createdAt
       ) || new Date(0);
+
     const sorted = [...tickets].sort((a, b) => getUpdatedAt(b) - getUpdatedAt(a));
     const out = [];
     for (const t of sorted) {
       if (!allowed.has(norm(t.status))) continue;
-      const projId = pickText(
-        t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto
-      );
+      const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
       if (projId && projectIsFinalizado(projId)) continue;
       out.push(t);
       if (out.length >= 20) break;
@@ -416,32 +464,28 @@ function TVPanel() {
     return out;
   }, [tickets, projectsMap]);
 
+  // KPIs e métricas p/ Tela 2 (chamados)
   const resolutionRate = useMemo(() => {
     const { total, concluidos, arquivados } = stats;
     return total ? ((concluidos + arquivados) / total) * 100 : 0;
   }, [stats]);
-  const activeTickets = useMemo(
-    () =>
-      tickets.filter(
-        (t) => !["concluido", "cancelado"].includes(norm(t.status)) && !isArchived(t.status)
-      ).length,
-    [tickets]
-  );
+
   const slaByArea = useMemo(() => {
     const map = {};
     slaViolationsList.forEach((t) => {
       const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
       map[a] = (map[a] || 0) + 1;
     });
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
   }, [slaViolationsList]);
+
+  // Tendência 30d (abertos vs resolvidos)
   const trends = useMemo(() => {
     const today = startOfDay(new Date());
     const days = Array.from({ length: 30 }, (_, i) => addDays(today, -(29 - i)));
     const openMap = Object.fromEntries(days.map((d) => [fmtDayKey(d), 0]));
     const closeMap = Object.fromEntries(days.map((d) => [fmtDayKey(d), 0]));
+
     tickets.forEach((t) => {
       const c = parseMaybeDate(t.createdAt);
       if (c) {
@@ -458,6 +502,7 @@ function TVPanel() {
         if (k2 in closeMap) closeMap[k2] += 1;
       }
     });
+
     const labels = days.map(fmtDayKey);
     const opens = labels.map((k) => openMap[k] || 0);
     const closes = labels.map((k) => closeMap[k] || 0);
@@ -469,6 +514,8 @@ function TVPanel() {
     }
     return { labels, opens, closes, backlog };
   }, [tickets]);
+
+  // Idade do backlog (abertos + em tratativa)
   const backlogAging = useMemo(() => {
     const now = new Date();
     const bucket = { "≤24h": 0, "1–3d": 0, "3–7d": 0, ">7d": 0 };
@@ -486,10 +533,68 @@ function TVPanel() {
     return bucket;
   }, [tickets]);
 
+  // Estatísticas de projetos — médias por projeto (ativos)
+  const projectDerived = useMemo(() => {
+    const activeProjectIds = Object.entries(projectsMap)
+      .filter(([, v]) => !["finalizado", "arquivado", "cancelado"].includes(norm(v.status)))
+      .map(([id]) => id);
+    const activeSet = new Set(activeProjectIds);
+    const nActive = activeProjectIds.length || 1;
+
+    // contagens por projeto
+    const ticketsByProj = {};
+    tickets.forEach((t) => {
+      const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
+      if (!projId) return;
+      ticketsByProj[projId] = (ticketsByProj[projId] || 0) + 1;
+    });
+
+    const cutoff = addDays(startOfDay(new Date()), -90);
+    const diaryByProj = {};
+    diaryRaw.forEach((d) => {
+      const when = parseMaybeDate(d.createdAt);
+      if (!when || when < cutoff) return;
+      const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
+      if (!projId) return;
+      diaryByProj[projId] = (diaryByProj[projId] || 0) + 1;
+    });
+
+    const totalTicketsActive = Object.entries(ticketsByProj)
+      .filter(([id]) => activeSet.has(id)).reduce((acc, [, v]) => acc + v, 0);
+    const totalDiariesActive = Object.entries(diaryByProj)
+      .filter(([id]) => activeSet.has(id)).reduce((acc, [, v]) => acc + v, 0);
+
+    const avgTicketsPerProject = totalTicketsActive / nActive;
+    const avgDiariesPerProject = totalDiariesActive / nActive;
+
+    // top 5
+    const topTickets = Object.entries(ticketsByProj)
+      .map(([id, cnt]) => ({ id, name: projectsMap[id]?.projectName || id, cnt }))
+      .sort((a, b) => b.cnt - a.cnt)
+      .slice(0, 5);
+
+    const topDiaries = Object.entries(diaryByProj)
+      .map(([id, cnt]) => ({ id, name: projectsMap[id]?.projectName || id, cnt }))
+      .sort((a, b) => b.cnt - a.cnt)
+      .slice(0, 5);
+
+    return {
+      nActive: activeSet.size,
+      avgTicketsPerProject,
+      avgDiariesPerProject,
+      totalTicketsActive,
+      totalDiariesActive,
+      topTickets,
+      topDiaries,
+    };
+  }, [projectsMap, tickets, diaryRaw]);
+
   const { time, date } = formatClock(now);
 
+  /* ============================ layout ============================ */
   return (
     <div className="w-full h-screen bg-zinc-950 text-white p-4 overflow-hidden">
+      {/* Header com relógio */}
       <div className="mb-3 flex items-center justify-between">
         <h1 className="text-xl font-bold">Painel Operacional</h1>
         <div className="flex items-baseline gap-3">
@@ -499,6 +604,7 @@ function TVPanel() {
         </div>
       </div>
 
+      {/* Router simples de telas */}
       {screen === 0 && (
         <ScreenDiary
           diaryItems={diaryItems}
@@ -517,12 +623,10 @@ function TVPanel() {
           escalatedCount={escalatedCount}
           slaStats={slaStats}
           slaByArea={slaByArea}
+          untreatedByArea={untreatedByArea}
           resolutionRate={resolutionRate}
           trends={trends}
-          diaryCount={diaryItems.length}
-          activeTickets={activeTickets}
           backlogAging={backlogAging}
-          untreatedByArea={untreatedByArea}
         />
       )}
       {screen === 2 && (
@@ -534,81 +638,78 @@ function TVPanel() {
           eventsMapRef={eventsMapRef}
         />
       )}
-      {screen === 3 && <ScreenProjects projectActives={projectActives} phaseCounts={phaseCounts} />}
+      {screen === 3 && (
+        <ScreenStatsProjects
+          projectActives={projectActives}
+          projectInativos={projectInativos}
+          phaseCounts={phaseCounts}
+          projectDerived={projectDerived}
+        />
+      )}
     </div>
   );
 }
 
 /* ============================ TELAS ============================ */
+
+/* ---- TELA 1 — DIÁRIOS (3×4 cards) ---- */
 function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
   return (
-    <div className="h-[calc(100%-0rem)] flex flex-col gap-3">
-      <div className="text-lg font-bold">Diários — exibindo atualizações (últimos 90 dias)</div>
+    <div className="flex flex-col h-[calc(100%-0rem)]">
+      <div className="mb-2 text-lg font-bold flex items-center">
+        <FileText className="h-5 w-5 mr-2 text-cyan-300" />
+        Diários
+        <span className="ml-2 text-xs text-white/60">(últimos 90 dias)</span>
+      </div>
+
       {diaryError && (
-        <div className="text-[12px] text-red-300 bg-red-500/10 border border-red-400/40 rounded-xl p-2">
-          Erro ao carregar o Diário ({String(diaryError)}).
+        <div className="text-[12px] text-red-300 bg-red-500/10 border border-red-400/40 rounded-xl p-2 mb-2">
+          Erro ao carregar o Diário ({String(diaryError)}). Modo compatível ativado.
         </div>
       )}
+
       <div className="grid grid-cols-3 grid-rows-4 gap-3 flex-1">
         {Array.from({ length: 12 }).map((_, idx) => {
           const d = diaryItems[idx];
-          if (!d) return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+          if (!d) {
+            return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+          }
           const when = d?.createdAt?.toDate ? d.createdAt.toDate() : null;
-          const projId = pickText(
-            d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto
-          );
+
+          const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
           const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
-          const proj =
-            pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
+          const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
+
           const evId =
             pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
             (projId ? projectsMap[projId]?.eventId : "");
           const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[evId]?.name);
           const evLocal = pickText(
-            d.eventName,
-            d.event_title,
-            d.eventTitle,
-            d?.event?.name,
-            d?.event?.nome,
-            d?.event?.feira,
-            d?.evento?.name,
-            d?.evento?.nome,
-            d?.evento?.feira
+            d.eventName, d.event_title, d.eventTitle,
+            d?.event?.name, d?.event?.nome, d?.event?.feira,
+            d?.evento?.name, d?.evento?.nome, d?.evento?.feira
           );
           const header = pickText(evLocal, evFromMap) ? `${proj} / ${pickText(evLocal, evFromMap)}` : proj;
-          const preview =
-            (d.text || "").slice(0, 280) + ((d.text || "").length > 280 ? "…" : "");
+
+          const preview = (d.text || "").slice(0, 240) + ((d.text || "").length > 240 ? "…" : "");
           const imgs = Array.isArray(d.attachments)
             ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
             : [];
           const thumb = imgs[0]?.url;
+
           return (
-            <div
-              key={d.id}
-              className="rounded-2xl border border-white/15 bg-black/25 p-0 flex flex-col overflow-hidden"
-            >
+            <div key={d.id} className="rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="text-[16px] font-semibold text-cyan-300 truncate">{header}</div>
+                <div className="text-[12px] text-white/70 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
+              </div>
+              <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
+              <div className="mt-1 text-[14px] text-white/90 line-clamp-4">{preview}</div>
               {thumb && (
-                <div className="w-full h-40 bg-black/30">
-                  <img
-                    src={thumb}
-                    alt="miniatura do diário"
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                <div className="mt-2 h-32 rounded-xl overflow-hidden bg-black/30">
+                  <img src={thumb} alt="thumb" className="w-full h-full object-cover" loading="lazy" />
                 </div>
               )}
-              <div className="p-3 flex-1 flex flex-col">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[15px] font-semibold text-cyan-300 truncate" title={header}>
-                    {header}
-                  </div>
-                  <div className="text-[12px] text-white/70 whitespace-nowrap">
-                    {when ? formatTimeAgo(when) : "—"}
-                  </div>
-                </div>
-                <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
-                <div className="mt-1 text-[14px] text-white/90 line-clamp-4">{preview}</div>
-              </div>
             </div>
           );
         })}
@@ -617,6 +718,7 @@ function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
   );
 }
 
+/* ---- TELA 2 — ESTATÍSTICAS DE CHAMADOS ---- */
 function ScreenStatsTickets({
   stats,
   awaitingValidation,
@@ -626,112 +728,149 @@ function ScreenStatsTickets({
   escalatedCount,
   slaStats,
   slaByArea,
+  untreatedByArea,
   resolutionRate,
   trends,
-  diaryCount,
-  activeTickets,
   backlogAging,
-  untreatedByArea,
 }) {
   const rateColor =
     resolutionRate >= RESOLUTION_GOAL ? "text-green-400" : resolutionRate >= 80 ? "text-amber-400" : "text-red-400";
+
   return (
-    <div className="flex flex-col gap-2 h-[calc(100%-0rem)] overflow-hidden">
-      <div className="text-lg font-bold mb-2">Estatísticas — Chamados</div>
-      <div className="grid grid-cols-6 gap-2">
-        <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-6 w-6" />} />
-        <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-6 w-6 text-orange-300" />} />
-        <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-6 w-6 text-cyan-300" />} />
-        <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-6 w-6 text-yellow-300" />} />
-        <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-6 w-6 text-indigo-300" />} />
-        <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-6 w-6 text-green-300" />} />
+    <div className="flex flex-col gap-3 h-[calc(100%-0rem)]">
+      <div className="text-lg font-bold flex items-center">
+        <Activity className="h-5 w-5 mr-2 text-cyan-300" />
+        Estatísticas — Chamados
       </div>
-      <div className="grid grid-cols-6 gap-2 mt-2">
-        <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-6 w-6 text-zinc-300" />} />
-        <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-6 w-6 text-purple-300" />} />
-        <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-6 w-6" />} />
-        <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-6 w-6" />} />
-        <div className="col-span-2 rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col justify-center">
-          <div className="text-base font-bold">Taxa de Resolução</div>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-4xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
-            <span className="text-white/70 text-sm">Meta: {RESOLUTION_GOAL}%</span>
+
+      {/* KPIs grandes */}
+      <div className="grid grid-cols-6 gap-3">
+        <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-7 w-7" />} />
+        <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-7 w-7 text-orange-300" />} />
+        <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-7 w-7 text-cyan-300" />} />
+        <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-7 w-7 text-green-300" />} />
+        <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-7 w-7 text-zinc-300" />} />
+        <div className="rounded-2xl border border-white/15 bg-black/25 p-4 flex flex-col justify-center">
+          <div className="text-lg font-bold">Taxa de Resolução</div>
+          <div className="flex items-baseline gap-3">
+            <span className={`text-6xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
+            <span className="text-white/70">Meta: {RESOLUTION_GOAL}%</span>
           </div>
-          <div className="w-full bg-black/30 rounded-full h-3 mt-1">
-            <div className={`${rateColor.replace("text-", "bg-")} h-3 rounded-full`} style={{ width: `${Math.min(100, resolutionRate)}%` }} />
+          <div className="w-full bg-black/30 rounded-full h-4 mt-2">
+            <div
+              className={`h-4 rounded-full ${rateColor.replace("text-", "bg-")}`}
+              style={{ width: `${Math.min(100, resolutionRate)}%` }}
+            />
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-2">
+
+      <div className="grid grid-cols-6 gap-3">
+        <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-7 w-7 text-yellow-300" />} />
+        <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-7 w-7 text-purple-300" />} />
+        <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-7 w-7" />} />
+        <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-7 w-7" />} />
+        <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-7 w-7 text-indigo-300" />} />
+        <div className="rounded-2xl border border-white/15 bg-black/25 p-4 text-sm text-white/70 flex items-center">
+          <Flag className="h-5 w-5 mr-2 text-red-300" />
+          Alertas críticos aparecem em tempo real nesta sessão.
+        </div>
+      </div>
+
+      {/* gráficos simples */}
+      <div className="grid grid-cols-3 gap-3 flex-1">
         <Panel title="Tendência (30 dias) — Entradas x Saídas">
-          <MiniLines opens={trends.opens} closes={trends.closes} width={480} height={110} />
+          <MiniLines opens={trends.opens} closes={trends.closes} />
         </Panel>
+
+        <Panel title="Backlog (acumulado 30 dias)">
+          <MiniArea series={trends.backlog} />
+        </Panel>
+
         <Panel title="SLA violado — Top 5 áreas">
           <ul className="space-y-1 mt-1">
             {slaByArea.map(([area, qtd]) => (
               <li key={area} className="flex items-center justify-between">
-                <span className={`text-sm ${areaHue(area)} truncate pr-2`}>{area}</span>
-                <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
+                <span className={`text-base ${areaHue(area)} truncate pr-2`}>{area}</span>
+                <span className="text-xl font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
               </li>
             ))}
             {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
           </ul>
         </Panel>
-        <Panel title="Foco por área / Idade do backlog">
-          <div className="grid grid-cols-3 gap-2 mb-2">
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <Panel title="Foco de atenção (abertos por área)">
+          <div className="grid grid-cols-3 gap-2">
             {Object.entries(untreatedByArea)
               .sort(([, a], [, b]) => b - a)
-              .slice(0, 3)
+              .slice(0, 6)
               .map(([area, count]) => (
-                <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-2 flex justify-between">
-                  <span className={`font-medium ${areaHue(area)} truncate pr-2 text-sm`}>{area}</span>
-                  <span className="font-bold text-base text-black bg-yellow-400 rounded-md px-2">{count}</span>
+                <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-3 flex justify-between">
+                  <span className={`font-medium ${areaHue(area)} truncate pr-2`}>{area}</span>
+                  <span className="font-bold text-lg text-black bg-yellow-400 rounded-md px-2">{count}</span>
                 </div>
               ))}
           </div>
+        </Panel>
+
+        <Panel title="Idade do backlog">
           <div className="grid grid-cols-4 gap-2">
             {Object.entries(backlogAging).map(([k, v]) => (
-              <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-2 text-center">
-                <div className="text-xs text-white/70">{k}</div>
-                <div className="text-2xl font-bold">{v}</div>
+              <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-3 text-center">
+                <div className="text-sm text-white/70">{k}</div>
+                <div className="text-3xl font-bold">{v}</div>
               </div>
             ))}
           </div>
+        </Panel>
+
+        <Panel title="Notas">
+          <p className="text-white/70 text-sm">
+            Estatísticas de chamados exibidas com base nos dados mais recentes.
+          </p>
         </Panel>
       </div>
     </div>
   );
 }
 
+/* ---- TELA 3 — CHAMADOS (4×5 cards) ---- */
 function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMapRef, eventsMapRef }) {
   return (
-    <div className="h-[calc(100%-0rem)] flex flex-col gap-3">
-      <div className="text-lg font-bold">Chamados — últimas atualizações</div>
+    <div className="flex flex-col h-[calc(100%-0rem)]">
+      <div className="mb-2 text-lg font-bold flex items-center">
+        <Activity className="h-5 w-5 mr-2 text-cyan-300" />
+        Chamados — últimas atualizações
+      </div>
+
       <div className="grid grid-cols-4 grid-rows-5 gap-3 flex-1">
         {Array.from({ length: 20 }).map((_, idx) => {
           const t = ticketsFeed[idx];
           if (!t) return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
 
           const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
-          const emailCandidates = [t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail].filter(Boolean);
+          const emailCandidates = [
+            t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail
+          ].filter(Boolean);
+
           const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-          const openedByFromEmail = emailCandidates.map((e) => (e || "").toLowerCase()).map((e) => usersByEmailRef.current[e]?.nome).find(isText);
+          const openedByFromEmail = emailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmailRef.current[e]?.nome)
+            .find(isText);
           const openedBy = obfuscate(
-            pickText(
-              openedByFromId,
-              openedByFromEmail,
-              t.openedByName,
-              t.criadoPorNome,
-              t.aberto_por_nome,
-              t.solicitanteNome,
-              t?.solicitante?.nome
-            )
+            pickText(openedByFromId, openedByFromEmail, t.openedByName, t.criadoPorNome, t.aberto_por_nome, t.solicitanteNome, t?.solicitante?.nome)
           );
 
           const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
           const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
           const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-          const responsavelFromEmail = respEmailCandidates.map((e) => (e || "").toLowerCase()).map((e) => usersByEmailRef.current[e]?.nome).find(isText);
+          const responsavelFromEmail = respEmailCandidates
+            .map((e) => (e || "").toLowerCase())
+            .map((e) => usersByEmailRef.current[e]?.nome)
+            .find(isText);
           const responsavel = obfuscate(
             pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome)
           );
@@ -748,20 +887,15 @@ function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMap
             eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
           );
           const evLabelFromDoc = pickText(
-            t.eventName,
-            t.event_title,
-            t.eventTitle,
-            t?.event?.name,
-            t?.event?.nome,
-            t?.event?.feira,
-            t?.evento?.name,
-            t?.evento?.nome,
-            t?.evento?.feira
+            t.eventName, t.event_title, t.eventTitle,
+            t?.event?.name, t?.event?.nome, t?.event?.feira,
+            t?.evento?.name, t?.evento?.nome, t?.evento?.feira
           );
           const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
 
           const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
-          const when = t?.updatedAt?.toDate ? t.updatedAt.toDate() : t?.createdAt?.toDate ? t.createdAt.toDate() : null;
+          const when = t?.updatedAt?.toDate ? t.updatedAt.toDate()
+            : t?.createdAt?.toDate ? t.createdAt.toDate() : null;
 
           return (
             <div key={t.id} className={`rounded-2xl border border-white/15 bg-black/25 p-3 ${statusColor(t.status)}`}>
@@ -797,46 +931,100 @@ function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMap
   );
 }
 
-function ScreenProjects({ projectActives, phaseCounts }) {
+/* ---- TELA 4 — ESTATÍSTICAS DE PROJETOS ---- */
+function ScreenStatsProjects({ projectActives, projectInativos, phaseCounts, projectDerived }) {
   return (
-    <div className="h-[calc(100%-0rem)] flex flex-col gap-2 overflow-hidden">
-      <div className="text-lg font-bold">Estatísticas — Projetos</div>
-      <div className="grid grid-cols-6 gap-2">
-        <BigKpi title="Projetos ativos" value={projectActives} icon={<FolderOpen className="h-6 w-6" />} />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
+    <div className="flex flex-col gap-3 h-[calc(100%-0rem)]">
+      <div className="text-lg font-bold flex items-center">
+        <FolderOpen className="h-5 w-5 mr-2 text-cyan-300" />
+        Estatísticas — Projetos
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-2">
-        <Panel title="Projetos — resumo por fase">
-          <div className="grid grid-cols-4 gap-2">
-            <PhaseStat title="Futuro" value={phaseCounts.futuro} />
-            <PhaseStat title="Andamento" value={phaseCounts.andamento} />
-            <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
-            <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
+
+      <div className="grid grid-cols-6 gap-3">
+        <BigKpi title="Ativos" value={projectActives} icon={<FolderOpen className="h-7 w-7" />} />
+        <BigKpi title="Inativos" value={projectInativos} icon={<FolderOpen className="h-7 w-7 text-zinc-300" />} />
+        <BigKpi title="Futuros" value={phaseCounts.futuro} icon={<Calendar className="h-7 w-7" />} />
+        <BigKpi title="Em andamento" value={phaseCounts.andamento} icon={<Activity className="h-7 w-7 text-cyan-300" />} />
+        <BigKpi title="Desmontagem" value={phaseCounts.desmontagem} icon={<Target className="h-7 w-7 text-yellow-300" />} />
+        <BigKpi title="Finalizados" value={phaseCounts.finalizado} icon={<Award className="h-7 w-7 text-emerald-300" />} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <Panel title="Abertura de chamados por projeto (média em projetos ativos)">
+          <div className="text-5xl font-extrabold">{projectDerived.avgTicketsPerProject.toFixed(2)}</div>
+          <div className="text-sm text-white/70 mt-1">
+            Total em ativos: {projectDerived.totalTicketsActive} · Projetos ativos: {projectDerived.nActive}
           </div>
         </Panel>
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
-        <div className="rounded-2xl border border-white/15 bg-black/10" />
+
+        <Panel title="Diários por projeto (média em projetos ativos)">
+          <div className="text-5xl font-extrabold">{projectDerived.avgDiariesPerProject.toFixed(2)}</div>
+          <div className="text-sm text-white/70 mt-1">
+            Total em ativos (últ. 90d): {projectDerived.totalDiariesActive} · Projetos ativos: {projectDerived.nActive}
+          </div>
+        </Panel>
+
+        <Panel title="Notas">
+          <p className="text-sm text-white/70">
+            Métricas calculadas considerando projetos ativos. Diários considerados nos últimos 90 dias.
+          </p>
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 flex-1">
+        <Panel title="Top 5 projetos por chamados">
+          <ul className="space-y-1 mt-1">
+            {projectDerived.topTickets.map((p) => (
+              <li key={p.id} className="flex items-center justify-between">
+                <span className="text-base truncate pr-2">{p.name}</span>
+                <span className="text-xl font-bold bg-cyan-400/80 text-black rounded px-2">{p.cnt}</span>
+              </li>
+            ))}
+            {projectDerived.topTickets.length === 0 && <li className="text-sm text-white/60">Sem dados</li>}
+          </ul>
+        </Panel>
+
+        <Panel title="Top 5 projetos por diários (90d)">
+          <ul className="space-y-1 mt-1">
+            {projectDerived.topDiaries.map((p) => (
+              <li key={p.id} className="flex items-center justify-between">
+                <span className="text-base truncate pr-2">{p.name}</span>
+                <span className="text-xl font-bold bg-emerald-400/80 text-black rounded px-2">{p.cnt}</span>
+              </li>
+            ))}
+            {projectDerived.topDiaries.length === 0 && <li className="text-sm text-white/60">Sem dados</li>}
+          </ul>
+        </Panel>
       </div>
     </div>
   );
 }
 
-/* ============================ auxiliares ============================ */
-function BigKpi({ title, value, icon }) {
+/* ============================ componentes auxiliares ============================ */
+function Kpi({ title, value, icon }) {
   return (
-    <div className="rounded-2xl border border-white/15 bg-black/25 p-3">
-      <div className="flex items-center justify-between">
-        <div className="text-base font-bold">{title}</div>
+    <div className="bg-black/20 border border-white/20 rounded-xl p-2 flex flex-col justify-center">
+      <div className="flex justify-between items-center mb-1">
+        <h3 className="text-md font-bold">{title}</h3>
         {icon}
       </div>
-      <div className="text-5xl font-extrabold mt-0.5">{value}</div>
+      <div className="text-4xl font-bold">{value}</div>
     </div>
   );
 }
+
+function BigKpi({ title, value, icon }) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-black/25 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-lg font-bold">{title}</div>
+        {icon}
+      </div>
+      <div className="text-6xl font-extrabold mt-1">{value}</div>
+    </div>
+  );
+}
+
 function PhaseStat({ title, value }) {
   return (
     <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex items-center justify-between">
@@ -845,6 +1033,7 @@ function PhaseStat({ title, value }) {
     </div>
   );
 }
+
 function StatusBadge({ status }) {
   const s = norm(status);
   const cfg = {
@@ -859,18 +1048,19 @@ function StatusBadge({ status }) {
   const c = cfg[s] || { label: s || "—", cls: "bg-zinc-600/20 text-zinc-200 border-zinc-500/40" };
   return <span className={`text-[11px] px-2 py-0.5 rounded border ${c.cls}`}>{c.label}</span>;
 }
+
 function Panel({ title, children }) {
   return (
-    <div className="rounded-2xl border border-white/15 bg-black/25 p-3">
-      <div className="text-base font-bold mb-1">{title}</div>
+    <div className="rounded-2xl border border-white/15 bg-black/25 p-4">
+      <div className="text-lg font-bold mb-1">{title}</div>
       {children}
     </div>
   );
 }
 
 /* Mini gráficos SVG sem dependências */
-function MiniLines({ opens, closes, width = 520, height = 140, padding = 10 }) {
-  const w = width, h = height, p = padding;
+function MiniLines({ opens, closes }) {
+  const w = 520, h = 140, p = 10;
   const max = Math.max(1, ...opens, ...closes);
   const toXY = (arr, idx) => {
     const x = p + (idx * (w - 2 * p)) / (arr.length - 1 || 1);
@@ -886,8 +1076,8 @@ function MiniLines({ opens, closes, width = 520, height = 140, padding = 10 }) {
     </svg>
   );
 }
-function MiniArea({ series, width = 520, height = 140, padding = 10 }) {
-  const w = width, h = height, p = padding;
+function MiniArea({ series }) {
+  const w = 520, h = 140, p = 10;
   const max = Math.max(1, ...series);
   const points = series.map((v, i) => {
     const x = p + (i * (w - 2 * p)) / (series.length - 1 || 1);
