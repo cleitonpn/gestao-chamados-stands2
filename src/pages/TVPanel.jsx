@@ -45,6 +45,11 @@ const parseMaybeDate = (v) => {
   return null;
 };
 
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const fmtDayKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 const formatTimeAgo = (d) => {
   if (!d) return "";
   const date = d instanceof Date ? d : d?.toDate?.() ?? null;
@@ -94,6 +99,8 @@ const isArchived = (st) => {
   return s.includes("arquiv") || s.includes("archiv");
 };
 
+const RESOLUTION_GOAL = 90; // meta 90%
+
 // Detecta WebViews de TV/TV Box com limitações
 const isTvLike = (() => {
   if (typeof navigator === "undefined") return false;
@@ -101,9 +108,46 @@ const isTvLike = (() => {
   return /Tizen|Web0S|SmartTV|Android\s?TV|; wv;|AFT|MiBOX|HBBTV|DTV/i.test(ua);
 })();
 
+// Paleta por área
+const areaHue = (area) => {
+  const a = norm(area);
+  if (a.includes("logist")) return "text-teal-300";
+  if (a.includes("compra")) return "text-amber-300";
+  if (a.includes("finance")) return "text-rose-300";
+  if (a.includes("detalh")) return "text-violet-300";
+  if (a.includes("projet")) return "text-cyan-300";
+  if (a.includes("operac")) return "text-sky-300";
+  if (a.includes("comunicacao") || a.includes("visual")) return "text-emerald-300";
+  return "text-white/80";
+};
+
+// Nome → “Nome S.”
+const obfuscate = (nameOrEmail) => {
+  const raw = (nameOrEmail || "").toString().trim();
+  if (!raw) return "—";
+  if (raw.includes("@")) {
+    const base = raw.split("@")[0].replace(/[._]/g, " ");
+    const parts = base.split(/\s+/).filter(Boolean);
+    const first = parts[0] ? parts[0][0].toUpperCase() + parts[0].slice(1) : "Usuário";
+    const last = parts[1] ? parts[1][0].toUpperCase() + "." : "";
+    return `${first} ${last}`.trim();
+  }
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
+};
+
 /* ============================ componente ============================ */
 function TVPanel() {
-  // KPIs (Chamados)
+  /* -------- estados de dados brutos -------- */
+  const [tickets, setTickets] = useState([]);
+  const [diaryRaw, setDiaryRaw] = useState([]);
+  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventId?, eventName?, status}
+  const [eventsMap, setEventsMap] = useState({}); // id -> {name}
+  const [usersById, setUsersById] = useState({});
+  const [usersByEmail, setUsersByEmail] = useState({});
+
+  /* -------- derivados -------- */
   const [stats, setStats] = useState({ total: 0, abertos: 0, emAndamento: 0, concluidos: 0, arquivados: 0 });
   const [awaitingValidation, setAwaitingValidation] = useState(0);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
@@ -111,43 +155,30 @@ function TVPanel() {
   const [openedThisMonth, setOpenedThisMonth] = useState(0);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [untreatedByArea, setUntreatedByArea] = useState({});
-
-  // SLA
   const [slaStats, setSlaStats] = useState({ violated: 0, risk: 0 });
   const [slaViolationsList, setSlaViolationsList] = useState([]);
-  const [slaView, setSlaView] = useState("summary");
-
-  // Projetos / Eventos
-  const [projectStats, setProjectStats] = useState({ ativos: 0 });
-  const [projectsMap, setProjectsMap] = useState({}); // id -> {projectName, eventId?, eventName?}
-  const [eventsMap, setEventsMap] = useState({}); // id -> {name}
   const [phaseCounts, setPhaseCounts] = useState({ futuro: 0, andamento: 0, desmontagem: 0, finalizado: 0 });
+  const [projectActives, setProjectActives] = useState(0);
 
-  // Users map por ID e por email
-  const [usersById, setUsersById] = useState({});
-  const [usersByEmail, setUsersByEmail] = useState({});
-
-  // Diário e Feed
-  const [diaryFeed, setDiaryFeed] = useState([]);
-  const [activityFeed, setActivityFeed] = useState([]);
   const [diaryError, setDiaryError] = useState(null);
 
-  // Refs para usar sempre os dados mais recentes dentro dos listeners
+  // Refs para listeners
   const usersByIdRef = useRef({});
   const usersByEmailRef = useRef({});
   const projectsMapRef = useRef({});
   const eventsMapRef = useRef({});
-
   useEffect(() => { usersByIdRef.current = usersById; }, [usersById]);
   useEffect(() => { usersByEmailRef.current = usersByEmail; }, [usersByEmail]);
   useEffect(() => { projectsMapRef.current = projectsMap; }, [projectsMap]);
   useEffect(() => { eventsMapRef.current = eventsMap; }, [eventsMap]);
 
-  // Relógio
+  // Relógio + rotação (1→2→3 a cada 45s)
   const [now, setNow] = useState(new Date());
+  const [screen, setScreen] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
+    const id1 = setInterval(() => setNow(new Date()), 1000);
+    const id2 = setInterval(() => setScreen((s) => (s + 1) % 3), 45000);
+    return () => { clearInterval(id1); clearInterval(id2); };
   }, []);
 
   /* ===== Som para novos chamados "aberto" ===== */
@@ -190,7 +221,7 @@ function TVPanel() {
       setUsersByEmail(byEmail);
     });
 
-    // Eventos (id -> nome)
+    // Eventos
     const unsubEvents = onSnapshot(collection(db, "eventos"), (snap) => {
       const map = {};
       snap.forEach((d) => {
@@ -201,7 +232,7 @@ function TVPanel() {
       setEventsMap(map);
     });
 
-    // Projetos
+    // Projetos (status + nomes)
     const unsubProjects = onSnapshot(collection(db, "projetos"), (snap) => {
       let ativos = 0;
       const projMap = {};
@@ -217,29 +248,22 @@ function TVPanel() {
 
         const eventId = pickText(data.eventId, data.event_id, data?.evento?.eventoId, data?.event?.eventoId, data?.eventoId);
         const evLocalName = pickText(
-          data.eventName,
-          data.event_title,
-          data.eventTitle,
-          data.evento,
-          data.event,
-          data?.event?.name,
-          data?.event?.nome,
-          data?.event?.feira,
-          data?.evento?.name,
-          data?.evento?.nome,
-          data?.evento?.feira
+          data.eventName, data.event_title, data.eventTitle, data.evento, data.event,
+          data?.event?.name, data?.event?.nome, data?.event?.feira,
+          data?.evento?.name, data?.evento?.nome, data?.evento?.feira
         );
         const fallbackEv = eventId && eventsMapRef.current[eventId]?.name;
         const eventName = evLocalName || fallbackEv || "";
-        projMap[d.id] = { projectName, eventId, eventName };
 
-        // fase
+        projMap[d.id] = { projectName, eventId, eventName, status: status || "" };
+
+        // fase (para card de projetos)
         const mStart = parseMaybeDate(data?.montagem?.dataInicio || data?.dataInicioMontagem);
-        const mEnd = parseMaybeDate(data?.montagem?.dataFim || data?.dataFimMontagem);
-        const eStart = parseMaybeDate(data?.evento?.dataInicio || data?.dataInicioEvento);
-        const eEnd = parseMaybeDate(data?.evento?.dataFim || data?.dataFimEvento);
+        const mEnd   = parseMaybeDate(data?.montagem?.dataFim    || data?.dataFimMontagem);
+        const eStart = parseMaybeDate(data?.evento?.dataInicio    || data?.dataInicioEvento);
+        const eEnd   = parseMaybeDate(data?.evento?.dataFim       || data?.dataFimEvento);
         const dStart = parseMaybeDate(data?.desmontagem?.dataInicio || data?.dataInicioDesmontagem);
-        const dEnd = parseMaybeDate(data?.desmontagem?.dataFim || data?.dataFimDesmontagem);
+        const dEnd   = parseMaybeDate(data?.desmontagem?.dataFim     || data?.dataFimDesmontagem);
 
         let fase = "futuro";
         if (dEnd && now > dEnd) {
@@ -260,44 +284,42 @@ function TVPanel() {
         counts[fase] += 1;
       });
 
-      setProjectStats({ ativos });
+      setProjectActives(ativos);
       setProjectsMap(projMap);
       setPhaseCounts(counts);
     });
 
-    // Chamados
+    // Chamados (ordenados por createdAt desc para KPIs; usaremos updatedAt para feed)
     const unsubTickets = onSnapshot(
       query(collection(db, "chamados"), orderBy("createdAt", "desc")),
       (snap) => {
         const now = new Date();
-        const tickets = [];
-        snap.forEach((d) => tickets.push({ id: d.id, ...(d.data() || {}) }));
+        const list = [];
+        snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
+        setTickets(list);
 
-        const total = tickets.length;
-        const abertos = tickets.filter((t) => norm(t.status) === "aberto").length;
-        const emAndamento = tickets.filter((t) => norm(t.status) === "em_tratativa").length;
-        const concluidos = tickets.filter((t) => norm(t.status) === "concluido").length;
-        const arquivados = tickets.filter((t) => isArchived(t.status)).length;
+        const total = list.length;
+        const abertos = list.filter((t) => norm(t.status) === "aberto").length;
+        const emAndamento = list.filter((t) => norm(t.status) === "em_tratativa").length;
+        const concluidos = list.filter((t) => norm(t.status) === "concluido").length;
+        const arquivados = list.filter((t) => isArchived(t.status)).length;
         setStats({ total, abertos, emAndamento, concluidos, arquivados });
 
         setAwaitingValidation(
-          tickets.filter((t) =>
+          list.filter((t) =>
             ["executado_aguardando_validacao", "executado_aguardando_validacao_operador"].includes(norm(t.status))
           ).length
         );
+        setPendingApprovalCount(list.filter((t) => norm(t.status) === "aguardando_aprovacao").length);
+        setEscalatedCount(list.filter((t) => norm(t.status) === "escalado_para_outra_area").length);
 
-        setPendingApprovalCount(tickets.filter((t) => norm(t.status) === "aguardando_aprovacao").length);
-        setEscalatedCount(tickets.filter((t) => norm(t.status) === "escalado_para_outra_area").length);
-
-        const startDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startDay = startOfDay(now);
         const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        setOpenedToday(tickets.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startDay).length);
-        setOpenedThisMonth(
-          tickets.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startMonth).length
-        );
+        setOpenedToday(list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startDay).length);
+        setOpenedThisMonth(list.filter((t) => (t?.createdAt?.toDate ? t.createdAt.toDate() : null) >= startMonth).length);
 
-        // Foco de atenção (abertos por área)
-        const openTickets = tickets.filter((t) => norm(t.status) === "aberto");
+        // foco de atenção: abertos por área
+        const openTickets = list.filter((t) => norm(t.status) === "aberto");
         const byArea = openTickets.reduce((acc, t) => {
           const a = t?.area_atual || t?.area || t?.areaAtual || "Não definida";
           acc[a] = (acc[a] || 0) + 1;
@@ -306,10 +328,9 @@ function TVPanel() {
         setUntreatedByArea(byArea);
 
         // SLA
-        let violated = 0,
-          risk = 0;
+        let violated = 0, risk = 0;
         const violatedList = [];
-        tickets
+        list
           .filter((t) => !["concluido", "cancelado"].includes(norm(t.status)) && !isArchived(t.status))
           .forEach((t) => {
             const prio = SLA_HOURS[norm(t.prioridade)];
@@ -317,8 +338,7 @@ function TVPanel() {
             if (!prio || !created) return;
             const elapsed = (now - created) / (1000 * 60 * 60);
             if (elapsed > prio) {
-              violated += 1;
-              violatedList.push(t);
+              violated += 1; violatedList.push(t);
             } else if (elapsed > prio * 0.75) {
               risk += 1;
             }
@@ -326,95 +346,8 @@ function TVPanel() {
         setSlaStats({ violated, risk });
         setSlaViolationsList(violatedList);
 
-        // Feed de chamados (sem scroll) — usando maps via refs
-        const FEED_LIMIT = 10;
-        const latest = tickets.slice(0, FEED_LIMIT).map((t) => {
-          // Quem abriu
-          const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
-          const emailCandidates = [
-            t.openedByEmail,
-            t.createdByEmail,
-            t.criadoPorEmail,
-            t.abertoPorEmail,
-            t.aberto_por_email,
-            t.solicitanteEmail,
-            t.emailCriador,
-            t.userEmail,
-          ].filter(Boolean);
-          const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-          const openedByFromEmail = emailCandidates
-            .map((e) => (e || "").toLowerCase())
-            .map((e) => usersByEmailRef.current[e]?.nome)
-            .find(isText);
-          const openedBy =
-            pickText(
-              openedByFromId,
-              openedByFromEmail,
-              t.openedByName,
-              t.criadoPorNome,
-              t.aberto_por_nome,
-              t.solicitanteNome,
-              t?.solicitante?.nome
-            ) || "—";
-
-          // Responsável
-          const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
-          const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
-          const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
-          const responsavelFromEmail = respEmailCandidates
-            .map((e) => (e || "").toLowerCase())
-            .map((e) => usersByEmailRef.current[e]?.nome)
-            .find(isText);
-          const responsavel =
-            pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome) ||
-            "—";
-
-          // Projeto / Evento
-          const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
-          const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
-          const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
-          const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
-
-          const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
-          const evFromMapByProj = projId ? projectsMapRef.current[projId]?.eventName : undefined;
-          const evFromEvents = pickText(
-            eventsMapRef.current[eventIdFromTicket]?.name,
-            eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
-          );
-          const evLabelFromDoc = pickText(
-            t.eventName,
-            t.event_title,
-            t.eventTitle,
-            t.evento,
-            t.event,
-            t?.event?.name,
-            t?.event?.nome,
-            t?.event?.feira,
-            t?.evento?.name,
-            t?.evento?.nome,
-            t?.evento?.feira
-          );
-          const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
-
-          const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
-          const when = t?.createdAt?.toDate ? t.createdAt.toDate() : null;
-
-          return {
-            id: t.id,
-            titulo: t.titulo || t.title || "(sem título)",
-            status: norm(t.status),
-            openedBy,
-            responsavel,
-            areaAtual,
-            openedAt: when,
-            projectLabel,
-            eventLabel,
-          };
-        });
-        setActivityFeed(latest);
-
         // Som para novos "aberto"
-        const onlyOpens = tickets.filter((t) => norm(t.status) === "aberto");
+        const onlyOpens = list.filter((t) => norm(t.status) === "aberto");
         if (!initializedOpens.current) {
           onlyOpens.forEach((t) => seenOpenIds.current.add(t.id));
           initializedOpens.current = true;
@@ -426,17 +359,17 @@ function TVPanel() {
       }
     );
 
-    // Diário (TV usa polling direto do servidor; desktop usa tempo real)
+    // Diário (TV: polling; desktop: realtime). Buscar mais do que 20 para filtrar 90d + finalizados.
     let unsubDiaries = () => {};
     if (isTvLike) {
       const fetchDiary = async () => {
         try {
           const snap = await getDocsFromServer(
-            query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10))
+            query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(60))
           );
-          const list = [];
-          snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
-          setDiaryFeed(list);
+          const rows = [];
+          snap.forEach((d) => rows.push({ id: d.id, ...(d.data() || {}) }));
+          setDiaryRaw(rows);
           setDiaryError(null);
         } catch (e) {
           console.error("[diary_feed] polling TV falhou", e);
@@ -444,31 +377,20 @@ function TVPanel() {
         }
       };
       fetchDiary();
-      const id = setInterval(fetchDiary, 30000); // 30s
+      const id = setInterval(fetchDiary, 30000);
       unsubDiaries = () => clearInterval(id);
     } else {
-      // Navegadores normais: tempo real
       unsubDiaries = onSnapshot(
-        query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10)),
+        query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(60)),
         (snap) => {
-          const list = [];
-          snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
-          setDiaryFeed(list);
+          const rows = [];
+          snap.forEach((d) => rows.push({ id: d.id, ...(d.data() || {}) }));
+          setDiaryRaw(rows);
           setDiaryError(null);
         },
         async (err) => {
           console.error("[diary_feed] onSnapshot error", err);
           setDiaryError(err?.code || err?.message || "erro");
-          try {
-            const snap = await getDocsFromServer(
-              query(collection(db, "diary_feed"), orderBy("createdAt", "desc"), limit(10))
-            );
-            const list = [];
-            snap.forEach((d) => list.push({ id: d.id, ...(d.data() || {}) }));
-            if (list.length) setDiaryFeed(list);
-          } catch (e) {
-            console.error("[diary_feed] fallback getDocsFromServer falhou", e);
-          }
         }
       );
     }
@@ -479,20 +401,66 @@ function TVPanel() {
       unsubProjects();
       unsubTickets();
       unsubDiaries();
-      try {
-        audioCtx.current && audioCtx.current.close();
-      } catch {}
+      try { audioCtx.current && audioCtx.current.close(); } catch {}
     };
-    // ⬇️ MUITO IMPORTANTE: não dependa de states aqui (evita re-assinar em loop)
   }, []);
 
-  // Rotação do card de SLA a cada 10s
-  useEffect(() => {
-    const id = setInterval(() => setSlaView((v) => (v === "summary" ? "areas" : "summary")), 10000);
-    return () => clearInterval(id);
-  }, []);
+  /* ============================ DERIVAÇÕES PARA TELAS ============================ */
 
-  const RESOLUTION_GOAL = 95;
+  // Projetos finalizados (para filtro)
+  const projectIsFinalizado = (projId) => {
+    if (!projId) return false;
+    const st = projectsMapRef.current[projId]?.status || "";
+    return norm(st) === "finalizado" || norm(st) === "arquivado";
+  };
+
+  // Diário (últimos 90 dias, 20 cards, exclui projetos finalizados)
+  const diaryItems = useMemo(() => {
+    const cutoff = addDays(startOfDay(new Date()), -90);
+    const out = [];
+    for (const d of diaryRaw) {
+      const when = parseMaybeDate(d.createdAt);
+      if (!when || when < cutoff) continue;
+      const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
+      if (projId && projectIsFinalizado(projId)) continue;
+      out.push(d);
+      if (out.length >= 20) break;
+    }
+    return out;
+  }, [diaryRaw, projectsMap]);
+
+  // Feed de chamados (últimas 20 *atualizações*) com estados permitidos; exclui projetos finalizados
+  const ticketsFeed = useMemo(() => {
+    const allowed = new Set([
+      "aberto",
+      "em_tratativa",
+      "executado_aguardando_validacao",
+      "executado_aguardando_validacao_operador",
+    ]);
+
+    const getUpdatedAt = (t) =>
+      parseMaybeDate(
+        t.updatedAt ||
+          t.resolvedAt ||
+          t.concludedAt ||
+          t.closedAt ||
+          (["concluido"].includes(norm(t.status)) ? t.updatedAt : null) ||
+          t.createdAt
+      ) || new Date(0);
+
+    const sorted = [...tickets].sort((a, b) => getUpdatedAt(b) - getUpdatedAt(a));
+    const out = [];
+    for (const t of sorted) {
+      if (!allowed.has(norm(t.status))) continue;
+      const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
+      if (projId && projectIsFinalizado(projId)) continue;
+      out.push(t);
+      if (out.length >= 20) break;
+    }
+    return out;
+  }, [tickets, projectsMap]);
+
+  // KPIs e métricas p/ Tela 2
   const resolutionRate = useMemo(() => {
     const { total, concluidos, arquivados } = stats;
     return total ? ((concluidos + arquivados) / total) * 100 : 0;
@@ -506,6 +474,60 @@ function TVPanel() {
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
   }, [slaViolationsList]);
+
+  // Tendência 30d (abertos vs resolvidos)
+  const trends = useMemo(() => {
+    const today = startOfDay(new Date());
+    const days = Array.from({ length: 30 }, (_, i) => addDays(today, -(29 - i)));
+    const openMap = Object.fromEntries(days.map((d) => [fmtDayKey(d), 0]));
+    const closeMap = Object.fromEntries(days.map((d) => [fmtDayKey(d), 0]));
+
+    tickets.forEach((t) => {
+      const c = parseMaybeDate(t.createdAt);
+      if (c) {
+        const k = fmtDayKey(startOfDay(c));
+        if (k in openMap) openMap[k] += 1;
+      }
+      const r =
+        parseMaybeDate(t.resolvedAt) ||
+        parseMaybeDate(t.concludedAt) ||
+        parseMaybeDate(t.closedAt) ||
+        (norm(t.status) === "concluido" ? parseMaybeDate(t.updatedAt) : null);
+      if (r) {
+        const k2 = fmtDayKey(startOfDay(r));
+        if (k2 in closeMap) closeMap[k2] += 1;
+      }
+    });
+
+    const labels = days.map(fmtDayKey);
+    const opens = labels.map((k) => openMap[k] || 0);
+    const closes = labels.map((k) => closeMap[k] || 0);
+    const backlog = [];
+    let acc = 0;
+    for (let i = 0; i < labels.length; i++) {
+      acc += opens[i] - closes[i];
+      backlog.push(Math.max(0, acc));
+    }
+    return { labels, opens, closes, backlog };
+  }, [tickets]);
+
+  // Idade do backlog (abertos + em tratativa)
+  const backlogAging = useMemo(() => {
+    const now = new Date();
+    const bucket = { "≤24h": 0, "1–3d": 0, "3–7d": 0, ">7d": 0 };
+    tickets
+      .filter((t) => ["aberto", "em_tratativa"].includes(norm(t.status)))
+      .forEach((t) => {
+        const c = parseMaybeDate(t.createdAt);
+        if (!c) return;
+        const days = (now - c) / (1000 * 60 * 60 * 24);
+        if (days <= 1) bucket["≤24h"]++;
+        else if (days <= 3) bucket["1–3d"]++;
+        else if (days <= 7) bucket["3–7d"]++;
+        else bucket[">7d"]++;
+      });
+    return bucket;
+  }, [tickets]);
 
   const { time, date } = formatClock(now);
 
@@ -522,259 +544,310 @@ function TVPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-3 h-[calc(100%-2.5rem)]">
-        {/* ESQUERDA – DIÁRIO */}
-        <aside className="col-span-3 bg-black/20 border border-white/15 rounded-2xl p-3 flex flex-col overflow-hidden">
-          <div className="sticky top-0 z-10 bg-transparent/40 backdrop-blur-sm -m-3 mb-2 p-3 rounded-t-2xl flex items-center justify-between">
-            <h3 className="text-lg font-bold flex items-center">
-              <FileText className="h-5 w-5 mr-2 text-cyan-300" />
-              Diário de Projetos
-            </h3>
-            <span className="text-xs text-white/60">10 recentes</span>
-          </div>
-          <div className="grid grid-cols-1 gap-2">
-            {diaryError && (
-              <div className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2">
-                Erro ao carregar o Diário ({String(diaryError)}). Ativei modo compatível para TV.
+      {/* Router simples de telas */}
+      {screen === 0 && (
+        <ScreenDiary
+          diaryItems={diaryItems}
+          projectsMap={projectsMap}
+          eventsMap={eventsMap}
+          diaryError={diaryError}
+        />
+      )}
+      {screen === 1 && (
+        <ScreenStats
+          stats={stats}
+          awaitingValidation={awaitingValidation}
+          pendingApprovalCount={pendingApprovalCount}
+          openedToday={openedToday}
+          openedThisMonth={openedThisMonth}
+          escalatedCount={escalatedCount}
+          projectActives={projectActives}
+          slaStats={slaStats}
+          slaByArea={slaByArea}
+          untreatedByArea={untreatedByArea}
+          resolutionRate={resolutionRate}
+          phaseCounts={phaseCounts}
+          trends={trends}
+          backlogAging={backlogAging}
+        />
+      )}
+      {screen === 2 && (
+        <ScreenTickets
+          ticketsFeed={ticketsFeed}
+          usersByIdRef={usersByIdRef}
+          usersByEmailRef={usersByEmailRef}
+          projectsMapRef={projectsMapRef}
+          eventsMapRef={eventsMapRef}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================ TELAS ============================ */
+
+// TELA 1 — DIÁRIO (4×5 cards)
+function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
+  return (
+    <div className="grid grid-cols-4 grid-rows-5 gap-3 h-[calc(100%-0rem)]">
+      {/* título lateral opcional já está no header; aqui só os cards */}
+      {diaryError && (
+        <div className="col-span-4 text-[12px] text-red-300 bg-red-500/10 border border-red-400/40 rounded-xl p-2">
+          Erro ao carregar o Diário ({String(diaryError)}). Modo compatível ativado.
+        </div>
+      )}
+      {Array.from({ length: 20 }).map((_, idx) => {
+        const d = diaryItems[idx];
+        if (!d) {
+          return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+        }
+        const when = d?.createdAt?.toDate ? d.createdAt.toDate() : null;
+
+        const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
+        const projFromMap = projId ? projectsMap[projId]?.projectName : undefined;
+        const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
+
+        const evId =
+          pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
+          (projId ? projectsMap[projId]?.eventId : "");
+        const evFromMap = pickText(projectsMap[projId]?.eventName, eventsMap[evId]?.name);
+        const evLocal = pickText(
+          d.eventName, d.event_title, d.eventTitle,
+          d?.event?.name, d?.event?.nome, d?.event?.feira,
+          d?.evento?.name, d?.evento?.nome, d?.evento?.feira
+        );
+        const header = pickText(evLocal, evFromMap) ? `${proj} / ${pickText(evLocal, evFromMap)}` : proj;
+
+        const preview = (d.text || "").slice(0, 200) + ((d.text || "").length > 200 ? "…" : "");
+        const imgs = Array.isArray(d.attachments)
+          ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
+          : [];
+        const thumb = imgs[0]?.url;
+
+        return (
+          <div key={d.id} className="rounded-2xl border border-white/15 bg-black/25 p-3 flex flex-col">
+            <div className="flex items-center justify-between">
+              <div className="text-[15px] font-semibold text-cyan-300 truncate">{header}</div>
+              <div className="text-[12px] text-white/70 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
+            </div>
+            <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
+            <div className="mt-1 text-[14px] text-white/90 line-clamp-3">{preview}</div>
+            {thumb && (
+              <div className="mt-2 h-24 rounded-xl overflow-hidden bg-black/30">
+                <img src={thumb} alt="thumb" className="w-full h-full object-cover" loading="lazy" />
               </div>
             )}
-            {diaryFeed.map((d) => {
-              const when = d?.createdAt?.toDate ? d.createdAt.toDate() : null;
-              const preview = (d.text || "").slice(0, 140) + ((d.text || "").length > 140 ? "…" : "");
-              const images = Array.isArray(d.attachments)
-                ? d.attachments.filter((a) => (a.type || a.contentType || "").includes("image"))
-                : [];
-              const thumbs = images.slice(0, 3);
-
-              // Projeto / Evento (usando refs)
-              const projId = pickText(d.projectId, d.projetoId, d.project_id, d.projeto_id, d.idProjeto, d.id_projeto);
-              const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
-              const proj = pickText(d.projectName, d.project, d.projetoNome, d.projeto, projFromMap, projId) || "Projeto";
-
-              const evId =
-                pickText(d.eventId, d.event_id, d?.evento?.eventoId, d?.event?.eventoId, d?.eventoId) ||
-                (projId ? projectsMapRef.current[projId]?.eventId : "");
-              const evFromMap = pickText(projectsMapRef.current[projId]?.eventName, eventsMapRef.current[evId]?.name);
-              const evLocal = pickText(
-                d.eventName,
-                d.event_title,
-                d.eventTitle,
-                d.eventoName,
-                d.evento_title,
-                d?.event?.name,
-                d?.event?.nome,
-                d?.event?.feira,
-                d?.evento?.name,
-                d?.evento?.nome,
-                d?.evento?.feira
-              );
-              const evt = pickText(evLocal, evFromMap);
-              const header = evt ? `${proj} / ${evt}` : proj;
-
-              return (
-                <div key={d.id} className="bg-black/25 border border-white/10 rounded-xl p-2 min-h-[86px]">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-cyan-300 truncate">{header}</div>
-                    <div className="text-[11px] text-white/60 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
-                  </div>
-                  <div className="mt-0.5 text-sm font-medium truncate">
-                    {d.authorName || "—"}
-                    {d.authorRole ? <span className="text-white/60 font-normal"> · {d.authorRole}</span> : null}
-                  </div>
-                  <div className="text-xs text-white/80 line-clamp-2 mt-0.5">{preview}</div>
-                  {thumbs.length > 0 && (
-                    <div className="mt-2 grid grid-cols-3 gap-1">
-                      {thumbs.map((img, i) => (
-                        <div key={i} className="w-full h-14 rounded overflow-hidden bg-black/30">
-                          <img src={img.url} alt={`img-${i}`} className="w-full h-full object-cover" loading="lazy" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {!diaryError && diaryFeed.length === 0 && <div className="text-xs text-white/60">Sem registros recentes.</div>}
           </div>
-        </aside>
+        );
+      })}
+    </div>
+  );
+}
 
-        {/* CENTRO – CARDS AGRUPADOS */}
-        <main className="col-span-6 flex flex-col gap-3 overflow-hidden">
-          {(slaStats.violated > 0 || escalatedCount > 0) && (
-            <div className="bg-red-500/15 border border-red-400/40 rounded-xl px-3 py-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Flag className="h-5 w-5 text-red-300" />
-                <span className="text-sm">
-                  Atenção: <strong>{slaStats.violated}</strong> chamado(s) com SLA violado e <strong>{escalatedCount}</strong> escalado(s).
-                </span>
-              </div>
-              <span className="text-[11px] text-white/70">Rotação automática a cada 10s</span>
-            </div>
-          )}
+// TELA 2 — ESTATÍSTICAS
+function ScreenStats({
+  stats,
+  awaitingValidation,
+  pendingApprovalCount,
+  openedToday,
+  openedThisMonth,
+  escalatedCount,
+  projectActives,
+  slaStats,
+  slaByArea,
+  untreatedByArea,
+  resolutionRate,
+  phaseCounts,
+  trends,
+  backlogAging,
+}) {
+  const rateColor =
+    resolutionRate >= RESOLUTION_GOAL ? "text-green-400" : resolutionRate >= 80 ? "text-amber-400" : "text-red-400";
 
-          {/* Chamados */}
-          <section className="bg-black/20 border border-white/15 rounded-2xl p-3">
-            <h2 className="text-base font-bold mb-2 flex items-center">
-              <Activity className="h-5 w-5 mr-2 text-cyan-300" />
-              Chamados
-            </h2>
-            <div className="grid grid-cols-5 gap-2">
-              <Kpi title="Total" value={stats.total} icon={<BarChart3 className="h-5 w-5" />} />
-              <Kpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-5 w-5 text-orange-400" />} />
-              <Kpi title="Em Tratativa" value={stats.emAndamento} icon={<Zap className="h-5 w-5 text-teal-400" />} />
-              <Kpi title="Aguard. Validação" value={awaitingValidation} icon={<UserCheck className="h-5 w-5 text-yellow-400" />} />
-              <Kpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-5 w-5 text-green-400" />} />
-            </div>
+  return (
+    <div className="flex flex-col gap-3 h-[calc(100%-0rem)]">
+      {/* KPIs grandes */}
+      <div className="grid grid-cols-6 gap-3">
+        <BigKpi title="Total" value={stats.total} icon={<BarChart3 className="h-7 w-7" />} />
+        <BigKpi title="Abertos" value={stats.abertos} icon={<AlertOctagon className="h-7 w-7 text-orange-300" />} />
+        <BigKpi title="Em tratativa" value={stats.emAndamento} icon={<Zap className="h-7 w-7 text-cyan-300" />} />
+        <BigKpi title="Concluídos" value={stats.concluidos} icon={<CheckCircle className="h-7 w-7 text-green-300" />} />
+        <BigKpi title="Arquivados" value={stats.arquivados} icon={<FolderOpen className="h-7 w-7 text-zinc-300" />} />
+        <BigKpi title="Projetos ativos" value={projectActives} icon={<FolderOpen className="h-7 w-7" />} />
+      </div>
 
-            <div className="grid grid-cols-5 gap-2 mt-2">
-              <Kpi title="Projetos Ativos" value={projectStats.ativos} icon={<FolderOpen className="h-5 w-5" />} />
-              <Kpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-5 w-5 text-indigo-400" />} />
-              <Kpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-5 w-5 text-purple-400" />} />
-              <Kpi title="Abertos Hoje" value={openedToday} icon={<Calendar className="h-5 w-5" />} />
-              <Kpi title="Abertos no Mês" value={openedThisMonth} icon={<Calendar className="h-5 w-5" />} />
-            </div>
-
-            <div className="grid grid-cols-4 gap-2 mt-2">
-              {/* SLA – rotativo */}
-              <div className="bg-black/20 border border-red-500/40 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
-                {slaView === "summary" ? (
-                  <>
-                    <h3 className="text-md font-bold mb-1">Status do SLA</h3>
-                    <div className="flex items-center mb-1">
-                      <TrendingDown className="h-6 w-6 mr-2 text-red-400" />
-                      <span className="text-3xl font-bold">{slaStats.violated}</span>
-                      <span className="ml-2 text-sm">Violado(s)</span>
-                    </div>
-                    <div className="flex items-center">
-                      <ClockIcon className="h-5 w-5 mr-2 text-yellow-300" />
-                      <span className="text-sm">{slaStats.risk} em risco</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="text-md font-bold mb-1">SLA violado por área</h3>
-                    <ul className="space-y-1">
-                      {slaByArea.map(([area, qtd]) => (
-                        <li key={area} className="flex items-center justify-between">
-                          <span className="text-sm text-white/90 truncate pr-2">{area}</span>
-                          <span className="text-lg font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
-                        </li>
-                      ))}
-                      {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
-                    </ul>
-                  </>
-                )}
-                <div className="text-[11px] text-white/60 mt-2">Alterna automaticamente a cada 10s</div>
-              </div>
-
-              {/* Foco de Atenção */}
-              <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col min-h-[148px]">
-                <h3 className="text-md font-bold mb-1 flex items-center">
-                  <Target className="h-5 w-5 mr-2 text-yellow-400" />
-                  Foco de Atenção
-                </h3>
-                <div className="space-y-1 flex-grow flex flex-col justify-center">
-                  {Object.entries(untreatedByArea)
-                    .sort(([, a], [, b]) => b - a)
-                    .slice(0, 3)
-                    .map(([area, count]) => (
-                      <div key={area} className="flex justify-between items-center bg-black/20 p-1.5 rounded-lg">
-                        <span className="font-medium text-yellow-300 text-sm truncate pr-2">{area}</span>
-                        <span className="font-bold text-lg text-black bg-yellow-400 rounded-md px-2">{count}</span>
-                      </div>
-                    ))}
-                  {Object.keys(untreatedByArea).length === 0 && (
-                    <p className="text-white/60 text-center text-sm py-2">Nenhum chamado aberto!</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Taxa de Resolução (inclui arquivados) */}
-              <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
-                <h3 className="text-md font-bold mb-1">Taxa de Resolução</h3>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-4xl font-bold text-green-400">{resolutionRate.toFixed(1)}%</span>
-                  <span className="text-xs text-white/70">Meta: {RESOLUTION_GOAL}%</span>
-                </div>
-                <div className="w-full bg-black/20 rounded-full h-3">
-                  <div className="bg-green-500 h-3 rounded-full" style={{ width: `${Math.min(100, resolutionRate)}%` }} />
-                </div>
-              </div>
-
-              {/* Destaques placeholder */}
-              <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex flex-col justify-center min-h-[148px]">
-                <h3 className="text-md font-bold mb-1 flex items-center">
-                  <Award className="h-5 w-5 mr-2 text-emerald-300" />
-                  Destaques
-                </h3>
-                <p className="text-sm text-white/70">Métricas internas / ranking por área podem entrar aqui futuramente.</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Projetos – Resumo por fase */}
-          <section className="bg-black/20 border border-white/15 rounded-2xl p-3">
-            <h2 className="text-base font-bold mb-2 flex items-center">
-              <FolderOpen className="h-5 w-5 mr-2" />
-              Projetos
-            </h2>
-            <div className="grid grid-cols-4 gap-2">
-              <PhaseStat title="Futuro" value={phaseCounts.futuro} />
-              <PhaseStat title="Andamento" value={phaseCounts.andamento} />
-              <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
-              <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
-            </div>
-          </section>
-        </main>
-
-        {/* DIREITA – FEED DE CHAMADOS */}
-        <aside className="col-span-3 bg-black/20 border border-white/15 rounded-2xl p-3 flex flex-col overflow-hidden">
-          <div className="sticky top-0 z-10 bg-transparent/40 backdrop-blur-sm -m-3 mb-2 p-3 rounded-t-2xl flex items-center justify-between">
-            <h3 className="text-lg font-bold flex items-center">
-              <Activity className="h-5 w-5 mr-2 text-cyan-300" />
-              Feed de Chamados
-            </h3>
-            <span className="text-xs text-white/60">últimos 10</span>
+      <div className="grid grid-cols-6 gap-3">
+        <BigKpi title="Aguard. validação" value={awaitingValidation} icon={<UserCheck className="h-7 w-7 text-yellow-300" />} />
+        <BigKpi title="Aprov. Gerência" value={pendingApprovalCount} icon={<GitPullRequest className="h-7 w-7 text-purple-300" />} />
+        <BigKpi title="Abertos hoje" value={openedToday} icon={<Calendar className="h-7 w-7" />} />
+        <BigKpi title="Abertos no mês" value={openedThisMonth} icon={<Calendar className="h-7 w-7" />} />
+        <BigKpi title="Escalados" value={escalatedCount} icon={<TrendingUp className="h-7 w-7 text-indigo-300" />} />
+        <div className="rounded-2xl border border-white/15 bg-black/25 p-4 flex flex-col justify-center">
+          <div className="text-lg font-bold">Taxa de Resolução</div>
+          <div className="flex items-baseline gap-3">
+            <span className={`text-6xl font-extrabold tabular-nums ${rateColor}`}>{resolutionRate.toFixed(1)}%</span>
+            <span className="text-white/70">Meta: {RESOLUTION_GOAL}%</span>
           </div>
-          <div className="grid grid-cols-1 gap-2 overflow-hidden">
-            {activityFeed.map((it) => (
-              <div key={it.id} className={`bg-black/25 border border-white/10 rounded-xl p-2 ${statusColor(it.status)}`}>
-                <div className="flex items-start justify-between">
-                  <div className="min-w-0 pr-2">
-                    <div className="text-sm font-semibold truncate" title={it.titulo}>
-                      {it.titulo}
-                    </div>
-                    <div className="text-[11px] text-white/70 truncate">
-                      Aberto por <span className="text-white">{it.openedBy}</span>
-                      <span className="mx-1">·</span>
-                      Área <span className="text-white">{it.areaAtual}</span>
-                      <span className="mx-1">·</span>
-                      Resp. <span className="text-white">{it.responsavel}</span>
-                    </div>
-                    {(it.projectLabel || it.eventLabel) && (
-                      <div className="text-[11px] text-white/70 truncate">
-                        <span className="text-white/80">{it.projectLabel || ""}</span>
-                        {it.eventLabel ? <span> / {it.eventLabel}</span> : null}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-white/60 whitespace-nowrap ml-2">
-                    {formatTimeAgo(it.openedAt)}
-                  </div>
+          <div className="w-full bg-black/30 rounded-full h-4 mt-2">
+            <div
+              className={`h-4 rounded-full ${rateColor.replace("text-", "bg-")}`}
+              style={{ width: `${Math.min(100, resolutionRate)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* gráficos simples */}
+      <div className="grid grid-cols-3 gap-3 flex-1">
+        <Panel title="Tendência (30 dias) — Entradas x Saídas">
+          <MiniLines opens={trends.opens} closes={trends.closes} />
+        </Panel>
+
+        <Panel title="Backlog (acumulado 30 dias)">
+          <MiniArea series={trends.backlog} />
+        </Panel>
+
+        <Panel title="SLA violado — Top 5 áreas">
+          <ul className="space-y-1 mt-1">
+            {slaByArea.map(([area, qtd]) => (
+              <li key={area} className="flex items-center justify-between">
+                <span className={`text-base ${areaHue(area)} truncate pr-2`}>{area}</span>
+                <span className="text-xl font-bold bg-red-500/80 text-black rounded px-2">{qtd}</span>
+              </li>
+            ))}
+            {slaByArea.length === 0 && <li className="text-sm text-white/60">Sem violações</li>}
+          </ul>
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <Panel title="Foco de atenção (abertos por área)">
+          <div className="grid grid-cols-3 gap-2">
+            {Object.entries(untreatedByArea)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 6)
+              .map(([area, count]) => (
+                <div key={area} className="bg-black/20 border border-white/10 rounded-xl p-3 flex justify-between">
+                  <span className={`font-medium ${areaHue(area)} truncate pr-2`}>{area}</span>
+                  <span className="font-bold text-lg text-black bg-yellow-400 rounded-md px-2">{count}</span>
                 </div>
-                <div className="mt-1">
-                  <StatusBadge status={it.status} />
-                </div>
+              ))}
+          </div>
+        </Panel>
+
+        <Panel title="Idade do backlog">
+          <div className="grid grid-cols-4 gap-2">
+            {Object.entries(backlogAging).map(([k, v]) => (
+              <div key={k} className="bg-black/20 border border-white/10 rounded-xl p-3 text-center">
+                <div className="text-sm text-white/70">{k}</div>
+                <div className="text-3xl font-bold">{v}</div>
               </div>
             ))}
           </div>
-        </aside>
+        </Panel>
+
+        <Panel title="Projetos — resumo por fase">
+          <div className="grid grid-cols-4 gap-2">
+            <PhaseStat title="Futuro" value={phaseCounts.futuro} />
+            <PhaseStat title="Andamento" value={phaseCounts.andamento} />
+            <PhaseStat title="Desmontagem" value={phaseCounts.desmontagem} />
+            <PhaseStat title="Finalizado" value={phaseCounts.finalizado} />
+          </div>
+        </Panel>
       </div>
     </div>
   );
 }
 
-/* ============================ componentes menores ============================ */
+// TELA 3 — CHAMADOS (4×5 cards)
+function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMapRef, eventsMapRef }) {
+  return (
+    <div className="grid grid-cols-4 grid-rows-5 gap-3 h-[calc(100%-0rem)]">
+      {Array.from({ length: 20 }).map((_, idx) => {
+        const t = ticketsFeed[idx];
+        if (!t) return <div key={idx} className="rounded-2xl border border-white/10 bg-black/10" />;
+
+        const idCandidates = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
+        const emailCandidates = [
+          t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail
+        ].filter(Boolean);
+
+        const openedByFromId = idCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
+        const openedByFromEmail = emailCandidates
+          .map((e) => (e || "").toLowerCase())
+          .map((e) => usersByEmailRef.current[e]?.nome)
+          .find(isText);
+        const openedBy = obfuscate(
+          pickText(openedByFromId, openedByFromEmail, t.openedByName, t.criadoPorNome, t.aberto_por_nome, t.solicitanteNome, t?.solicitante?.nome)
+        );
+
+        const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
+        const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
+        const responsavelFromId = respIdCandidates.map((id) => usersByIdRef.current[id]?.nome).find(isText);
+        const responsavelFromEmail = respEmailCandidates
+          .map((e) => (e || "").toLowerCase())
+          .map((e) => usersByEmailRef.current[e]?.nome)
+          .find(isText);
+        const responsavel = obfuscate(
+          pickText(responsavelFromId, responsavelFromEmail, t.atribuido_a_nome, t.responsavelNome, t.responsavel_atual_nome)
+        );
+
+        const projId = pickText(t.projectId, t.projetoId, t.project_id, t.projeto_id, t.idProjeto, t.id_projeto);
+        const projFromMap = projId ? projectsMapRef.current[projId]?.projectName : undefined;
+        const projLabelFromDoc = pickText(t.projectName, t.projetoNome, t.projeto, t.project, t.project_title, t.titleProject);
+        const projectLabel = pickText(projLabelFromDoc, projFromMap, projId);
+
+        const eventIdFromTicket = pickText(t.eventId, t.event_id, t?.evento?.eventoId, t?.event?.eventoId, t?.eventoId);
+        const evFromMapByProj = projId ? projectsMapRef.current[projId]?.eventName : undefined;
+        const evFromEvents = pickText(
+          eventsMapRef.current[eventIdFromTicket]?.name,
+          eventsMapRef.current[projectsMapRef.current[projId]?.eventId || ""]?.name
+        );
+        const evLabelFromDoc = pickText(
+          t.eventName, t.event_title, t.eventTitle,
+          t?.event?.name, t?.event?.nome, t?.event?.feira,
+          t?.evento?.name, t?.evento?.nome, t?.evento?.feira
+        );
+        const eventLabel = pickText(evLabelFromDoc, evFromMapByProj, evFromEvents);
+
+        const areaAtual = t?.area_atual || t?.area || t?.areaAtual || "—";
+        const when = t?.updatedAt?.toDate ? t.updatedAt.toDate()
+          : t?.createdAt?.toDate ? t.createdAt.toDate() : null;
+
+        return (
+          <div key={t.id} className={`rounded-2xl border border-white/15 bg-black/25 p-3 ${statusColor(t.status)}`}>
+            <div className="flex items-start justify-between">
+              <div className="min-w-0 pr-2">
+                <div className="text-[16px] font-semibold truncate" title={t.titulo || t.title}>
+                  {t.titulo || t.title || "(sem título)"}
+                </div>
+                <div className="text-[13px] text-white/80 truncate">
+                  Aberto por <span className="text-white">{openedBy}</span>
+                  <span className="mx-1">·</span>
+                  Área <span className={`text-white ${areaHue(areaAtual)}`}>{areaAtual}</span>
+                  <span className="mx-1">·</span>
+                  Resp. <span className="text-white">{responsavel}</span>
+                </div>
+                {(projectLabel || eventLabel) && (
+                  <div className="text-[13px] text-white/70 truncate">
+                    <span className="text-white/80">{projectLabel || ""}</span>
+                    {eventLabel ? <span> / {eventLabel}</span> : null}
+                  </div>
+                )}
+              </div>
+              <div className="text-[12px] text-white/60 whitespace-nowrap ml-2">{formatTimeAgo(when)}</div>
+            </div>
+            <div className="mt-2">
+              <StatusBadge status={t.status} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================ componentes auxiliares ============================ */
 function Kpi({ title, value, icon }) {
   return (
     <div className="bg-black/20 border border-white/20 rounded-xl p-2 flex flex-col justify-center">
@@ -783,6 +856,18 @@ function Kpi({ title, value, icon }) {
         {icon}
       </div>
       <div className="text-4xl font-bold">{value}</div>
+    </div>
+  );
+}
+
+function BigKpi({ title, value, icon }) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-black/25 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-lg font-bold">{title}</div>
+        {icon}
+      </div>
+      <div className="text-6xl font-extrabold mt-1">{value}</div>
     </div>
   );
 }
@@ -811,6 +896,49 @@ function StatusBadge({ status }) {
   return <span className={`text-[11px] px-2 py-0.5 rounded border ${c.cls}`}>{c.label}</span>;
 }
 
+function Panel({ title, children }) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-black/25 p-4">
+      <div className="text-lg font-bold mb-1">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+/* Mini gráficos SVG sem dependências */
+function MiniLines({ opens, closes }) {
+  const w = 520, h = 140, p = 10;
+  const max = Math.max(1, ...opens, ...closes);
+  const toXY = (arr, idx) => {
+    const x = p + (idx * (w - 2 * p)) / (arr.length - 1 || 1);
+    const y = h - p - (arr[idx] / max) * (h - 2 * p);
+    return `${idx === 0 ? "M" : "L"}${x},${y}`;
+  };
+  const path = (arr) => arr.map((_, i) => toXY(arr, i)).join(" ");
+  return (
+    <svg width={w} height={h} className="block">
+      <rect x="0" y="0" width={w} height={h} fill="none" className="stroke-white/10" />
+      <path d={path(opens)} fill="none" className="stroke-cyan-300" strokeWidth="2" />
+      <path d={path(closes)} fill="none" className="stroke-emerald-300" strokeWidth="2" />
+    </svg>
+  );
+}
+function MiniArea({ series }) {
+  const w = 520, h = 140, p = 10;
+  const max = Math.max(1, ...series);
+  const points = series.map((v, i) => {
+    const x = p + (i * (w - 2 * p)) / (series.length - 1 || 1);
+    const y = h - p - (v / max) * (h - 2 * p);
+    return `${x},${y}`;
+  });
+  const d = `M ${p},${h - p} L ${points.join(" L ")} L ${w - p},${h - p} Z`;
+  return (
+    <svg width={w} height={h} className="block">
+      <rect x="0" y="0" width={w} height={h} fill="none" className="stroke-white/10" />
+      <path d={d} className="fill-cyan-300/20 stroke-cyan-300" strokeWidth="2" />
+    </svg>
+  );
+}
+
 export { TVPanel };
 export default TVPanel;
-
