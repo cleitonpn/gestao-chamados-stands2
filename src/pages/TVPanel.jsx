@@ -899,7 +899,7 @@ function BigKpi({ title, value, icon }) {
   );
 }
 
-function PhaseStat({ title, value }) {({ title, value }) {
+function PhaseStat({ title, value }) {
   return (
     <div className="bg-black/20 border border-white/20 rounded-xl p-3 flex items-center justify-between">
       <span className="text-sm text-white/80">{title}</span>
