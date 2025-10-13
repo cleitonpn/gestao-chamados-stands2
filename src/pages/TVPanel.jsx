@@ -932,7 +932,7 @@ function Panel({ title, children }) {
   );
 }
 
-/* Mini gráficos SVG sem dependências */ SVG sem dependências */
+/* Mini gráficos SVG sem dependências */
 function MiniLines({ opens, closes, width = 520, height = 140, padding = 10 }) {
   const w = width, h = height, p = padding;
   const max = Math.max(1, ...opens, ...closes);
