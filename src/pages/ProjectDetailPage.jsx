@@ -382,20 +382,16 @@ const ProjectDetailPage = () => {
     return { total, open, closed, completion, topAreas };
   }, [tickets]);
 
-  // Linkar para a lista filtrada (usa página /admin/chamados-filtrados)
+  // ====== ALTERADO: levar para a Dashboard filtrada por este projeto
   const goToFilteredTickets = () => {
     try {
-      const payload = {
-        chamados: tickets,
-        titulo: `Chamados do projeto: ${project?.nome || projectId}`,
-        filtro: `Projeto: ${project?.nome || projectId}`,
-      };
-      localStorage.setItem('chamadosFiltrados', JSON.stringify(payload));
-      navigate('/admin/chamados-filtrados');
+      const pid = project?.id || projectId;
+      const pname = project?.nome || '';
+      const qs = `?projectId=${encodeURIComponent(pid)}${pname ? `&projectName=${encodeURIComponent(pname)}` : ''}`;
+      navigate(`/dashboard${qs}`);
     } catch (e) {
-      console.error('Falha ao preparar a lista filtrada:', e);
-      // fallback: vai para dashboard
-      navigate('/dashboard');
+      console.error('Falha ao preparar a navegação para o dashboard filtrado:', e);
+      navigate('/dashboard'); // fallback
     }
   };
 
