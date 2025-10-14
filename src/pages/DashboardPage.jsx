@@ -385,19 +385,18 @@ const DashboardPage = () => {
     const raw = (searchTerm || '').trim();
     if (!raw) return;
     const idCandidate = getSearchIdCandidate(raw).toLowerCase();
-    // match exato
     const exact = tickets.find(t => ((t.id || '').toString().toLowerCase() === idCandidate));
     if (exact) {
       navigate(`/chamado/${exact.id}`);
       return;
     }
-    // único match parcial
     const partial = tickets.filter(t => ((t.id || '').toString().toLowerCase().includes(idCandidate)));
     if (partial.length === 1) {
       navigate(`/chamado/${partial[0].id}`);
     }
   };
-const getFilteredTickets = () => {
+
+  const getFilteredTickets = () => {
     let base = [];
     if (activeFilter === 'arquivados') {
       base = tickets.filter(t => t.status === 'arquivado');
@@ -428,7 +427,6 @@ const getFilteredTickets = () => {
       }
     }
 
-    
     // Busca por título/descrição e também por ID do chamado (#ABC123... ou parcial)
     const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const term = norm(searchTerm || '');
@@ -436,14 +434,11 @@ const getFilteredTickets = () => {
       const raw = (searchTerm || '').trim();
       const idCandidateRaw = getSearchIdCandidate(raw);
       const idCandidate = idCandidateRaw.toLowerCase();
-      // Heurística: se digitou com # ou parece um ID (6+ chars alfanuméricos/_-)
       const looksLikeId = raw.startsWith('#') || (/^[A-Za-z0-9_-]{6,}$/.test(idCandidateRaw));
 
       base = base.filter(t => {
-        // match por ID (parcial ou completo)
         const byId = looksLikeId ? ((t.id || '').toString().toLowerCase().includes(idCandidate)) : false;
 
-        // match textual padrão
         const titulo = norm(t.titulo);
         const descricao = norm(t.descricao);
         const area = norm(t.area);
@@ -466,7 +461,8 @@ const getFilteredTickets = () => {
         return byId || byText;
       });
     }
-// Filtro por evento (project.feira)
+
+    // Filtro por evento (project.feira)
     if (selectedEvent && selectedEvent !== 'todos') {
       base = base.filter(t => {
         const ids = Array.isArray(t.projetos) && t.projetos.length ? t.projetos : (t.projetoId ? [t.projetoId] : []);
@@ -484,12 +480,10 @@ const getFilteredTickets = () => {
       });
     }
 
-    // Chips extras
     if (selectedStatuses.size > 0) base = base.filter(t => selectedStatuses.has(t.status));
     if (selectedAreas.size > 0) base = base.filter(t => selectedAreas.has(t.area));
     if (selectedPriorities.size > 0) base = base.filter(t => selectedPriorities.has(t.prioridade));
 
-    // Ordenação
     return [...base].sort((a, b) => {
       if (sortBy === 'priority') {
         const pa = priorityOrder[a.prioridade] || 0;
@@ -503,7 +497,6 @@ const getFilteredTickets = () => {
         if (sa !== sb) return sa - sb;
         return getUpdatedDate(b) - getUpdatedDate(a);
       }
-      // padrão: atualização (desc)
       return getUpdatedDate(b) - getUpdatedDate(a);
     });
   };
@@ -939,23 +932,30 @@ const getFilteredTickets = () => {
               <Calendar className="h-4 w-4 mr-3" />
               Cronograma
             </Button>
+
             {/* Atalho para a página de diários */}
             <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
               <BookOpen className="h-4 w-4 mr-3" />
               Diário do Projeto
             </Button>
 
-           <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
-  <Trophy className="h-4 w-4 mr-3" />
-  Gamificação
-</Button>
+            {/* ➕ Novo: atalho para Resumo do Projeto no menu lateral */}
+            <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
+              <FileText className="h-4 w-4 mr-3" />
+              Resumo do Projeto
+            </Button>
 
-{userProfile?.funcao === 'gerente' && (
-  <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
-    <BarChart3 className="h-4 w-4 mr-3" />
-    Relatórios
-  </Button>
-)}
+            <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+              <Trophy className="h-4 w-4 mr-3" />
+              Gamificação
+            </Button>
+
+            {userProfile?.funcao === 'gerente' && (
+              <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
+                <BarChart3 className="h-4 w-4 mr-3" />
+                Relatórios
+              </Button>
+            )}
 
             {userProfile?.funcao === 'administrador' && (
               <>
@@ -1033,7 +1033,6 @@ const getFilteredTickets = () => {
                   <FileText className="h-4 w-4" />
                   <span>Chamados</span>
                 </TabsTrigger>
-                {/* Aba "Projetos" removida conforme requisito */}
               </TabsList>
             </div>
 
@@ -1041,15 +1040,15 @@ const getFilteredTickets = () => {
               {/* Barra sticky: busca + filtros + toggle view */}
               <div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
                 <div className="px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2">
-  <form onSubmit={handleSearchSubmit} className="flex-1">
-    <Input
-      className="h-9 w-full"
-      placeholder="Buscar por título, descrição, projeto ou #número do chamado..."
-      value={searchTerm}
-      onChange={(e) => setSearchTerm(e.target.value)}
-    />
-  </form>
-  <Button
+                  <form onSubmit={handleSearchSubmit} className="flex-1">
+                    <Input
+                      className="h-9 w-full"
+                      placeholder="Buscar por título, descrição, projeto ou #número do chamado..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </form>
+                  <Button
                     variant="outline"
                     size="icon"
                     className="h-9 w-9"
@@ -1097,7 +1096,7 @@ const getFilteredTickets = () => {
 
                   <div className="ml-auto flex items-center gap-2">
                     <Button variant="outline" onClick={saveCurrentFilterCombination}>Salvar filtro atual</Button>
-          <Button variant="ghost" onClick={clearAllFilters}>Limpar filtros</Button>
+                    <Button variant="ghost" onClick={clearAllFilters}>Limpar filtros</Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="outline">Filtros salvos</Button>
