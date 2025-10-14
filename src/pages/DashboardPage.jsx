@@ -945,10 +945,17 @@ const getFilteredTickets = () => {
               Diário do Projeto
             </Button>
 
-            <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+           <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
   <Trophy className="h-4 w-4 mr-3" />
   Gamificação
 </Button>
+
+{userProfile?.funcao === 'gerente' && (
+  <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
+    <BarChart3 className="h-4 w-4 mr-3" />
+    Relatórios
+  </Button>
+)}
 
             {userProfile?.funcao === 'administrador' && (
               <>
