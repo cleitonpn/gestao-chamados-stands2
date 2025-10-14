@@ -22,6 +22,7 @@ import AdminPanelPage from './pages/AdminPanelPage';
 import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage'; // NOVA IMPORTAÇÃO
 import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
 import GamingPage from './pages/GamingPage';
+import ProjectSummaryPage from "./pages/ProjectSummaryPage";
 
 // >>> NOVA IMPORTAÇÃO: Página de Diários (feed global)
 import AllDiariesPage from './pages/AllDiariesPage';
@@ -184,6 +185,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
+              <Route path="/resumo-projeto" element={<ProjectSummaryPage />} />
 
               {/* Rota para painel operacional - sem header */}
               <Route path="/painel-operacional" element={<OperationalPanel />} />
