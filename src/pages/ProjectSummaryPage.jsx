@@ -14,9 +14,9 @@ import { eventService } from "../services/eventService";
  * Resumo do Projeto
  * - Botões: ← Dashboard e Imprimir
  * - Eventos + datas (via eventService) e projetos por evento (respeita papel)
- * - Cards de chamados (totais) e lista detalhada por chamado:
- *   título, data, descrição, status, MENSAGENS e **INFORMAÇÕES ESPECÍFICAS**
- *   (detecta locação/compras e exibe campos extras)
+ * - Cards de chamados (totais) e lista detalhada:
+ *   título, data, descrição, status, MENSAGENS e INFORMAÇÕES ESPECÍFICAS
+ *   (inclui locação/compras). **Oculta** chamados financeiros sensíveis.
  * - Diários agrupados por dia
  */
 
@@ -449,13 +449,8 @@ export default function ProjectSummaryPage() {
                         </p>
                       )}
 
-                      {/* Campos extras por tipo (Locação/Compras) */}
                       {renderExtraSections(t)}
-
-                      {/* Informações Específicas (itens) – cobre 'camposEspecificos' */}
                       {renderSpecificInfoBlock(t)}
-
-                      {/* Mensagens / comentários */}
                       {renderMessages(t)}
                     </article>
                   ))
@@ -559,10 +554,34 @@ function prettyStatus(s) {
   return aliases[v] || (s || "—");
 }
 
+/* ===== Regra de privacidade p/ Financeiro ===== */
+function isSensitiveFinanceTicket(t) {
+  // área/categoria precisa ser Financeiro
+  const area = norm(t.area || t.setor || t.categoria || t.areaOriginal || "");
+  const isFinance = ["financeiro", "financas", "finanças"].includes(area);
+  if (!isFinance) return false;
+
+  // tipo do chamado (várias variações)
+  const rawType = norm(
+    t.tipo || t.tipoChamado || t.tipoDeChamado || t.category || t.subtipo || ""
+  ).replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
+
+  const sensitiveTypes = new Set([
+    "pagamento frete",
+    "pagamento de frete",
+    "pedido caixinha",
+    "pedido de caixinha",
+    "caixinha"
+  ]);
+
+  return sensitiveTypes.has(rawType);
+}
+
 /* ===== Tickets helpers ===== */
 function filterTicketsForProject(all, projectId) {
   const pid = String(projectId);
-  const list = (all || []).filter((t) => {
+  // 1) pertencem ao projeto
+  let list = (all || []).filter((t) => {
     if (!t) return false;
     if (String(t.projetoId || "") === pid) return true;
     if (String(t.projectId || "") === pid) return true;
@@ -571,6 +590,11 @@ function filterTicketsForProject(all, projectId) {
     if (Array.isArray(t.projectIds) && t.projectIds.map(String).includes(pid)) return true;
     return false;
   });
+
+  // 2) remove chamados financeiros sensíveis
+  list = list.filter((t) => !isSensitiveFinanceTicket(t));
+
+  // 3) ordena por atualização/criação mais recente
   list.sort((a, b) => parseMillis(b.updatedAt || b.createdAt) - parseMillis(a.updatedAt || a.createdAt));
   return list;
 }
