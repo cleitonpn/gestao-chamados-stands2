@@ -420,7 +420,7 @@ export default function ProjectSummaryPage() {
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Resumo dos Chamados</h2>
                 <p className="text-sm text-neutral-500">
-                  Título, data, descrição, **Informações Específicas**, mensagens, status.
+                  Título, data, descrição, <strong>Informações Específicas</strong>, mensagens, status.
                 </p>
               </header>
               <div className="p-5 space-y-3">
@@ -452,7 +452,7 @@ export default function ProjectSummaryPage() {
                       {/* Campos extras por tipo (Locação/Compras) */}
                       {renderExtraSections(t)}
 
-                      {/* Informações Específicas (itens) – aparece para qualquer chamado que possua a estrutura */}
+                      {/* Informações Específicas (itens) – cobre 'camposEspecificos' */}
                       {renderSpecificInfoBlock(t)}
 
                       {/* Mensagens / comentários */}
@@ -588,19 +588,19 @@ function buildTicketSummary(tickets) {
 
 /* ===== Locação & Compras: detecção e extras ===== */
 function isLocacaoTicket(t) {
-  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
+  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || t.areaOriginal || "");
   if (["locacao", "locação", "locacoes", "locações", "rental"].includes(tipo)) return true;
   return has(
     t,
     "dataRetirada","dataDevolucao","retiradaData","devolucaoData",
     "locadora","empresaLocadora","fornecedorLocacao","enderecoRetirada","enderecoDevolucao",
-    "valorDiaria","valorTotalLocacao"
+    "valorDiaria","valorTotalLocacao","camposEspecificos"
   );
 }
 function isComprasTicket(t) {
-  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
-  if (["compras", "compra", "purchase", "suprimentos","material","materiais"].includes(tipo)) return true;
-  return has(t,"produto","descricaoProduto","valorUnitario","valorTotal","quantidade","prazoEntrega","fornecedor","nfNumero","pedidoNumero","cotacoes");
+  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || t.areaOriginal || "");
+  if (["compras","compra","purchase","suprimentos","material","materiais"].includes(tipo)) return true;
+  return has(t,"produto","descricaoProduto","valorUnitario","valorTotal","quantidade","prazoEntrega","fornecedor","nfNumero","pedidoNumero","cotacoes","camposEspecificos");
 }
 
 function renderExtraSections(t) {
@@ -653,7 +653,6 @@ function renderExtraSections(t) {
 }
 
 /* ===== Informações Específicas (itens) ===== */
-// aceita vários formatos: array OU objeto com {item1: {...}, item2: {...}}, OU "itens"
 function toArrayFromUnknown(x) {
   if (!x) return [];
   if (Array.isArray(x)) return x;
@@ -661,7 +660,9 @@ function toArrayFromUnknown(x) {
   return [];
 }
 function extractSpecificItems(t) {
+  // prioridade para 'camposEspecificos' (como no seu Firestore)
   const candidates = [
+    t.camposEspecificos,
     t.informacoesEspecificasItens,
     t.informacoesEspecificas,
     t.itensEspecificos,
@@ -672,22 +673,26 @@ function extractSpecificItems(t) {
     t.itens,
     t.lista,
   ];
+
   let arr = [];
   for (const src of candidates) {
     const tmp = toArrayFromUnknown(src);
     if (tmp.length) { arr = tmp; break; }
   }
+
   return arr
     .map((i, idx) => ({
       idx,
-      codigo: i.codigoDoItem || i.codigo_item || i.codigo || i.cod || i.codigoItem,
+      // Firestore: codItem, id, item, quantidade
+      codigo: i.codItem || i.codigoDoItem || i.codigo_item || i.codigo || i.cod || i.codigoItem,
+      idItem: i.id || i.codigoInterno,
       item: i.item || i.nome || i.descricao || i.descricaoItem || i.produto,
       quantidade: i.quantidade || i.qtd || i.qtde,
       unidade: i.unidade || i.um,
       valorUnitario: i.valorUnitario || i.precoUnitario || i.vlrUnit,
       valorTotal: i.valorTotal || i.precoTotal || i.vlrTotal,
     }))
-    .filter((it) => it.item || it.codigo || it.quantidade);
+    .filter((it) => it.item || it.codigo || it.quantidade || it.idItem);
 }
 function renderSpecificInfoBlock(t) {
   const items = extractSpecificItems(t);
@@ -700,15 +705,26 @@ function renderSpecificInfoBlock(t) {
           {items.map((it, idx) => (
             <li key={it.idx ?? idx} className="text-sm">
               <div className="font-medium">Item {idx + 1}</div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div><span className="text-neutral-500">Código:</span> {it.codigo || "—"}</div>
                 <div className="sm:col-span-2"><span className="text-neutral-500">Item:</span> {it.item || "—"}</div>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div><span className="text-neutral-500">Quantidade:</span> {it.quantidade || "—"}</div>
                 <div><span className="text-neutral-500">Unidade:</span> {it.unidade || "—"}</div>
-                <div><span className="text-neutral-500">Vlr Un:</span> {it.valorUnitario || "—"} {it.valorTotal ? ` | Vlr Total: ${it.valorTotal}` : ""}</div>
+                <div>
+                  <span className="text-neutral-500">Vlr Un:</span> {it.valorUnitario || "—"}
+                  {it.valorTotal ? ` | Vlr Total: ${it.valorTotal}` : ""}
+                </div>
               </div>
+
+              {it.idItem && (
+                <div className="mt-1">
+                  <span className="text-neutral-500">ID do item:</span> {it.idItem}
+                </div>
+              )}
             </li>
           ))}
         </ul>
