@@ -1,5 +1,6 @@
 // src/pages/ProjectSummaryPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
 // Services do projeto
@@ -13,10 +14,12 @@ import { eventService } from "../services/eventService";
  * Página: Resumo do Projeto
  * - Lista EVENTOS (derivados dos projetos) e carrega EVENTOS completos via eventService para exibir datas
  * - Respeita papéis (produtor / consultor)
- * - Mostra resumo dos chamados + lista detalhada (descrição, mensagens e status)
+ * - Mostra resumo dos chamados + lista detalhada (inclui campos específicos de Locação e Compras)
  * - Mostra diários agrupados por dia
- * - Botão "Imprimir"
+ * - Botões: Imprimir e ← Dashboard
  */
+
+const DASHBOARD_PATH = "/dashboard"; // ajuste se sua rota for diferente
 
 const STATUS_LABELS = {
   aberto: "Aberto",
@@ -30,6 +33,7 @@ const KNOWN_STATUSES = Object.keys(STATUS_LABELS);
 
 // helpers de string/data
 const norm = (s) => (s || "").toString().trim().toLowerCase();
+const has = (obj, ...keys) => keys.some((k) => obj && obj[k] != null && obj[k] !== "");
 
 function parseMillis(ts) {
   if (!ts) return 0;
@@ -37,7 +41,6 @@ function parseMillis(ts) {
   if (typeof ts === "object" && ts.seconds) return ts.seconds * 1000;
   try { return new Date(ts).getTime() || 0; } catch { return 0; }
 }
-
 function formatDateBR(tsLike) {
   const ms = parseMillis(tsLike);
   if (!ms) return "—";
@@ -48,18 +51,13 @@ function formatDateTimeBR(tsLike) {
   if (!ms) return "—";
   return new Date(ms).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
 }
-
 function projectMatchesEvent(project, eventObj) {
   if (!project || !eventObj) return false;
   const pEventId = project.eventId || project.eventoId || project.feiraId;
   if (pEventId && eventObj.id && String(pEventId) === String(eventObj.id)) return true;
-
   const pEventName = project.feira || project.evento || project.eventName || project.nomeEvento;
   if (pEventName && eventObj.name && norm(pEventName) === norm(eventObj.name)) return true;
-
-  // fallback (id do evento = nome)
   if (!pEventId && eventObj.id && norm(eventObj.id) === norm(pEventName)) return true;
-
   return false;
 }
 
@@ -87,6 +85,9 @@ export default function ProjectSummaryPage() {
   const [ticketsSummary, setTicketsSummary] = useState({ total: 0, byStatus: {} });
   const [ticketsList, setTicketsList] = useState([]);
   const [diariesGrouped, setDiariesGrouped] = useState({}); // { 'dd/mm/aaaa': [items] }
+
+  const navigate = useNavigate();
+  const goDashboard = () => navigate(DASHBOARD_PATH);
 
   useEffect(() => { document.title = "Resumo do Projeto"; }, []);
 
@@ -173,10 +174,12 @@ export default function ProjectSummaryPage() {
       return;
     }
     const list = allAccessibleProjects.filter((p) => projectMatchesEvent(p, ev));
-    list.sort((a, b) => norm(a?.name || a?.titulo || a?.nome || "")
-      .localeCompare(norm(b?.name || b?.titulo || b?.nome || "")));
+    list.sort((a, b) =>
+      norm(a?.name || a?.titulo || a?.nome || "").localeCompare(
+        norm(b?.name || b?.titulo || b?.nome || "")
+      )
+    );
     setProjectsForEvent(list);
-
     if (selectedProjectId && !list.some((p) => p.id === selectedProjectId)) {
       setSelectedProjectId("");
       setProjectData(null);
@@ -264,6 +267,14 @@ export default function ProjectSummaryPage() {
       <div className="no-print sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-neutral-200">
         <div className="mx-auto max-w-7xl px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={goDashboard}
+              className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
+              title="Voltar para a Dashboard"
+            >
+              ← Dashboard
+            </button>
             <h1 className="text-xl font-semibold">Resumo do Projeto</h1>
             {loading && (
               <span className="text-xs px-2 py-1 bg-neutral-100 rounded border border-neutral-200">
@@ -360,7 +371,7 @@ export default function ProjectSummaryPage() {
                   <Field label="Consultor" value={names.consultantName || "—"} />
                   <Field label="Produtor" value={names.producerName || "—"} />
 
-                  {/* Datas do projeto (quando existem) */}
+                  {/* Datas do projeto (ou do evento) */}
                   <Field
                     label="Montagem"
                     value={
@@ -434,7 +445,7 @@ export default function ProjectSummaryPage() {
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Resumo dos Chamados</h2>
                 <p className="text-sm text-neutral-500">
-                  Título, data, descrição, mensagens e status de cada chamado do projeto.
+                  Título, data, descrição, mensagens, status e campos específicos (Locação/Compras).
                 </p>
               </header>
               <div className="p-5 space-y-3">
@@ -468,6 +479,10 @@ export default function ProjectSummaryPage() {
                         </p>
                       ) : null}
 
+                      {/* Campos específicos conforme o tipo */}
+                      {renderExtraSections(t)}
+
+                      {/* Mensagens / comentários */}
                       {renderMessages(t)}
                     </article>
                   ))
@@ -530,6 +545,15 @@ function KPI({ label, value }) {
     <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
       <div className="text-xs text-neutral-500">{label}</div>
       <div className="text-2xl font-semibold">{value ?? 0}</div>
+    </div>
+  );
+}
+function FieldRow({ label, value }) {
+  if (!value && value !== 0) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2 text-sm">
+      <div className="col-span-1 text-neutral-500">{label}</div>
+      <div className="col-span-2 font-medium">{String(value)}</div>
     </div>
   );
 }
@@ -605,6 +629,98 @@ function buildTicketSummary(tickets) {
   return { total, byStatus };
 }
 
+// ======== Locação & Compras: detecção e render ========
+function isLocacaoTicket(t) {
+  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
+  if (["locacao", "locação", "locacoes", "locações", "rental"].includes(tipo)) return true;
+  return has(t,
+    "dataRetirada", "dataDevolucao", "retiradaData", "devolucaoData",
+    "locadora", "empresaLocadora", "fornecedorLocacao", "enderecoRetirada", "enderecoDevolucao",
+    "valorDiaria", "valorTotalLocacao", "itensLocacao", "itemLocacao"
+  );
+}
+function isComprasTicket(t) {
+  const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
+  if (["compras", "compra", "purchase", "suprimentos"].includes(tipo)) return true;
+  return has(t,
+    "produto", "descricaoProduto", "valorUnitario", "valorTotal", "quantidade",
+    "prazoEntrega", "fornecedor", "nfNumero", "pedidoNumero", "cotacoes"
+  );
+}
+
+function renderExtraSections(t) {
+  if (isLocacaoTicket(t)) return renderLocacaoExtra(t);
+  if (isComprasTicket(t)) return renderComprasExtra(t);
+  return null;
+}
+
+function renderLocacaoExtra(t) {
+  const itens = Array.isArray(t.itensLocacao) ? t.itensLocacao
+    : Array.isArray(t.itens) ? t.itens
+    : t.itemLocacao ? [t.itemLocacao] : [];
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-neutral-500 mb-1">Detalhes de Locação</div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
+        <FieldRow label="Fornecedor / Locadora" value={t.empresaLocadora || t.locadora || t.fornecedorLocacao || t.fornecedor} />
+        <FieldRow label="Contato" value={t.contato || t.telefone || t.emailContato} />
+        <FieldRow label="Retirada" value={`${formatDateBR(t.dataRetirada || t.retiradaData)} ${t.enderecoRetirada ? "• " + t.enderecoRetirada : ""}`} />
+        <FieldRow label="Devolução" value={`${formatDateBR(t.dataDevolucao || t.devolucaoData)} ${t.enderecoDevolucao ? "• " + t.enderecoDevolucao : ""}`} />
+        <FieldRow label="Valor diária" value={t.valorDiaria} />
+        <FieldRow label="Valor total" value={t.valorTotalLocacao || t.valorTotal} />
+
+        {itens?.length ? (
+          <div className="pt-2">
+            <div className="text-xs text-neutral-500 mb-1">Itens</div>
+            <ul className="space-y-1">
+              {itens.map((i, idx) => (
+                <li key={idx} className="text-sm">
+                  • {(i?.descricao || i?.descricaoItem || i?.produto || i?.item || "Item")}
+                  {i?.quantidade ? ` — Qtde: ${i.quantidade}` : ""}
+                  {i?.valorUnitario ? ` — Vlr Un: ${i.valorUnitario}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function renderComprasExtra(t) {
+  const cotacoes = Array.isArray(t.cotacoes) ? t.cotacoes : [];
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-neutral-500 mb-1">Detalhes de Compras</div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
+        <FieldRow label="Produto" value={t.produto || t.descricaoProduto || t.item || t.titulo} />
+        <FieldRow label="Fornecedor" value={t.fornecedor || t.fornecedorCompra || t.empresa} />
+        <FieldRow label="Quantidade" value={t.quantidade} />
+        <FieldRow label="Valor unitário" value={t.valorUnitario} />
+        <FieldRow label="Valor total" value={t.valorTotal} />
+        <FieldRow label="Prazo de entrega" value={t.prazoEntrega && formatDateBR(t.prazoEntrega)} />
+        <FieldRow label="Nº do pedido" value={t.pedidoNumero} />
+        <FieldRow label="Nº da NF" value={t.nfNumero} />
+
+        {cotacoes.length ? (
+          <div className="pt-2">
+            <div className="text-xs text-neutral-500 mb-1">Cotações</div>
+            <ul className="space-y-1">
+              {cotacoes.map((c, idx) => (
+                <li key={idx} className="text-sm">
+                  • {(c.fornecedor || c.empresa || `Fornecedor ${idx + 1}`)} — {c.valor || c.preco || "—"}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 // mensagens/comentários: tenta "messages", "mensagens", "historico", "comentarios", "comments", "updates"
 function renderMessages(t) {
   const candidates = [t.messages, t.mensagens, t.historico, t.comentarios, t.comments, t.updates];
@@ -654,7 +770,6 @@ function groupDiariesByDay(feedItems) {
     if (!groups[key]) groups[key] = [];
     groups[key].push(it);
   }
-
   // ordenar dias desc
   const ordered = {};
   Object.entries(groups)
