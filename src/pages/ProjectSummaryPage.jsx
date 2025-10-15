@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
-// Services do projeto
+// Services
 import { projectService } from "../services/projectService";
 import { ticketService } from "../services/ticketService";
 import { userService } from "../services/userService";
@@ -11,15 +11,16 @@ import { diaryService } from "../services/diaryService";
 import { eventService } from "../services/eventService";
 
 /**
- * Página: Resumo do Projeto
- * - Lista EVENTOS (derivados dos projetos) e carrega EVENTOS completos via eventService para exibir datas
- * - Respeita papéis (produtor / consultor)
- * - Mostra resumo dos chamados + lista detalhada (inclui campos específicos de Locação e Compras)
- * - Mostra diários agrupados por dia
- * - Botões: Imprimir e ← Dashboard
+ * Resumo do Projeto
+ * - Botões: ← Dashboard e Imprimir
+ * - Eventos + datas (via eventService) e projetos por evento (respeita papel)
+ * - Cards de chamados (totais) e lista detalhada por chamado:
+ *   título, data, descrição, status, MENSAGENS e **INFORMAÇÕES ESPECÍFICAS**
+ *   (detecta locação/compras e exibe campos extras)
+ * - Diários agrupados por dia
  */
 
-const DASHBOARD_PATH = "/dashboard"; // ajuste se sua rota for diferente
+const DASHBOARD_PATH = "/dashboard"; // ajuste se sua rota for outra
 
 const STATUS_LABELS = {
   aberto: "Aberto",
@@ -31,7 +32,7 @@ const STATUS_LABELS = {
 };
 const KNOWN_STATUSES = Object.keys(STATUS_LABELS);
 
-// helpers de string/data
+// utils
 const norm = (s) => (s || "").toString().trim().toLowerCase();
 const has = (obj, ...keys) => keys.some((k) => obj && obj[k] != null && obj[k] !== "");
 
@@ -62,7 +63,6 @@ function projectMatchesEvent(project, eventObj) {
 }
 
 export default function ProjectSummaryPage() {
-  // Compat: {currentUser, role} e {user, userProfile}
   const auth = (typeof useAuth === "function" ? useAuth() : {}) || {};
   const uid = auth?.currentUser?.uid || auth?.user?.uid || null;
   const userRoleRaw = auth?.role || auth?.userProfile?.funcao || null;
@@ -70,28 +70,26 @@ export default function ProjectSummaryPage() {
 
   const [loading, setLoading] = useState(false);
 
-  // Eventos & Projetos
-  const [events, setEvents] = useState([]); // [{id, name}]
-  const [eventsFull, setEventsFull] = useState([]); // eventService (com datas)
+  const [events, setEvents] = useState([]);
+  const [eventsFull, setEventsFull] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
 
   const [allAccessibleProjects, setAllAccessibleProjects] = useState([]);
   const [projectsForEvent, setProjectsForEvent] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
 
-  // Dados agregados
   const [projectData, setProjectData] = useState(null);
   const [usersMap, setUsersMap] = useState({});
   const [ticketsSummary, setTicketsSummary] = useState({ total: 0, byStatus: {} });
   const [ticketsList, setTicketsList] = useState([]);
-  const [diariesGrouped, setDiariesGrouped] = useState({}); // { 'dd/mm/aaaa': [items] }
+  const [diariesGrouped, setDiariesGrouped] = useState({});
 
   const navigate = useNavigate();
   const goDashboard = () => navigate(DASHBOARD_PATH);
 
   useEffect(() => { document.title = "Resumo do Projeto"; }, []);
 
-  // 1) Carrega projetos + usuários + eventos
+  // Carrega projetos + usuários + eventos
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -102,7 +100,6 @@ export default function ProjectSummaryPage() {
           eventService.getAllEvents?.().catch(() => []) || [],
         ]);
 
-        // mapa de usuários
         const umap = {};
         (allUsers || []).forEach((u) => {
           const id = u.id || u.uid || u.userId;
@@ -110,7 +107,6 @@ export default function ProjectSummaryPage() {
         });
         setUsersMap(umap);
 
-        // restringe por perfil
         let accessible = [...(allProjects || [])];
         if (["produtor", "consultor"].includes(userRole) && uid) {
           accessible = accessible.filter((p) => {
@@ -123,19 +119,19 @@ export default function ProjectSummaryPage() {
         }
         setAllAccessibleProjects(accessible);
 
-        // deriva eventos pelos projetos acessíveis
+        // eventos derivados dos projetos
         const byKey = new Map();
         accessible.forEach((p) => {
           const id = p?.eventId || p?.eventoId || p?.feiraId || null;
           const name = p?.feira || p?.evento || p?.eventName || p?.nomeEvento || null;
           if (name) {
-            const key = norm(id || name);
-            if (!byKey.has(key)) byKey.set(key, { id: id || name, name });
+            const k = norm(id || name);
+            if (!byKey.has(k)) byKey.set(k, { id: id || name, name });
           }
         });
         setEvents(Array.from(byKey.values()).sort((a, b) => norm(a.name).localeCompare(norm(b.name))));
 
-        // eventos (com datas) vindos do eventService
+        // eventos (com datas)
         const mappedFull = (evs || []).map((e) => ({
           id: e.id,
           name: e.nome || e.name || e.titulo || e.id,
@@ -160,7 +156,7 @@ export default function ProjectSummaryPage() {
     })();
   }, [uid, userRole]);
 
-  // 2) Ao escolher evento, filtra projetos em memória
+  // Filtra projetos do evento
   useEffect(() => {
     if (!selectedEventId) {
       setProjectsForEvent([]);
@@ -186,7 +182,7 @@ export default function ProjectSummaryPage() {
     }
   }, [selectedEventId, events, allAccessibleProjects]);
 
-  // 3) Ao escolher projeto, carrega resumo + tickets + diários
+  // Seleciona projeto -> tickets + diários
   useEffect(() => {
     if (!selectedProjectId) {
       setProjectData(null);
@@ -204,13 +200,11 @@ export default function ProjectSummaryPage() {
           null;
         setProjectData(p || null);
 
-        // Tickets
         const allTickets = await ticketService.getAllTickets();
         const tickets = filterTicketsForProject(allTickets, selectedProjectId);
         setTicketsList(tickets);
         setTicketsSummary(buildTicketSummary(tickets));
 
-        // Diários (feed do projeto)
         const feed = await diaryService
           .fetchFeedByProject?.({ projectId: selectedProjectId, pageSize: 500 })
           .catch(() => ({ items: [] }));
@@ -229,7 +223,6 @@ export default function ProjectSummaryPage() {
     [events, selectedEventId]
   );
 
-  // mesmo evento (com datas) via id ou nome
   const selectedEventFull = useMemo(() => {
     if (!selectedEvent) return null;
     const byId = eventsFull.find((e) => String(e.id) === String(selectedEvent.id));
@@ -238,7 +231,6 @@ export default function ProjectSummaryPage() {
     return byName || null;
   }, [selectedEvent, eventsFull]);
 
-  // nomes
   const names = useMemo(() => {
     const cId = projectData?.consultantId || projectData?.consultorId || projectData?.consultorUid;
     const pId = projectData?.producerId || projectData?.produtorId || projectData?.produtorUid;
@@ -248,9 +240,7 @@ export default function ProjectSummaryPage() {
     return { consultantName: display(c), producerName: display(p) };
   }, [projectData, usersMap]);
 
-  function handlePrint() {
-    window.print();
-  }
+  const handlePrint = () => window.print();
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -263,7 +253,7 @@ export default function ProjectSummaryPage() {
         }
       `}</style>
 
-      {/* Header flutuante */}
+      {/* Header */}
       <div className="no-print sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-neutral-200">
         <div className="mx-auto max-w-7xl px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -346,7 +336,7 @@ export default function ProjectSummaryPage() {
           </div>
         ) : (
           <>
-            {/* Dados do Projeto + Datas do Evento */}
+            {/* Dados + Datas */}
             <section className="print-block grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 rounded-2xl bg-white border border-neutral-200 shadow-sm">
                 <header className="border-b border-neutral-200 px-5 py-4">
@@ -364,22 +354,16 @@ export default function ProjectSummaryPage() {
                   )}
                 </header>
                 <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <Field
-                    label="Projeto"
-                    value={projectData?.name || projectData?.titulo || projectData?.nome || "—"}
-                  />
+                  <Field label="Projeto" value={projectData?.name || projectData?.titulo || projectData?.nome || "—"} />
                   <Field label="Consultor" value={names.consultantName || "—"} />
                   <Field label="Produtor" value={names.producerName || "—"} />
 
-                  {/* Datas do projeto (ou do evento) */}
                   <Field
                     label="Montagem"
                     value={
                       (projectData?.montagem?.dataInicio || projectData?.montagem?.dataFim)
                         ? `${formatDateBR(projectData?.montagem?.dataInicio)} — ${formatDateBR(projectData?.montagem?.dataFim)}`
-                        : (selectedEventFull
-                            ? `${formatDateBR(selectedEventFull?.dataInicioMontagem)} — ${formatDateBR(selectedEventFull?.dataFimMontagem)}`
-                            : "—")
+                        : (selectedEventFull ? `${formatDateBR(selectedEventFull?.dataInicioMontagem)} — ${formatDateBR(selectedEventFull?.dataFimMontagem)}` : "—")
                     }
                   />
                   <Field
@@ -387,9 +371,7 @@ export default function ProjectSummaryPage() {
                     value={
                       (projectData?.evento?.dataInicio || projectData?.evento?.dataFim)
                         ? `${formatDateBR(projectData?.evento?.dataInicio)} — ${formatDateBR(projectData?.evento?.dataFim)}`
-                        : (selectedEventFull
-                            ? `${formatDateBR(selectedEventFull?.dataInicioEvento)} — ${formatDateBR(selectedEventFull?.dataFimEvento)}`
-                            : "—")
+                        : (selectedEventFull ? `${formatDateBR(selectedEventFull?.dataInicioEvento)} — ${formatDateBR(selectedEventFull?.dataFimEvento)}` : "—")
                     }
                   />
                   <Field
@@ -397,9 +379,7 @@ export default function ProjectSummaryPage() {
                     value={
                       (projectData?.desmontagem?.dataInicio || projectData?.desmontagem?.dataFim)
                         ? `${formatDateBR(projectData?.desmontagem?.dataInicio)} — ${formatDateBR(projectData?.desmontagem?.dataFim)}`
-                        : (selectedEventFull
-                            ? `${formatDateBR(selectedEventFull?.dataInicioDesmontagem)} — ${formatDateBR(selectedEventFull?.dataFimDesmontagem)}`
-                            : "—")
+                        : (selectedEventFull ? `${formatDateBR(selectedEventFull?.dataInicioDesmontagem)} — ${formatDateBR(selectedEventFull?.dataFimDesmontagem)}` : "—")
                     }
                   />
 
@@ -407,8 +387,8 @@ export default function ProjectSummaryPage() {
                     <div className="text-[13px] text-neutral-500 mb-1">Equipes terceirizadas</div>
                     {renderTeamsPills(
                       projectData?.equipesEmpreiteiras ||
-                        projectData?.thirdPartyTeams ||
-                        projectData?.fornecedores
+                      projectData?.thirdPartyTeams ||
+                      projectData?.fornecedores
                     )}
                   </div>
                 </div>
@@ -422,16 +402,11 @@ export default function ProjectSummaryPage() {
                   <KPI label="Total" value={ticketsSummary?.total || 0} />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <KPI label={STATUS_LABELS.aberto} value={ticketsSummary?.byStatus?.aberto || 0} />
-                    <KPI
-                      label={STATUS_LABELS.em_tratativa}
-                      value={ticketsSummary?.byStatus?.em_tratativa || 0}
-                    />
+                    <KPI label={STATUS_LABELS.em_tratativa} value={ticketsSummary?.byStatus?.em_tratativa || 0} />
                     <KPI
                       label="Executado (aguard. validação)"
-                      value={
-                        (ticketsSummary?.byStatus?.executado_aguardando_validacao || 0) +
-                        (ticketsSummary?.byStatus?.executado_aguardando_validacao_operador || 0)
-                      }
+                      value={(ticketsSummary?.byStatus?.executado_aguardando_validacao || 0) +
+                             (ticketsSummary?.byStatus?.executado_aguardando_validacao_operador || 0)}
                     />
                     <KPI label={STATUS_LABELS.concluido} value={ticketsSummary?.byStatus?.concluido || 0} />
                     <KPI label={STATUS_LABELS.arquivado} value={ticketsSummary?.byStatus?.arquivado || 0} />
@@ -445,7 +420,7 @@ export default function ProjectSummaryPage() {
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Resumo dos Chamados</h2>
                 <p className="text-sm text-neutral-500">
-                  Título, data, descrição, mensagens, status e campos específicos (Locação/Compras).
+                  Título, data, descrição, **Informações Específicas**, mensagens, status.
                 </p>
               </header>
               <div className="p-5 space-y-3">
@@ -455,32 +430,30 @@ export default function ProjectSummaryPage() {
                   </div>
                 ) : (
                   ticketsList.map((t) => (
-                    <article
-                      key={t.id || t.ticketId}
-                      className="rounded-xl border border-neutral-200 bg-neutral-50 p-4"
-                    >
+                    <article key={t.id || t.ticketId} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-semibold">
                             {t.titulo || t.title || t.assunto || `Chamado ${t.id || ""}`}
                           </div>
-                          <div className="text-xs text-neutral-500">
-                            {formatDateTimeBR(t.updatedAt || t.createdAt)}
-                          </div>
+                          <div className="text-xs text-neutral-500">{formatDateTimeBR(t.updatedAt || t.createdAt)}</div>
                         </div>
                         <span className="inline-flex items-center rounded-full border border-neutral-300 bg-white px-2 py-0.5 text-xs font-medium text-neutral-700">
                           {prettyStatus(t.status)}
                         </span>
                       </div>
 
-                      {t.descricao || t.description ? (
+                      {(t.descricao || t.description) && (
                         <p className="mt-2 text-sm text-neutral-700 whitespace-pre-wrap">
                           {t.descricao || t.description}
                         </p>
-                      ) : null}
+                      )}
 
-                      {/* Campos específicos conforme o tipo */}
+                      {/* Campos extras por tipo (Locação/Compras) */}
                       {renderExtraSections(t)}
+
+                      {/* Informações Específicas (itens) – aparece para qualquer chamado que possua a estrutura */}
+                      {renderSpecificInfoBlock(t)}
 
                       {/* Mensagens / comentários */}
                       {renderMessages(t)}
@@ -503,9 +476,7 @@ export default function ProjectSummaryPage() {
                 ) : (
                   Object.entries(diariesGrouped).map(([day, items]) => (
                     <div key={day} className="rounded-xl border border-neutral-200 bg-neutral-50">
-                      <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">
-                        {day}
-                      </div>
+                      <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">{day}</div>
                       <ul className="divide-y divide-neutral-200">
                         {items.map((d) => (
                           <li key={d.id} className="p-4">
@@ -513,9 +484,7 @@ export default function ProjectSummaryPage() {
                               <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
                               <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
                             </div>
-                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">
-                              {(d.text || "").trim() || "—"}
-                            </p>
+                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">{(d.text || "").trim() || "—"}</p>
                           </li>
                         ))}
                       </ul>
@@ -531,7 +500,7 @@ export default function ProjectSummaryPage() {
   );
 }
 
-/* ================== UI helpers ================== */
+/* ===== UI helpers ===== */
 function Field({ label, value }) {
   return (
     <div className="flex flex-col">
@@ -549,7 +518,7 @@ function KPI({ label, value }) {
   );
 }
 function FieldRow({ label, value }) {
-  if (!value && value !== 0) return null;
+  if (value === undefined || value === null || value === "") return null;
   return (
     <div className="grid grid-cols-3 gap-2 text-sm">
       <div className="col-span-1 text-neutral-500">{label}</div>
@@ -560,27 +529,18 @@ function FieldRow({ label, value }) {
 function renderTeamsPills(raw) {
   const list = Array.isArray(raw) ? raw : (raw && typeof raw === "object" ? Object.values(raw) : []);
   if (!list || list.length === 0) {
-    return (
-      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">
-        —
-      </div>
-    );
+    return <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">—</div>;
   }
   return (
     <div className="flex flex-wrap gap-1">
       {list.filter(Boolean).map((empresa, idx) => (
-        <span
-          key={idx}
-          className="px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-800 text-xs border"
-          title={empresa}
-        >
+        <span key={idx} className="px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-800 text-xs border" title={empresa}>
           {empresa}
         </span>
       ))}
     </div>
   );
 }
-
 function prettyStatus(s) {
   const v = (s || "").toString().toLowerCase();
   if (STATUS_LABELS[v]) return STATUS_LABELS[v];
@@ -599,7 +559,7 @@ function prettyStatus(s) {
   return aliases[v] || (s || "—");
 }
 
-/* ================== data helpers ================== */
+/* ===== Tickets helpers ===== */
 function filterTicketsForProject(all, projectId) {
   const pid = String(projectId);
   const list = (all || []).filter((t) => {
@@ -611,12 +571,9 @@ function filterTicketsForProject(all, projectId) {
     if (Array.isArray(t.projectIds) && t.projectIds.map(String).includes(pid)) return true;
     return false;
   });
-
-  // ordena por atualização/criação mais recente
-  list.sort((a, b) => (parseMillis(b.updatedAt || b.createdAt) - parseMillis(a.updatedAt || a.createdAt)));
+  list.sort((a, b) => parseMillis(b.updatedAt || b.createdAt) - parseMillis(a.updatedAt || a.createdAt));
   return list;
 }
-
 function buildTicketSummary(tickets) {
   const byStatus = {};
   let total = 0;
@@ -629,99 +586,138 @@ function buildTicketSummary(tickets) {
   return { total, byStatus };
 }
 
-// ======== Locação & Compras: detecção e render ========
+/* ===== Locação & Compras: detecção e extras ===== */
 function isLocacaoTicket(t) {
   const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
   if (["locacao", "locação", "locacoes", "locações", "rental"].includes(tipo)) return true;
-  return has(t,
-    "dataRetirada", "dataDevolucao", "retiradaData", "devolucaoData",
-    "locadora", "empresaLocadora", "fornecedorLocacao", "enderecoRetirada", "enderecoDevolucao",
-    "valorDiaria", "valorTotalLocacao", "itensLocacao", "itemLocacao"
+  return has(
+    t,
+    "dataRetirada","dataDevolucao","retiradaData","devolucaoData",
+    "locadora","empresaLocadora","fornecedorLocacao","enderecoRetirada","enderecoDevolucao",
+    "valorDiaria","valorTotalLocacao"
   );
 }
 function isComprasTicket(t) {
   const tipo = norm(t.tipo || t.categoria || t.setor || t.area || "");
-  if (["compras", "compra", "purchase", "suprimentos"].includes(tipo)) return true;
-  return has(t,
-    "produto", "descricaoProduto", "valorUnitario", "valorTotal", "quantidade",
-    "prazoEntrega", "fornecedor", "nfNumero", "pedidoNumero", "cotacoes"
-  );
+  if (["compras", "compra", "purchase", "suprimentos","material","materiais"].includes(tipo)) return true;
+  return has(t,"produto","descricaoProduto","valorUnitario","valorTotal","quantidade","prazoEntrega","fornecedor","nfNumero","pedidoNumero","cotacoes");
 }
 
 function renderExtraSections(t) {
-  if (isLocacaoTicket(t)) return renderLocacaoExtra(t);
-  if (isComprasTicket(t)) return renderComprasExtra(t);
+  if (isLocacaoTicket(t)) {
+    return (
+      <div className="mt-3">
+        <div className="text-xs text-neutral-500 mb-1">Detalhes de Locação</div>
+        <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
+          <FieldRow label="Fornecedor / Locadora" value={t.empresaLocadora || t.locadora || t.fornecedorLocacao || t.fornecedor} />
+          <FieldRow label="Contato" value={t.contato || t.telefone || t.emailContato} />
+          <FieldRow label="Retirada" value={`${formatDateBR(t.dataRetirada || t.retiradaData)}${t.enderecoRetirada ? " • " + t.enderecoRetirada : ""}`} />
+          <FieldRow label="Devolução" value={`${formatDateBR(t.dataDevolucao || t.devolucaoData)}${t.enderecoDevolucao ? " • " + t.enderecoDevolucao : ""}`} />
+          <FieldRow label="Valor diária" value={t.valorDiaria} />
+          <FieldRow label="Valor total" value={t.valorTotalLocacao || t.valorTotal} />
+        </div>
+      </div>
+    );
+  }
+  if (isComprasTicket(t)) {
+    const cotacoes = Array.isArray(t.cotacoes) ? t.cotacoes : [];
+    return (
+      <div className="mt-3">
+        <div className="text-xs text-neutral-500 mb-1">Detalhes de Compras</div>
+        <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
+          <FieldRow label="Produto" value={t.produto || t.descricaoProduto || t.item || t.titulo} />
+          <FieldRow label="Fornecedor" value={t.fornecedor || t.fornecedorCompra || t.empresa} />
+          <FieldRow label="Quantidade" value={t.quantidade} />
+          <FieldRow label="Valor unitário" value={t.valorUnitario} />
+          <FieldRow label="Valor total" value={t.valorTotal} />
+          <FieldRow label="Prazo de entrega" value={t.prazoEntrega && formatDateBR(t.prazoEntrega)} />
+          <FieldRow label="Nº do pedido" value={t.pedidoNumero} />
+          <FieldRow label="Nº da NF" value={t.nfNumero} />
+          {cotacoes.length ? (
+            <div className="pt-2">
+              <div className="text-xs text-neutral-500 mb-1">Cotações</div>
+              <ul className="space-y-1">
+                {cotacoes.map((c, idx) => (
+                  <li key={idx} className="text-sm">
+                    • {(c.fornecedor || c.empresa || `Fornecedor ${idx + 1}`)} — {c.valor || c.preco || "—"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return null;
 }
 
-function renderLocacaoExtra(t) {
-  const itens = Array.isArray(t.itensLocacao) ? t.itensLocacao
-    : Array.isArray(t.itens) ? t.itens
-    : t.itemLocacao ? [t.itemLocacao] : [];
-
+/* ===== Informações Específicas (itens) ===== */
+// aceita vários formatos: array OU objeto com {item1: {...}, item2: {...}}, OU "itens"
+function toArrayFromUnknown(x) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x;
+  if (typeof x === "object") return Object.keys(x).map((k) => ({ _key: k, ...x[k] }));
+  return [];
+}
+function extractSpecificItems(t) {
+  const candidates = [
+    t.informacoesEspecificasItens,
+    t.informacoesEspecificas,
+    t.itensEspecificos,
+    t.itens_especificos,
+    t.dadosEspecificos,
+    t.itemsEspec,
+    t.items,
+    t.itens,
+    t.lista,
+  ];
+  let arr = [];
+  for (const src of candidates) {
+    const tmp = toArrayFromUnknown(src);
+    if (tmp.length) { arr = tmp; break; }
+  }
+  return arr
+    .map((i, idx) => ({
+      idx,
+      codigo: i.codigoDoItem || i.codigo_item || i.codigo || i.cod || i.codigoItem,
+      item: i.item || i.nome || i.descricao || i.descricaoItem || i.produto,
+      quantidade: i.quantidade || i.qtd || i.qtde,
+      unidade: i.unidade || i.um,
+      valorUnitario: i.valorUnitario || i.precoUnitario || i.vlrUnit,
+      valorTotal: i.valorTotal || i.precoTotal || i.vlrTotal,
+    }))
+    .filter((it) => it.item || it.codigo || it.quantidade);
+}
+function renderSpecificInfoBlock(t) {
+  const items = extractSpecificItems(t);
+  if (!items.length) return null;
   return (
     <div className="mt-3">
-      <div className="text-xs text-neutral-500 mb-1">Detalhes de Locação</div>
-      <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
-        <FieldRow label="Fornecedor / Locadora" value={t.empresaLocadora || t.locadora || t.fornecedorLocacao || t.fornecedor} />
-        <FieldRow label="Contato" value={t.contato || t.telefone || t.emailContato} />
-        <FieldRow label="Retirada" value={`${formatDateBR(t.dataRetirada || t.retiradaData)} ${t.enderecoRetirada ? "• " + t.enderecoRetirada : ""}`} />
-        <FieldRow label="Devolução" value={`${formatDateBR(t.dataDevolucao || t.devolucaoData)} ${t.enderecoDevolucao ? "• " + t.enderecoDevolucao : ""}`} />
-        <FieldRow label="Valor diária" value={t.valorDiaria} />
-        <FieldRow label="Valor total" value={t.valorTotalLocacao || t.valorTotal} />
-
-        {itens?.length ? (
-          <div className="pt-2">
-            <div className="text-xs text-neutral-500 mb-1">Itens</div>
-            <ul className="space-y-1">
-              {itens.map((i, idx) => (
-                <li key={idx} className="text-sm">
-                  • {(i?.descricao || i?.descricaoItem || i?.produto || i?.item || "Item")}
-                  {i?.quantidade ? ` — Qtde: ${i.quantidade}` : ""}
-                  {i?.valorUnitario ? ` — Vlr Un: ${i.valorUnitario}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+      <div className="text-xs text-neutral-500 mb-1">Informações Específicas</div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-3">
+        <ul className="space-y-2">
+          {items.map((it, idx) => (
+            <li key={it.idx ?? idx} className="text-sm">
+              <div className="font-medium">Item {idx + 1}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div><span className="text-neutral-500">Código:</span> {it.codigo || "—"}</div>
+                <div className="sm:col-span-2"><span className="text-neutral-500">Item:</span> {it.item || "—"}</div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div><span className="text-neutral-500">Quantidade:</span> {it.quantidade || "—"}</div>
+                <div><span className="text-neutral-500">Unidade:</span> {it.unidade || "—"}</div>
+                <div><span className="text-neutral-500">Vlr Un:</span> {it.valorUnitario || "—"} {it.valorTotal ? ` | Vlr Total: ${it.valorTotal}` : ""}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
 }
 
-function renderComprasExtra(t) {
-  const cotacoes = Array.isArray(t.cotacoes) ? t.cotacoes : [];
-  return (
-    <div className="mt-3">
-      <div className="text-xs text-neutral-500 mb-1">Detalhes de Compras</div>
-      <div className="rounded-lg border border-neutral-200 bg-white p-3 space-y-2">
-        <FieldRow label="Produto" value={t.produto || t.descricaoProduto || t.item || t.titulo} />
-        <FieldRow label="Fornecedor" value={t.fornecedor || t.fornecedorCompra || t.empresa} />
-        <FieldRow label="Quantidade" value={t.quantidade} />
-        <FieldRow label="Valor unitário" value={t.valorUnitario} />
-        <FieldRow label="Valor total" value={t.valorTotal} />
-        <FieldRow label="Prazo de entrega" value={t.prazoEntrega && formatDateBR(t.prazoEntrega)} />
-        <FieldRow label="Nº do pedido" value={t.pedidoNumero} />
-        <FieldRow label="Nº da NF" value={t.nfNumero} />
-
-        {cotacoes.length ? (
-          <div className="pt-2">
-            <div className="text-xs text-neutral-500 mb-1">Cotações</div>
-            <ul className="space-y-1">
-              {cotacoes.map((c, idx) => (
-                <li key={idx} className="text-sm">
-                  • {(c.fornecedor || c.empresa || `Fornecedor ${idx + 1}`)} — {c.valor || c.preco || "—"}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-// mensagens/comentários: tenta "messages", "mensagens", "historico", "comentarios", "comments", "updates"
+/* ===== Mensagens ===== */
 function renderMessages(t) {
   const candidates = [t.messages, t.mensagens, t.historico, t.comentarios, t.comments, t.updates];
   let arr = null;
@@ -763,6 +759,7 @@ function renderMessages(t) {
   );
 }
 
+/* ===== Diários ===== */
 function groupDiariesByDay(feedItems) {
   const groups = {};
   for (const it of (feedItems || [])) {
@@ -770,11 +767,9 @@ function groupDiariesByDay(feedItems) {
     if (!groups[key]) groups[key] = [];
     groups[key].push(it);
   }
-  // ordenar dias desc
   const ordered = {};
   Object.entries(groups)
     .sort((a, b) => {
-      // dd/mm/aaaa -> aaaa-mm-dd
       const A = a[0].split("/").reverse().join("-");
       const B = b[0].split("/").reverse().join("-");
       return new Date(B) - new Date(A);
