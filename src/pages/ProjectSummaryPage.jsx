@@ -1,19 +1,21 @@
+// src/pages/ProjectSummaryPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
-// ✅ Use os services já existentes no projeto (mesmos paths usados na Dashboard)
+// Services do projeto
 import { projectService } from "../services/projectService";
 import { ticketService } from "../services/ticketService";
 import { userService } from "../services/userService";
+import { diaryService } from "../services/diaryService";
+import { eventService } from "../services/eventService";
 
 /**
  * Página: Resumo do Projeto
- * - Deriva os EVENTOS a partir dos projetos acessíveis (campos: feira | evento | eventName | nomeEvento, e eventId opcional)
- * - Filtra projetos por evento respeitando a role (produtor/consultor)
- * - Mostra dados do projeto, resumo de chamados por status e (opcional) diários
- * - Botão "Imprimir" com CSS de impressão
- *
- * ❌ Sem dependência direta do Firebase/Firestore aqui (usa apenas os services).
+ * - Lista EVENTOS (derivados dos projetos) e carrega EVENTOS completos via eventService para exibir datas
+ * - Respeita papéis (produtor / consultor)
+ * - Mostra resumo dos chamados + lista detalhada (descrição, mensagens e status)
+ * - Mostra diários agrupados por dia
+ * - Botão "Imprimir"
  */
 
 const STATUS_LABELS = {
@@ -24,22 +26,29 @@ const STATUS_LABELS = {
   concluido: "Concluído",
   arquivado: "Arquivado",
 };
-const INTERESTING_STATUSES = Object.keys(STATUS_LABELS);
+const KNOWN_STATUSES = Object.keys(STATUS_LABELS);
 
-// Utils
+// helpers de string/data
 const norm = (s) => (s || "").toString().trim().toLowerCase();
-function formatDateBR(tsLike) {
-  if (!tsLike) return "—";
-  let d = null;
-  if (tsLike instanceof Date) d = tsLike;
-  else if (typeof tsLike === "string" || typeof tsLike === "number") d = new Date(tsLike);
-  else if (tsLike && typeof tsLike === "object" && typeof tsLike.toDate === "function") d = tsLike.toDate();
-  else if (tsLike && typeof tsLike === "object" && "seconds" in tsLike) d = new Date(tsLike.seconds * 1000);
-  if (!d || isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+function parseMillis(ts) {
+  if (!ts) return 0;
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts === "object" && ts.seconds) return ts.seconds * 1000;
+  try { return new Date(ts).getTime() || 0; } catch { return 0; }
 }
 
-// Match de projeto x evento por id ou por nome
+function formatDateBR(tsLike) {
+  const ms = parseMillis(tsLike);
+  if (!ms) return "—";
+  return new Date(ms).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+function formatDateTimeBR(tsLike) {
+  const ms = parseMillis(tsLike);
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
 function projectMatchesEvent(project, eventObj) {
   if (!project || !eventObj) return false;
   const pEventId = project.eventId || project.eventoId || project.feiraId;
@@ -48,13 +57,14 @@ function projectMatchesEvent(project, eventObj) {
   const pEventName = project.feira || project.evento || project.eventName || project.nomeEvento;
   if (pEventName && eventObj.name && norm(pEventName) === norm(eventObj.name)) return true;
 
-  // fallback (id = nome)
+  // fallback (id do evento = nome)
   if (!pEventId && eventObj.id && norm(eventObj.id) === norm(pEventName)) return true;
+
   return false;
 }
 
 export default function ProjectSummaryPage() {
-  // Compat: tanto {currentUser, role} quanto {user, userProfile}
+  // Compat: {currentUser, role} e {user, userProfile}
   const auth = (typeof useAuth === "function" ? useAuth() : {}) || {};
   const uid = auth?.currentUser?.uid || auth?.user?.uid || null;
   const userRoleRaw = auth?.role || auth?.userProfile?.funcao || null;
@@ -63,44 +73,48 @@ export default function ProjectSummaryPage() {
   const [loading, setLoading] = useState(false);
 
   // Eventos & Projetos
-  const [events, setEvents] = useState([]); // [{id,name}]
+  const [events, setEvents] = useState([]); // [{id, name}]
+  const [eventsFull, setEventsFull] = useState([]); // eventService (com datas)
   const [selectedEventId, setSelectedEventId] = useState("");
+
   const [allAccessibleProjects, setAllAccessibleProjects] = useState([]);
   const [projectsForEvent, setProjectsForEvent] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
 
   // Dados agregados
   const [projectData, setProjectData] = useState(null);
-  const [usersMap, setUsersMap] = useState({}); // {uid: {nome, displayName, ...}}
+  const [usersMap, setUsersMap] = useState({});
   const [ticketsSummary, setTicketsSummary] = useState({ total: 0, byStatus: {} });
-  const [diaries, setDiaries] = useState([]); // opcional
+  const [ticketsList, setTicketsList] = useState([]);
+  const [diariesGrouped, setDiariesGrouped] = useState({}); // { 'dd/mm/aaaa': [items] }
 
   useEffect(() => { document.title = "Resumo do Projeto"; }, []);
 
-  // 1) Carrega todos os projetos acessíveis + deriva eventos + carrega usuários
+  // 1) Carrega projetos + usuários + eventos
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [allProjects, allUsers] = await Promise.all([
+        const [allProjects, allUsers, evs] = await Promise.all([
           projectService.getAllProjects(),
           userService.getAllUsers(),
+          eventService.getAllEvents?.().catch(() => []) || [],
         ]);
 
-        // Mapa de usuários
+        // mapa de usuários
         const umap = {};
-        (allUsers || []).forEach(u => {
+        (allUsers || []).forEach((u) => {
           const id = u.id || u.uid || u.userId;
           if (id) umap[String(id)] = u;
         });
         setUsersMap(umap);
 
-        // Restringe projetos por role
-        let accessible = [...allProjects];
+        // restringe por perfil
+        let accessible = [...(allProjects || [])];
         if (["produtor", "consultor"].includes(userRole) && uid) {
           accessible = accessible.filter((p) => {
-            const pid = String(p?.producerId || p?.produtorId || "");
-            const cid = String(p?.consultantId || p?.consultorId || "");
+            const pid = String(p?.producerId || p?.produtorId || p?.produtorUid || "");
+            const cid = String(p?.consultantId || p?.consultorId || p?.consultorUid || "");
             if (userRole === "produtor") return pid === String(uid);
             if (userRole === "consultor") return cid === String(uid);
             return true;
@@ -108,22 +122,36 @@ export default function ProjectSummaryPage() {
         }
         setAllAccessibleProjects(accessible);
 
-        // Deriva eventos a partir dos projetos acessíveis
-        const mapByKey = new Map();
+        // deriva eventos pelos projetos acessíveis
+        const byKey = new Map();
         accessible.forEach((p) => {
           const id = p?.eventId || p?.eventoId || p?.feiraId || null;
           const name = p?.feira || p?.evento || p?.eventName || p?.nomeEvento || null;
           if (name) {
             const key = norm(id || name);
-            if (!mapByKey.has(key)) mapByKey.set(key, { id: id || name, name });
+            if (!byKey.has(key)) byKey.set(key, { id: id || name, name });
           }
         });
-        const evs = Array.from(mapByKey.values()).sort((a, b) => norm(a.name).localeCompare(norm(b.name)));
-        setEvents(evs);
+        setEvents(Array.from(byKey.values()).sort((a, b) => norm(a.name).localeCompare(norm(b.name))));
+
+        // eventos (com datas) vindos do eventService
+        const mappedFull = (evs || []).map((e) => ({
+          id: e.id,
+          name: e.nome || e.name || e.titulo || e.id,
+          pavilhao: e.pavilhao || null,
+          dataInicioMontagem: e.dataInicioMontagem || e.montagemInicio,
+          dataFimMontagem: e.dataFimMontagem || e.montagemFim,
+          dataInicioEvento: e.dataInicioEvento || e.eventoInicio,
+          dataFimEvento: e.dataFimEvento || e.eventoFim,
+          dataInicioDesmontagem: e.dataInicioDesmontagem || e.desmontagemInicio,
+          dataFimDesmontagem: e.dataFimDesmontagem || e.desmontagemFim,
+        }));
+        setEventsFull(mappedFull);
       } catch (e) {
-        console.error("Erro ao carregar projetos/eventos/usuários:", e);
-        setEvents([]);
+        console.error("Erro ao carregar dados iniciais:", e);
         setAllAccessibleProjects([]);
+        setEvents([]);
+        setEventsFull([]);
         setUsersMap({});
       } finally {
         setLoading(false);
@@ -145,33 +173,46 @@ export default function ProjectSummaryPage() {
       return;
     }
     const list = allAccessibleProjects.filter((p) => projectMatchesEvent(p, ev));
-    list.sort((a, b) => norm(a?.name || a?.titulo || a?.nome || "").localeCompare(norm(b?.name || b?.titulo || b?.nome || "")));
+    list.sort((a, b) => norm(a?.name || a?.titulo || a?.nome || "")
+      .localeCompare(norm(b?.name || b?.titulo || b?.nome || "")));
     setProjectsForEvent(list);
+
     if (selectedProjectId && !list.some((p) => p.id === selectedProjectId)) {
       setSelectedProjectId("");
       setProjectData(null);
     }
   }, [selectedEventId, events, allAccessibleProjects]);
 
-  // 3) Ao escolher projeto, carrega dados + sumariza chamados
+  // 3) Ao escolher projeto, carrega resumo + tickets + diários
   useEffect(() => {
     if (!selectedProjectId) {
       setProjectData(null);
       setTicketsSummary({ total: 0, byStatus: {} });
-      setDiaries([]);
+      setTicketsList([]);
+      setDiariesGrouped({});
       return;
     }
     (async () => {
       setLoading(true);
       try {
-        const p = projectsForEvent.find((x) => x.id === selectedProjectId) || allAccessibleProjects.find((x) => x.id === selectedProjectId) || null;
+        const p =
+          projectsForEvent.find((x) => x.id === selectedProjectId) ||
+          allAccessibleProjects.find((x) => x.id === selectedProjectId) ||
+          null;
         setProjectData(p || null);
 
-        // Resumo de Chamados com ticketService
-        await summarizeTicketsForProject(selectedProjectId, setTicketsSummary);
+        // Tickets
+        const allTickets = await ticketService.getAllTickets();
+        const tickets = filterTicketsForProject(allTickets, selectedProjectId);
+        setTicketsList(tickets);
+        setTicketsSummary(buildTicketSummary(tickets));
 
-        // Diários (opcional): se você tiver diaryService, podemos integrar depois
-        setDiaries([]);
+        // Diários (feed do projeto)
+        const feed = await diaryService
+          .fetchFeedByProject?.({ projectId: selectedProjectId, pageSize: 500 })
+          .catch(() => ({ items: [] }));
+        const grouped = groupDiariesByDay(feed?.items || []);
+        setDiariesGrouped(grouped);
       } catch (e) {
         console.error("Erro ao carregar dados do projeto:", e);
       } finally {
@@ -185,36 +226,24 @@ export default function ProjectSummaryPage() {
     [events, selectedEventId]
   );
 
+  // mesmo evento (com datas) via id ou nome
+  const selectedEventFull = useMemo(() => {
+    if (!selectedEvent) return null;
+    const byId = eventsFull.find((e) => String(e.id) === String(selectedEvent.id));
+    if (byId) return byId;
+    const byName = eventsFull.find((e) => norm(e.name) === norm(selectedEvent.name));
+    return byName || null;
+  }, [selectedEvent, eventsFull]);
+
+  // nomes
   const names = useMemo(() => {
-    const cId = projectData?.consultantId || projectData?.consultorId;
-    const pId = projectData?.producerId || projectData?.produtorId;
+    const cId = projectData?.consultantId || projectData?.consultorId || projectData?.consultorUid;
+    const pId = projectData?.producerId || projectData?.produtorId || projectData?.produtorUid;
     const c = (cId && usersMap[String(cId)]) || {};
     const p = (pId && usersMap[String(pId)]) || {};
     const display = (u) => u.displayName || u.nome || u.name || u.email || "—";
     return { consultantName: display(c), producerName: display(p) };
   }, [projectData, usersMap]);
-
-  const thirdPartyTeams = useMemo(() => {
-    if (!projectData) return [];
-    const raw = projectData?.thirdPartyTeams || projectData?.equipesTerceirizadas || projectData?.fornecedores || [];
-    if (Array.isArray(raw)) return raw;
-    if (raw && typeof raw === "object") return Object.keys(raw).map((k) => raw[k]);
-    return [];
-  }, [projectData]);
-
-  const perf = useMemo(
-    () => ({
-      totalChamados: ticketsSummary?.total || 0,
-      abertos: ticketsSummary?.byStatus?.aberto || 0,
-      emTratativa: ticketsSummary?.byStatus?.em_tratativa || 0,
-      executadoAguardandoValidacao:
-        (ticketsSummary?.byStatus?.executado_aguardando_validacao || 0) +
-        (ticketsSummary?.byStatus?.executado_aguardando_validacao_operador || 0),
-      concluidos: ticketsSummary?.byStatus?.concluido || 0,
-      arquivados: ticketsSummary?.byStatus?.arquivado || 0,
-    }),
-    [ticketsSummary]
-  );
 
   function handlePrint() {
     window.print();
@@ -231,7 +260,7 @@ export default function ProjectSummaryPage() {
         }
       `}</style>
 
-      {/* Header flutuante com selects */}
+      {/* Header flutuante */}
       <div className="no-print sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-neutral-200">
         <div className="mx-auto max-w-7xl px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -295,7 +324,7 @@ export default function ProjectSummaryPage() {
       </div>
 
       {/* Conteúdo */}
-      <div className="mx-auto max-w-7xl px-4 py-6">
+      <div className="mx-auto max-w-7xl px-4 py-6 space-y-6">
         {!selectedProjectId ? (
           <div className="rounded-xl border border-dashed border-neutral-300 bg-white p-8 text-neutral-600">
             Selecione um evento e um projeto para visualizar o resumo.
@@ -305,103 +334,189 @@ export default function ProjectSummaryPage() {
             Não foi possível carregar os dados do projeto selecionado.
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Dados do Projeto */}
-            <section className="print-block lg:col-span-2 rounded-2xl bg-white border border-neutral-200 shadow-sm">
-              <header className="border-b border-neutral-200 px-5 py-4">
-                <h2 className="text-lg font-semibold">Dados do Projeto</h2>
-                {selectedEvent && (
-                  <p className="text-sm text-neutral-500">
-                    Evento:{" "}
-                    <span className="font-medium">
-                      {selectedEvent?.name || selectedEvent?.titulo || selectedEvent?.nome}
-                    </span>
-                  </p>
-                )}
-              </header>
-              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                <Field label="Projeto" value={projectData?.name || projectData?.titulo || projectData?.nome || "—"} />
-                <Field label="Consultor" value={(usersMap[String(projectData?.consultantId || projectData?.consultorId)]?.displayName) || (usersMap[String(projectData?.consultantId || projectData?.consultorId)]?.nome) || "—"} />
-                <Field label="Produtor" value={(usersMap[String(projectData?.producerId || projectData?.produtorId)]?.displayName) || (usersMap[String(projectData?.producerId || projectData?.produtorId)]?.nome) || "—"} />
-                <Field label="Montagem" value={formatDateBR(projectData?.montagemDate || projectData?.dataMontagem)} />
-                <Field label="Evento" value={formatDateBR(projectData?.eventoDate || projectData?.dataEvento)} />
-                <Field label="Desmontagem" value={formatDateBR(projectData?.desmontagemDate || projectData?.dataDesmontagem)} />
+          <>
+            {/* Dados do Projeto + Datas do Evento */}
+            <section className="print-block grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 rounded-2xl bg-white border border-neutral-200 shadow-sm">
+                <header className="border-b border-neutral-200 px-5 py-4">
+                  <h2 className="text-lg font-semibold">Dados do Projeto</h2>
+                  {selectedEvent && (
+                    <p className="text-sm text-neutral-500">
+                      Evento:{" "}
+                      <span className="font-medium">
+                        {selectedEvent?.name || selectedEvent?.titulo || selectedEvent?.nome}
+                      </span>
+                      {selectedEventFull?.pavilhao ? (
+                        <span className="ml-2">• Pavilhão: {selectedEventFull.pavilhao}</span>
+                      ) : null}
+                    </p>
+                  )}
+                </header>
+                <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <Field
+                    label="Projeto"
+                    value={projectData?.name || projectData?.titulo || projectData?.nome || "—"}
+                  />
+                  <Field label="Consultor" value={names.consultantName || "—"} />
+                  <Field label="Produtor" value={names.producerName || "—"} />
 
-                <div className="sm:col-span-2">
-                  <div className="text-[13px] text-neutral-500 mb-1">Equipes terceirizadas</div>
-                  {(() => {
-                    const raw = projectData?.thirdPartyTeams || projectData?.equipesTerceirizadas || projectData?.fornecedores || [];
-                    const list = Array.isArray(raw) ? raw : (raw && typeof raw === "object" ? Object.keys(raw).map((k) => raw[k]) : []);
-                    return list?.length ? (
-                      <ul className="space-y-2">
-                        {list.map((t, idx) => (
-                          <li key={idx} className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2">
-                            {renderTeam(t)}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">—</div>
-                    );
-                  })()}
+                  {/* Datas do projeto (quando existem) */}
+                  <Field
+                    label="Montagem"
+                    value={
+                      (projectData?.montagem?.dataInicio || projectData?.montagem?.dataFim)
+                        ? `${formatDateBR(projectData?.montagem?.dataInicio)} — ${formatDateBR(projectData?.montagem?.dataFim)}`
+                        : (selectedEventFull
+                            ? `${formatDateBR(selectedEventFull?.dataInicioMontagem)} — ${formatDateBR(selectedEventFull?.dataFimMontagem)}`
+                            : "—")
+                    }
+                  />
+                  <Field
+                    label="Evento"
+                    value={
+                      (projectData?.evento?.dataInicio || projectData?.evento?.dataFim)
+                        ? `${formatDateBR(projectData?.evento?.dataInicio)} — ${formatDateBR(projectData?.evento?.dataFim)}`
+                        : (selectedEventFull
+                            ? `${formatDateBR(selectedEventFull?.dataInicioEvento)} — ${formatDateBR(selectedEventFull?.dataFimEvento)}`
+                            : "—")
+                    }
+                  />
+                  <Field
+                    label="Desmontagem"
+                    value={
+                      (projectData?.desmontagem?.dataInicio || projectData?.desmontagem?.dataFim)
+                        ? `${formatDateBR(projectData?.desmontagem?.dataInicio)} — ${formatDateBR(projectData?.desmontagem?.dataFim)}`
+                        : (selectedEventFull
+                            ? `${formatDateBR(selectedEventFull?.dataInicioDesmontagem)} — ${formatDateBR(selectedEventFull?.dataFimDesmontagem)}`
+                            : "—")
+                    }
+                  />
+
+                  <div className="sm:col-span-2">
+                    <div className="text-[13px] text-neutral-500 mb-1">Equipes terceirizadas</div>
+                    {renderTeamsPills(
+                      projectData?.equipesEmpreiteiras ||
+                        projectData?.thirdPartyTeams ||
+                        projectData?.fornecedores
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-neutral-200 shadow-sm">
+                <header className="border-b border-neutral-200 px-5 py-4">
+                  <h2 className="text-lg font-semibold">Chamados</h2>
+                </header>
+                <div className="p-5 space-y-4">
+                  <KPI label="Total" value={ticketsSummary?.total || 0} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <KPI label={STATUS_LABELS.aberto} value={ticketsSummary?.byStatus?.aberto || 0} />
+                    <KPI
+                      label={STATUS_LABELS.em_tratativa}
+                      value={ticketsSummary?.byStatus?.em_tratativa || 0}
+                    />
+                    <KPI
+                      label="Executado (aguard. validação)"
+                      value={
+                        (ticketsSummary?.byStatus?.executado_aguardando_validacao || 0) +
+                        (ticketsSummary?.byStatus?.executado_aguardando_validacao_operador || 0)
+                      }
+                    />
+                    <KPI label={STATUS_LABELS.concluido} value={ticketsSummary?.byStatus?.concluido || 0} />
+                    <KPI label={STATUS_LABELS.arquivado} value={ticketsSummary?.byStatus?.arquivado || 0} />
+                  </div>
                 </div>
               </div>
             </section>
 
-            {/* Resumo de Chamados */}
+            {/* Lista detalhada de chamados */}
             <section className="print-block rounded-2xl bg-white border border-neutral-200 shadow-sm">
               <header className="border-b border-neutral-200 px-5 py-4">
-                <h2 className="text-lg font-semibold">Chamados</h2>
+                <h2 className="text-lg font-semibold">Resumo dos Chamados</h2>
+                <p className="text-sm text-neutral-500">
+                  Título, data, descrição, mensagens e status de cada chamado do projeto.
+                </p>
               </header>
-              <div className="p-5 space-y-4">
-                <KPI label="Total" value={perf.totalChamados} />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <KPI label={STATUS_LABELS.aberto} value={perf.abertos} />
-                  <KPI label={STATUS_LABELS.em_tratativa} value={perf.emTratativa} />
-                  <KPI label="Executado (aguard. validação)" value={perf.executadoAguardandoValidacao} />
-                  <KPI label={STATUS_LABELS.concluido} value={perf.concluidos} />
-                  <KPI label={STATUS_LABELS.arquivado} value={perf.arquivados} />
-                </div>
+              <div className="p-5 space-y-3">
+                {ticketsList.length === 0 ? (
+                  <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">
+                    Nenhum chamado para este projeto.
+                  </div>
+                ) : (
+                  ticketsList.map((t) => (
+                    <article
+                      key={t.id || t.ticketId}
+                      className="rounded-xl border border-neutral-200 bg-neutral-50 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold">
+                            {t.titulo || t.title || t.assunto || `Chamado ${t.id || ""}`}
+                          </div>
+                          <div className="text-xs text-neutral-500">
+                            {formatDateTimeBR(t.updatedAt || t.createdAt)}
+                          </div>
+                        </div>
+                        <span className="inline-flex items-center rounded-full border border-neutral-300 bg-white px-2 py-0.5 text-xs font-medium text-neutral-700">
+                          {prettyStatus(t.status)}
+                        </span>
+                      </div>
+
+                      {t.descricao || t.description ? (
+                        <p className="mt-2 text-sm text-neutral-700 whitespace-pre-wrap">
+                          {t.descricao || t.description}
+                        </p>
+                      ) : null}
+
+                      {renderMessages(t)}
+                    </article>
+                  ))
+                )}
               </div>
             </section>
 
-            {/* Resumo de Diários */}
-            <section className="print-block lg:col-span-3 rounded-2xl bg-white border border-neutral-200 shadow-sm">
+            {/* Diários agrupados por dia */}
+            <section className="print-block rounded-2xl bg-white border border-neutral-200 shadow-sm">
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Diários do Projeto</h2>
               </header>
-              <div className="p-5">
-                {diaries?.length ? (
-                  <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {diaries.map((d) => (
-                      <li key={d.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-                        <div className="text-sm font-medium">{d.title || d.titulo || "Sem título"}</div>
-                        <div className="mt-1 text-xs text-neutral-500">
-                          {formatDateBR(d.createdAt)} {d?.authorName ? `· ${d.authorName}` : ""}
-                        </div>
-                        {d?.summary || d?.resumo ? (
-                          <p className="mt-2 text-sm text-neutral-700 line-clamp-3">
-                            {d.summary || d.resumo}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
+              <div className="p-5 space-y-4">
+                {Object.keys(diariesGrouped).length === 0 ? (
                   <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">
                     Nenhum diário encontrado para este projeto.
                   </div>
+                ) : (
+                  Object.entries(diariesGrouped).map(([day, items]) => (
+                    <div key={day} className="rounded-xl border border-neutral-200 bg-neutral-50">
+                      <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">
+                        {day}
+                      </div>
+                      <ul className="divide-y divide-neutral-200">
+                        {items.map((d) => (
+                          <li key={d.id} className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
+                              <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
+                            </div>
+                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">
+                              {(d.text || "").trim() || "—"}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
                 )}
               </div>
             </section>
-          </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// UI helpers
+/* ================== UI helpers ================== */
 function Field({ label, value }) {
   return (
     <div className="flex flex-col">
@@ -418,44 +533,137 @@ function KPI({ label, value }) {
     </div>
   );
 }
-function renderTeam(item) {
-  if (typeof item === "string") return item;
-  if (item && typeof item === "object") {
-    const nome = item.name || item.nome || item.empresa || item.fornecedor || "—";
-    const area = item.area || item.tipo || item.categoria || null;
-    const contato = item.contato || item.telefone || item.email || null;
+function renderTeamsPills(raw) {
+  const list = Array.isArray(raw) ? raw : (raw && typeof raw === "object" ? Object.values(raw) : []);
+  if (!list || list.length === 0) {
     return (
-      <div className="flex flex-col">
-        <span className="font-medium">{nome}</span>
-        <span className="text-xs text-neutral-500">{area ? `${area}` : ""} {contato ? `· ${contato}` : ""}</span>
+      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-500">
+        —
       </div>
     );
   }
-  return "—";
+  return (
+    <div className="flex flex-wrap gap-1">
+      {list.filter(Boolean).map((empresa, idx) => (
+        <span
+          key={idx}
+          className="px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-800 text-xs border"
+          title={empresa}
+        >
+          {empresa}
+        </span>
+      ))}
+    </div>
+  );
 }
 
-// Data helpers (sem Firestore — usa ticketService)
-async function summarizeTicketsForProject(projectId, setState) {
+function prettyStatus(s) {
+  const v = (s || "").toString().toLowerCase();
+  if (STATUS_LABELS[v]) return STATUS_LABELS[v];
+  const aliases = {
+    aberto: "Aberto",
+    aberto_aguardando: "Aberto",
+    tratamento: "Em Tratativa",
+    tratando: "Em Tratativa",
+    em_tratativa: "Em Tratativa",
+    executado: "Executado",
+    executado_aguardando_validacao: "Executado (aguard. validação)",
+    concluido: "Concluído",
+    finalizado: "Concluído",
+    arquivado: "Arquivado",
+  };
+  return aliases[v] || (s || "—");
+}
+
+/* ================== data helpers ================== */
+function filterTicketsForProject(all, projectId) {
+  const pid = String(projectId);
+  const list = (all || []).filter((t) => {
+    if (!t) return false;
+    if (String(t.projetoId || "") === pid) return true;
+    if (String(t.projectId || "") === pid) return true;
+    if (t.project && String(t.project.id || "") === pid) return true;
+    if (Array.isArray(t.projetos) && t.projetos.map(String).includes(pid)) return true;
+    if (Array.isArray(t.projectIds) && t.projectIds.map(String).includes(pid)) return true;
+    return false;
+  });
+
+  // ordena por atualização/criação mais recente
+  list.sort((a, b) => (parseMillis(b.updatedAt || b.createdAt) - parseMillis(a.updatedAt || a.createdAt)));
+  return list;
+}
+
+function buildTicketSummary(tickets) {
   const byStatus = {};
   let total = 0;
+  for (const t of tickets) {
+    total += 1;
+    const s = (t.status || "").toLowerCase();
+    const key = KNOWN_STATUSES.includes(s) ? s : "outros";
+    byStatus[key] = (byStatus[key] || 0) + 1;
+  }
+  return { total, byStatus };
+}
 
-  try {
-    const all = await ticketService.getAllTickets();
-    // considera projectId único OU array "projetos"
-    const filtered = (all || []).filter((t) => {
-      if (Array.isArray(t.projetos) && t.projetos.length) return t.projetos.includes(projectId);
-      return String(t.projetoId || "") === String(projectId);
-    });
+// mensagens/comentários: tenta "messages", "mensagens", "historico", "comentarios", "comments", "updates"
+function renderMessages(t) {
+  const candidates = [t.messages, t.mensagens, t.historico, t.comentarios, t.comments, t.updates];
+  let arr = null;
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length) { arr = c; break; }
+  }
+  if (!arr) return null;
 
-    filtered.forEach((t) => {
-      total += 1;
-      const s = (t.status || "").toLowerCase();
-      const key = INTERESTING_STATUSES.includes(s) ? s : "outros";
-      byStatus[key] = (byStatus[key] || 0) + 1;
-    });
-  } catch (e) {
-    console.error("Erro ao resumir chamados:", e);
+  const items = arr.map((m, idx) => {
+    if (typeof m === "string") return { id: idx, text: m, authorName: null, createdAt: null };
+    if (typeof m === "object") {
+      return {
+        id: m.id || idx,
+        text: m.text || m.mensagem || m.message || m.descricao || "",
+        authorName: m.authorName || m.autorNome || m.userName || m.usuario || null,
+        createdAt: m.createdAt || m.data || m.timestamp || null,
+      };
+    }
+    return { id: idx, text: String(m), authorName: null, createdAt: null };
+  }).filter((x) => (x.text || "").trim().length > 0);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-neutral-500 mb-1">Mensagens</div>
+      <ul className="space-y-2">
+        {items.map((m) => (
+          <li key={m.id} className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-neutral-500">{m.authorName || "—"}</div>
+              <div className="text-xs text-neutral-400">{formatDateTimeBR(m.createdAt)}</div>
+            </div>
+            <p className="text-sm text-neutral-800 whitespace-pre-wrap">{m.text}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function groupDiariesByDay(feedItems) {
+  const groups = {};
+  for (const it of (feedItems || [])) {
+    const key = formatDateBR(it.createdAt) || "Sem data";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(it);
   }
 
-  setState({ total, byStatus });
+  // ordenar dias desc
+  const ordered = {};
+  Object.entries(groups)
+    .sort((a, b) => {
+      // dd/mm/aaaa -> aaaa-mm-dd
+      const A = a[0].split("/").reverse().join("-");
+      const B = b[0].split("/").reverse().join("-");
+      return new Date(B) - new Date(A);
+    })
+    .forEach(([k, v]) => (ordered[k] = v));
+  return ordered;
 }
