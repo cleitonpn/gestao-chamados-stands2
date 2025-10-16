@@ -198,8 +198,6 @@ const DashboardPage = () => {
         const isConfidential = ticket.isConfidential || ticket.confidencial;
         if (!isConfidential) return true;
         const isCreator = ticket.criadoPor === user.uid;
-        the: {
-        }
         const isAdmin = userProfile?.funcao === 'administrador';
         const isOperatorOfArea =
           userProfile?.funcao === 'operador' && (
@@ -383,7 +381,6 @@ const DashboardPage = () => {
   };
   const getUpdatedDate = (t) => t.arquivadoEm?.toDate?.() || t.dataUltimaAtualizacao?.toDate?.() || t.createdAt?.toDate?.() || new Date(0);
 
-  
   // --- Busca por ID (#...) util & submit handler ---
   const getSearchIdCandidate = (s) => (s || '').trim().replace(/^#/, '');
 
@@ -931,60 +928,50 @@ const DashboardPage = () => {
             )}
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/projetos'
-)} variant="ghost" className="w-full justify-start">
-              <FolderOpen className="h-4 w-4 mr-3" />
-              Ver Projetos
-            </Button>
+              <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
+                <FolderOpen className="h-4 w-4 mr-3" />
+                Ver Projetos
+              </Button>
             )}
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/cronograma'
-)} variant="ghost" className="w-full justify-start">
-              <Calendar className="h-4 w-4 mr-3" />
-              Cronograma
-            </Button>
+              <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
+                <Calendar className="h-4 w-4 mr-3" />
+                Cronograma
+              </Button>
             )}
 
             {/* Atalho para a página de diários */}
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/diarios'
-)} variant="ghost" className="w-full justify-start">
-              <BookOpen className="h-4 w-4 mr-3" />
-              Diário do Projeto
-            </Button>
+              <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
+                <BookOpen className="h-4 w-4 mr-3" />
+                Diário do Projeto
+              </Button>
             )}
 
-            {{!isEmpreiteiro && (
-/* ➕ Novo: atalho para Resumo do Projeto no menu lateral */}{/* ➕ Atalho: Resumo do Projeto (oculto para perfil empreiteiro) */}
-{!isEmpreiteiro && (
-  <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
-              <FileText className="h-4 w-4 mr-3" />
-              Resumo do Projeto
-            </Button>
-)}
-
-)}
-
+            {/* Resumo do Projeto — agora oculto para empreiteiro */}
+            {!isEmpreiteiro && (
+              <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
+                <FileText className="h-4 w-4 mr-3" />
+                Resumo do Projeto
+              </Button>
+            )}
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/gaming'
-)} variant="ghost" className="w-full justify-start">
-              <Trophy className="h-4 w-4 mr-3" />
-              Gamificação
-            </Button>
+              <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+                <Trophy className="h-4 w-4 mr-3" />
+                Gamificação
+              </Button>
             )}
 
-            {/* Novo botão: Empreita (visível para admin, gerente e empreiteiro) */}
+            {/* Empreita — único visível para empreiteiro */}
             {(isAdmin || isGerente || isEmpreiteiro) && (
-              <Button onClick={() => navigate('/empreiteiro')}
- variant="ghost" className="w-full justify-start">
+              <Button onClick={() => navigate('/empreiteiro')} variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
                 empreita
               </Button>
             )}
 
-          
             {userProfile?.funcao === 'gerente' && !isEmpreiteiro && (
               <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
                 <BarChart3 className="h-4 w-4 mr-3" />
