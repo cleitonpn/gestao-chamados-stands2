@@ -42,6 +42,8 @@ import {
   BarChart3,
   ClipboardList,
   TrendingUp,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 /* =========================================================================
@@ -148,6 +150,30 @@ const ProjectDetailPage = () => {
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [ticketsErr, setTicketsErr] = useState('');
+
+  // ====== Copiar ID
+  const [copied, setCopied] = useState(false);
+  const handleCopyId = async () => {
+    const pid = project?.id || projectId;
+    if (!pid) return;
+    try {
+      await navigator.clipboard.writeText(pid);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback simples
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = pid;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {}
+    }
+  };
 
   useEffect(() => {
     if (authInitialized && user && userProfile) {
@@ -473,6 +499,27 @@ const ProjectDetailPage = () => {
                 >
                   {statusInfo.label}
                 </Badge>
+
+                {/* Botão Copiar ID */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={handleCopyId}
+                  title="Copiar ID do projeto"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Copiado!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copiar ID
+                    </>
+                  )}
+                </Button>
               </div>
               <p className="text-gray-600">
                 {project.feira} • {project.local}
