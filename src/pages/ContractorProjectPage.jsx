@@ -195,6 +195,51 @@ function extractProjectDriveLink(p) {
   );
 }
 
+/* ----------------- NOVOS HELPERS: links & imagens no diário ----------------- */
+function isHttpUrl(u) {
+  try { const x = new URL(String(u)); return x.protocol === "http:" || x.protocol === "https:"; }
+  catch { return false; }
+}
+function isLikelyImage(att) {
+  const ct = (att?.contentType || att?.type || "").toString().toLowerCase();
+  if (ct.includes("image/")) return true;
+  const u = (att?.downloadURL || att?.url || att?.src || att?.href || "").toString().toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
+}
+function extractDiaryLinks(d) {
+  const links = [];
+  const candidates = [
+    d.linkUrl, d.link, d.url, d.href,
+    ...(Array.isArray(d.links) ? d.links : []),
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (Array.isArray(c)) {
+      for (const x of c) if (isHttpUrl(x)) links.push(String(x));
+    } else if (isHttpUrl(c)) {
+      links.push(String(c));
+    }
+  }
+  // remove duplicados
+  return Array.from(new Set(links));
+}
+function extractDiaryImages(d) {
+  const arrays =
+    (Array.isArray(d.attachments) && d.attachments) ||
+    (Array.isArray(d.anexos) && d.anexos) ||
+    (Array.isArray(d.fotos) && d.fotos) ||
+    (Array.isArray(d.images) && d.images) ||
+    (Array.isArray(d.imagens) && d.imagens) ||
+    [];
+  const urls = [];
+  for (const att of arrays) {
+    const candidate = att?.downloadURL || att?.url || att?.src || att?.href || null;
+    if (candidate && (isLikelyImage(att) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(candidate)))) {
+      if (isHttpUrl(candidate)) urls.push(String(candidate));
+    }
+  }
+  return Array.from(new Set(urls));
+}
+
 export default function ContractorProjectPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -214,6 +259,12 @@ export default function ContractorProjectPage() {
   const [ticketsList, setTicketsList] = useState([]);
   const [diariesGrouped, setDiariesGrouped] = useState({});
   const [error, setError] = useState("");
+
+  const flashError = (msg) => {
+    setError(msg);
+    window.clearTimeout(flashError._t);
+    flashError._t = window.setTimeout(() => setError(""), 4000);
+  };
 
   // Ler ?id= ou /empreiteiro/:projectId e localStorage
   useEffect(() => {
@@ -366,6 +417,26 @@ export default function ContractorProjectPage() {
 
   const handlePrint = () => window.print();
 
+  // NOVO: colar da área de transferência
+  const handlePasteFromClipboard = async () => {
+    try {
+      if (!navigator?.clipboard?.readText) {
+        flashError("Seu navegador não permite leitura da área de transferência aqui.");
+        return;
+      }
+      const txt = (await navigator.clipboard.readText()) || "";
+      const cleaned = txt.trim();
+      if (!cleaned) {
+        flashError("A área de transferência está vazia.");
+        return;
+      }
+      setProjectIdInput(cleaned);
+    } catch (e) {
+      console.error("Clipboard read error:", e);
+      flashError("Não consegui acessar a área de transferência.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
       <style>{`
@@ -400,6 +471,17 @@ export default function ContractorProjectPage() {
                 onKeyDown={(e) => { if (e.key === "Enter") handleLoad(); }}
               />
             </div>
+
+            {/* NOVO: Botão COLAR à esquerda do CARREGAR */}
+            <button
+              type="button"
+              onClick={handlePasteFromClipboard}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+              title="Colar do clipboard"
+            >
+              📋 Colar
+            </button>
+
             <button
               type="button"
               onClick={() => handleLoad()}
@@ -575,15 +657,68 @@ export default function ContractorProjectPage() {
                     <div key={day} className="rounded-xl border border-neutral-200 bg-neutral-50">
                       <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">{day}</div>
                       <ul className="divide-y divide-neutral-200">
-                        {items.map((d) => (
-                          <li key={d.id} className="p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
-                              <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
-                            </div>
-                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">{(d.text || "").trim() || "—"}</p>
-                          </li>
-                        ))}
+                        {items.map((d) => {
+                          const links = extractDiaryLinks(d);
+                          const images = extractDiaryImages(d);
+                          return (
+                            <li key={d.id} className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
+                                <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
+                              </div>
+                              <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">
+                                {(d.text || "").trim() || "—"}
+                              </p>
+
+                              {/* NOVO: Links do diário */}
+                              {links.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-xs text-neutral-500 mb-1">Links</div>
+                                  <ul className="space-y-1">
+                                    {links.map((href, i) => (
+                                      <li key={i}>
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-sm text-blue-700 underline-offset-2 hover:underline break-all"
+                                        >
+                                          {href}
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* NOVO: Imagens do diário */}
+                              {images.length > 0 && (
+                                <div className="mt-3">
+                                  <div className="text-xs text-neutral-500 mb-1">Imagens</div>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                    {images.map((src, i) => (
+                                      <a
+                                        key={i}
+                                        href={src}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block rounded-lg overflow-hidden border border-neutral-200 bg-white"
+                                        title="Abrir em nova guia"
+                                      >
+                                        <img
+                                          src={src}
+                                          alt={`Anexo ${i + 1}`}
+                                          className="w-full h-28 object-cover"
+                                          loading="lazy"
+                                        />
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   ))
