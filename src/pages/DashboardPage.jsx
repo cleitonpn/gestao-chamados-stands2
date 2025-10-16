@@ -30,29 +30,11 @@ const LOCAL_STORAGE_FILTERS_KEY = 'dashboard_saved_filters_v2';
 const DashboardPage = () => {
   const { user, userProfile, logout, authInitialized } = useAuth();
   const navigate = useNavigate();
-const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area || '').toString();
+  // ---- Perfil: empreiteiro (modo super restrito) ----
+  const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area || '').toString();
   const roleNorm = roleRaw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const isContractor = roleNorm === 'empreiteiro' || roleNorm === 'empreiteira' || roleNorm === 'contractor';
 
-  // Hide sidebar for contractor via CSS injection (safe, reversible)
-  useEffect(() => {
-    if (!isContractor) return;
-    const style = document.createElement('style');
-    style.id = 'hide-sidebar-emp';
-    style.textContent = `
-      /* tentativa abrangente de esconder sidebars comuns do app */
-      aside, .sidebar, .app-sidebar, .layout-sidebar, .sidenav, [data-sidebar="true"] {
-        display: none !important;
-      }
-      /* expandir container principal quando sidebar some */
-      .with-sidebar, .layout, .app-shell, .content-with-sidebar {
-        padding-left: 0 !important;
-        margin-left: 0 !important;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => { try { document.getElementById('hide-sidebar-emp')?.remove(); } catch {} };
-  }, [isContractor]);
 
   // --------- Estado base (regras de negócio intactas) ---------
   const [tickets, setTickets] = useState([]);
@@ -104,7 +86,45 @@ const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area |
     };
     apply();
     window.addEventListener('resize', apply);
-    return () => window.removeEventListener('resize', apply);
+    
+  // Se for empreiteiro, renderiza apenas dois botões (Empreiteiro e Login) e não carrega dados
+  if (isContractor) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="max-w-lg w-full">
+          <Card className="shadow-md">
+            <CardContent className="p-6 space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Acesso do Empreiteiro</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Olá, {userProfile?.nome || user?.email}. Seu perfil é <strong>empreiteiro</strong>.
+                  Use o botão abaixo para acessar a página exclusiva.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button className="flex-1" onClick={() => navigate('/empreiteiro')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Página do Empreiteiro
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={async () => { await logout(); navigate('/login', { replace: true }); }}
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Login
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Precisa de acesso completo? Fale com o administrador.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+return () => window.removeEventListener('resize', apply);
   }, []);
 
   // Aplicar filtros vindos por parâmetros da URL (ex.: ?projectId=123&projectName=ABC)
@@ -207,7 +227,6 @@ const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area |
   }, [user, userProfile, authInitialized, navigate]);
 
   const loadDashboardData = async () => {
-    if (isContractor) { setLoading(false); return; }
     try {
       setLoading(true);
 
@@ -583,44 +602,6 @@ const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area |
   const FiltersPanel = ({ variant = 'mobile' }) => {
     const isDesktop = variant === 'desktop';
     const wrapperClass = `${isDesktop ? '' : 'lg:hidden'} px-4 sm:px-6 lg:px-8 pb-3`;
-  // --- Vista super restrita para EMPREITEIRO (sem sidebar e sem dados) ---
-  if (isContractor) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="max-w-lg w-full">
-          <Card className="shadow-md">
-            <CardContent className="p-6 space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold">Acesso do Empreiteiro</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Olá, {userProfile?.nome || user?.email}. Seu perfil é <strong>empreiteiro</strong>.
-                  Para visualizar as informações, use a página exclusiva abaixo.
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button className="flex-1" onClick={() => navigate('/empreiteiro')}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Ir para Página do Empreiteiro
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={async () => { await logout(); navigate('/login', { replace: true }); }}
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Ir para Login
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                Precisa de acesso completo? Fale com o administrador.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
 
     return (
       <div className={wrapperClass}>
@@ -1073,6 +1054,17 @@ const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area |
         <header className="bg-white shadow-sm border-b">
           <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center space-x-4">
+              {/* Atalho: Página do Empreiteiro */}
+              <Button
+                variant="outline"
+                className="hidden sm:inline-flex"
+                onClick={() => navigate('/empreiteiro')}
+                title="Abrir página do Empreiteiro"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Empreiteiro
+              </Button>
+
               <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden">
                 <Menu className="h-6 w-6" />
               </button>
