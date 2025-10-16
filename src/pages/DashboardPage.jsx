@@ -946,7 +946,6 @@ const DashboardPage = () => {
 
             {/* Atalho para a página de diários */}
             {!isEmpreiteiro && (
-{!isEmpreiteiro && (
 <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
               <BookOpen className="h-4 w-4 mr-3" />
               Diário do Projeto
@@ -958,7 +957,6 @@ const DashboardPage = () => {
               <FileText className="h-4 w-4 mr-3" />
               Resumo do Projeto
             </Button>
-            )}
 
             {!isEmpreiteiro && (
 <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
