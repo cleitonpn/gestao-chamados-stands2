@@ -23,6 +23,7 @@ import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage'; // NOVA IMPOR
 import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
 import GamingPage from './pages/GamingPage';
 import ProjectSummaryPage from "./pages/ProjectSummaryPage";
+import ContractorProjectPage from "./pages/ContractorProjectPage";
 
 // >>> NOVA IMPORTAÇÃO: Página de Diários (feed global)
 import AllDiariesPage from './pages/AllDiariesPage';
@@ -190,6 +191,10 @@ function App() {
 
               {/* Rota para painel operacional - sem header */}
               <Route path="/painel-operacional" element={<OperationalPanel />} />
+
+              <Route path="/empreiteiro" element={<ContractorProjectPage />} />
+              
+              <Route path="/empreiteiro/:projectId" element={<ContractorProjectPage />} />
 
               {/* Rota para painel TV - sem header, sem login */}
               <Route path="/painel-tv" element={<TVPanel />} />
