@@ -931,14 +931,16 @@ const DashboardPage = () => {
             )}
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
+<Button onClick={() => navigate('/projetos'
+)} variant="ghost" className="w-full justify-start">
               <FolderOpen className="h-4 w-4 mr-3" />
               Ver Projetos
             </Button>
             )}
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
+<Button onClick={() => navigate('/cronograma'
+)} variant="ghost" className="w-full justify-start">
               <Calendar className="h-4 w-4 mr-3" />
               Cronograma
             </Button>
@@ -946,7 +948,8 @@ const DashboardPage = () => {
 
             {/* Atalho para a página de diários */}
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
+<Button onClick={() => navigate('/diarios'
+)} variant="ghost" className="w-full justify-start">
               <BookOpen className="h-4 w-4 mr-3" />
               Diário do Projeto
             </Button>
@@ -959,13 +962,17 @@ const DashboardPage = () => {
             </Button>
 
             {!isEmpreiteiro && (
-<Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+<Button onClick={() => navigate('/gaming'
+)} variant="ghost" className="w-full justify-start">
               <Trophy className="h-4 w-4 mr-3" />
               Gamificação
             </Button>
+            )}
+
             {/* Novo botão: Empreita (visível para admin, gerente e empreiteiro) */}
             {(isAdmin || isGerente || isEmpreiteiro) && (
-              <Button onClick={() => navigate('/empreiteiro')} variant="ghost" className="w-full justify-start">
+              <Button onClick={() => navigate('/empreiteiro')}
+ variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
                 empreita
               </Button>
