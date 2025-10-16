@@ -923,23 +923,21 @@ const DashboardPage = () => {
               </Button>
             )}
 
-            {userProfile?.funcao === 'administrador' && (
-              { !isEmpreiteiro && (
-<Button onClick={() => navigate('/novo-projeto')} variant="outline" className="w-full justify-start mb-4">
+            {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
+              <Button onClick={() => navigate('/novo-projeto')} variant="outline" className="w-full justify-start mb-4">
                 <Plus className="h-4 w-4 mr-3" />
                 Novo Projeto
               </Button>
             )}
-            )}
 
-            { !isEmpreiteiro && (
+            {!isEmpreiteiro && (
 <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
               <FolderOpen className="h-4 w-4 mr-3" />
               Ver Projetos
             </Button>
             )}
 
-            { !isEmpreiteiro && (
+            {!isEmpreiteiro && (
 <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
               <Calendar className="h-4 w-4 mr-3" />
               Cronograma
@@ -947,8 +945,8 @@ const DashboardPage = () => {
             )}
 
             {/* Atalho para a página de diários */}
-            { !isEmpreiteiro && (
-{ !isEmpreiteiro && (
+            {!isEmpreiteiro && (
+{!isEmpreiteiro && (
 <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
               <BookOpen className="h-4 w-4 mr-3" />
               Diário do Projeto
@@ -962,7 +960,7 @@ const DashboardPage = () => {
             </Button>
             )}
 
-            { !isEmpreiteiro && (
+            {!isEmpreiteiro && (
 <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
               <Trophy className="h-4 w-4 mr-3" />
               Gamificação
@@ -977,14 +975,14 @@ const DashboardPage = () => {
 
             )}
 
-            {userProfile?.funcao === 'gerente' && (
+            {userProfile?.funcao === 'gerente' && !isEmpreiteiro && (
               <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
                 <BarChart3 className="h-4 w-4 mr-3" />
                 Relatórios
               </Button>
             )}
 
-            {userProfile?.funcao === 'administrador' && (
+            {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
               <>
                 <Button onClick={() => navigate('/eventos')} variant="ghost" className="w-full justify-start">
                   <Calendar className="h-4 w-4 mr-3" />
