@@ -8,25 +8,71 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, LogIn } from 'lucide-react';
 
+function normalize(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // adicionamos userProfile e (opcional) fetchUserProfile para pegar a role
-  const { login, userProfile, fetchUserProfile } = useAuth();
+  // agora também usamos currentUser para tentar ler custom claims no fallback
+  const { login, userProfile, fetchUserProfile, currentUser } = useAuth();
   const navigate = useNavigate();
 
-  // tenta resolver a função (role) do usuário com segurança
+  const pickRoleFromObject = (obj) => {
+    if (!obj) return '';
+    const keys = ['funcao', 'role', 'area', 'perfil', 'papel', 'tipo'];
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v) return normalize(v);
+    }
+    return '';
+  };
+
+  // decide destino com base em várias fontes
   const resolveUserRole = async () => {
     try {
-      // se o AuthContext expõe um fetchUserProfile, usamos; senão, caímos no userProfile
+      // 1) Tenta carregar perfil via contexto
       const profile = (await (fetchUserProfile?.())) || userProfile || {};
-      const roleRaw = profile?.funcao || profile?.role || '';
-      return String(roleRaw).toLowerCase().trim();
+      let role = pickRoleFromObject(profile);
+
+      // 2) Fallback: tenta custom claims do token
+      if (!role) {
+        try {
+          // após login o currentUser deve existir
+          const tokenResult = await currentUser?.getIdTokenResult?.();
+          const claimsRole = tokenResult?.claims?.role || tokenResult?.claims?.funcao || tokenResult?.claims?.area;
+          role = normalize(claimsRole || '');
+        } catch (_) {
+          // ignora
+        }
+      }
+
+      // 3) Último fallback: nada encontrado
+      return role || '';
     } catch {
       return '';
+    }
+  };
+
+  const goByRole = (role) => {
+    const r = normalize(role);
+    const isEmpreiteiro =
+      r === 'empreiteiro' ||
+      r === 'empreiteira' ||
+      r === 'contractor';
+
+    if (isEmpreiteiro) {
+      navigate('/empreiteiro');
+    } else {
+      navigate('/dashboard');
     }
   };
 
@@ -44,16 +90,12 @@ const LoginPage = () => {
     try {
       await login(email, password);
 
-      // descobre a role e decide a rota pós-login
       const role = await resolveUserRole();
-      if (role === 'empreiteiro' || role === 'contractor') {
-        navigate('/empreiteiro');
-      } else {
-        navigate('/dashboard');
-      }
+      // Log leve para debug local (pode remover depois)
+      console.log('[Login] Role detectada:', role || '(vazia)');
+      goByRole(role);
     } catch (error) {
       console.error('Erro no login:', error);
-      // Traduzir erros do Firebase para português
       switch (error.code) {
         case 'auth/user-not-found':
           setError('Usuário não encontrado');
@@ -123,11 +165,7 @@ const LoginPage = () => {
               />
             </div>
 
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={loading}
-            >
+            <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -139,7 +177,7 @@ const LoginPage = () => {
             </Button>
 
             <p className="text-center text-xs text-gray-500 mt-2">
-              Se seu perfil for <strong>empreiteiro</strong>, você será direcionado automaticamente ao painel exclusivo.
+              Perfis <strong>empreiteiro</strong> são direcionados ao painel exclusivo automaticamente.
             </p>
           </form>
         </CardContent>
