@@ -13,13 +13,26 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  const { login } = useAuth();
+
+  // adicionamos userProfile e (opcional) fetchUserProfile para pegar a role
+  const { login, userProfile, fetchUserProfile } = useAuth();
   const navigate = useNavigate();
+
+  // tenta resolver a função (role) do usuário com segurança
+  const resolveUserRole = async () => {
+    try {
+      // se o AuthContext expõe um fetchUserProfile, usamos; senão, caímos no userProfile
+      const profile = (await (fetchUserProfile?.())) || userProfile || {};
+      const roleRaw = profile?.funcao || profile?.role || '';
+      return String(roleRaw).toLowerCase().trim();
+    } catch {
+      return '';
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       setError('Por favor, preencha todos os campos');
       return;
@@ -30,10 +43,16 @@ const LoginPage = () => {
 
     try {
       await login(email, password);
-      navigate('/dashboard');
+
+      // descobre a role e decide a rota pós-login
+      const role = await resolveUserRole();
+      if (role === 'empreiteiro' || role === 'contractor') {
+        navigate('/empreiteiro');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (error) {
       console.error('Erro no login:', error);
-      
       // Traduzir erros do Firebase para português
       switch (error.code) {
         case 'auth/user-not-found':
@@ -77,7 +96,7 @@ const LoginPage = () => {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -90,7 +109,7 @@ const LoginPage = () => {
                 required
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
               <Input
@@ -103,10 +122,10 @@ const LoginPage = () => {
                 required
               />
             </div>
-            
-            <Button 
-              type="submit" 
-              className="w-full" 
+
+            <Button
+              type="submit"
+              className="w-full"
               disabled={loading}
             >
               {loading ? (
@@ -118,6 +137,10 @@ const LoginPage = () => {
                 'Entrar'
               )}
             </Button>
+
+            <p className="text-center text-xs text-gray-500 mt-2">
+              Se seu perfil for <strong>empreiteiro</strong>, você será direcionado automaticamente ao painel exclusivo.
+            </p>
           </form>
         </CardContent>
       </Card>
@@ -126,4 +149,3 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
-
