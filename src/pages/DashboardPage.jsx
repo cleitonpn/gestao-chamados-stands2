@@ -29,12 +29,14 @@ const LOCAL_STORAGE_FILTERS_KEY = 'dashboard_saved_filters_v2';
 
 const DashboardPage = () => {
   const { user, userProfile, logout, authInitialized } = useAuth();
-  const navigate = useNavigate();
-  // ---- Perfil: empreiteiro (modo super restrito) ----
-  const roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area || '').toString();
-  const roleNorm = roleRaw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-  const isContractor = roleNorm === 'empreiteiro' || roleNorm === 'empreiteira' || roleNorm === 'contractor';
+  // ---- Papel do usuário / função/área ----
+  const _roleRaw = (userProfile?.funcao || userProfile?.role || userProfile?.area || '').toString();
+  const _role = _roleRaw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const isEmpreiteiro = _role === 'empreiteiro' || _role === 'empreiteira' || _role === 'contractor';
+  const isGerente = _role === 'gerente' || _role === 'manager';
+  const isAdmin = _role === 'administrador' || _role === 'admin';
 
+  const navigate = useNavigate();
 
   // --------- Estado base (regras de negócio intactas) ---------
   const [tickets, setTickets] = useState([]);
@@ -86,45 +88,7 @@ const DashboardPage = () => {
     };
     apply();
     window.addEventListener('resize', apply);
-    
-  // Se for empreiteiro, renderiza apenas dois botões (Empreiteiro e Login) e não carrega dados
-  if (isContractor) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="max-w-lg w-full">
-          <Card className="shadow-md">
-            <CardContent className="p-6 space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold">Acesso do Empreiteiro</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Olá, {userProfile?.nome || user?.email}. Seu perfil é <strong>empreiteiro</strong>.
-                  Use o botão abaixo para acessar a página exclusiva.
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button className="flex-1" onClick={() => navigate('/empreiteiro')}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Página do Empreiteiro
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={async () => { await logout(); navigate('/login', { replace: true }); }}
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Login
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                Precisa de acesso completo? Fale com o administrador.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-return () => window.removeEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
   }, []);
 
   // Aplicar filtros vindos por parâmetros da URL (ex.: ?projectId=123&projectName=ABC)
@@ -960,38 +924,58 @@ return () => window.removeEventListener('resize', apply);
             )}
 
             {userProfile?.funcao === 'administrador' && (
-              <Button onClick={() => navigate('/novo-projeto')} variant="outline" className="w-full justify-start mb-4">
+              { !isEmpreiteiro && (
+<Button onClick={() => navigate('/novo-projeto')} variant="outline" className="w-full justify-start mb-4">
                 <Plus className="h-4 w-4 mr-3" />
                 Novo Projeto
               </Button>
             )}
+            )}
 
-            <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
+            { !isEmpreiteiro && (
+<Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
               <FolderOpen className="h-4 w-4 mr-3" />
               Ver Projetos
             </Button>
+            )}
 
-            <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
+            { !isEmpreiteiro && (
+<Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
               <Calendar className="h-4 w-4 mr-3" />
               Cronograma
             </Button>
+            )}
 
             {/* Atalho para a página de diários */}
-            <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
+            { !isEmpreiteiro && (
+{ !isEmpreiteiro && (
+<Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
               <BookOpen className="h-4 w-4 mr-3" />
               Diário do Projeto
             </Button>
+            )}
 
             {/* ➕ Novo: atalho para Resumo do Projeto no menu lateral */}
             <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
               <FileText className="h-4 w-4 mr-3" />
               Resumo do Projeto
             </Button>
+            )}
 
-            <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+            { !isEmpreiteiro && (
+<Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
               <Trophy className="h-4 w-4 mr-3" />
               Gamificação
             </Button>
+            {/* Novo botão: Empreita (visível para admin, gerente e empreiteiro) */}
+            {(isAdmin || isGerente || isEmpreiteiro) && (
+              <Button onClick={() => navigate('/empreiteiro')} variant="ghost" className="w-full justify-start">
+                <FileText className="h-4 w-4 mr-3" />
+                empreita
+              </Button>
+            )}
+
+            )}
 
             {userProfile?.funcao === 'gerente' && (
               <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
@@ -1054,17 +1038,6 @@ return () => window.removeEventListener('resize', apply);
         <header className="bg-white shadow-sm border-b">
           <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center space-x-4">
-              {/* Atalho: Página do Empreiteiro */}
-              <Button
-                variant="outline"
-                className="hidden sm:inline-flex"
-                onClick={() => navigate('/empreiteiro')}
-                title="Abrir página do Empreiteiro"
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Empreiteiro
-              </Button>
-
               <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden">
                 <Menu className="h-6 w-6" />
               </button>
