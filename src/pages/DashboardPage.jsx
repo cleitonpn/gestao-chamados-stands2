@@ -955,11 +955,14 @@ const DashboardPage = () => {
             </Button>
             )}
 
-            {/* ➕ Novo: atalho para Resumo do Projeto no menu lateral */}
+            {{!isEmpreiteiro && (
+/* ➕ Novo: atalho para Resumo do Projeto no menu lateral */}
             <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
               <FileText className="h-4 w-4 mr-3" />
               Resumo do Projeto
             </Button>
+)}
+
 
             {!isEmpreiteiro && (
 <Button onClick={() => navigate('/gaming'
