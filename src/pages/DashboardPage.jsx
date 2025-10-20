@@ -943,7 +943,13 @@ const DashboardPage = () => {
 
             {/* Atalho para a página de diários */}
             {!isEmpreiteiro && (
-              <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
+              <Button onClick={() => navigate('/diari
+            {/* >>> NOVO: Meu Perfil */}
+            <Button onClick={() => navigate('/perfil')} variant="ghost" className="w-full justify-start">
+              <UserIcon className="h-4 w-4 mr-3" />
+              Meu Perfil
+            </Button>
+os')} variant="ghost" className="w-full justify-start">
                 <BookOpen className="h-4 w-4 mr-3" />
                 Diário do Projeto
               </Button>
@@ -1043,7 +1049,17 @@ const DashboardPage = () => {
             </div>
             <div className="flex items-center space-x-4">
               <NotificationCenter />
-            </div>
+            
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={logout}
+                title="Sair"
+                className="hover:bg-red-50"
+              >
+                <LogOut className="h-5 w-5" />
+              </Button>
+</div>
           </div>
         </header>
 
