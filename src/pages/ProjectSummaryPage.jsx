@@ -17,7 +17,8 @@ import { eventService } from "../services/eventService";
  * - Cards de chamados (totais) e lista detalhada:
  *   título, data, descrição, status, MENSAGENS e INFORMAÇÕES ESPECÍFICAS
  *   (inclui locação/compras). **Oculta** chamados financeiros sensíveis.
- * - Diários agrupados por dia
+ * - Diários agrupados por dia + (NOVO) Links e Imagens
+ * - (NOVO) Links Úteis: Manual da Feira, Planta da Feira e Pasta do Projeto (Drive)
  */
 
 const DASHBOARD_PATH = "/dashboard"; // ajuste se sua rota for outra
@@ -60,6 +61,85 @@ function projectMatchesEvent(project, eventObj) {
   if (pEventName && eventObj.name && norm(pEventName) === norm(eventObj.name)) return true;
   if (!pEventId && eventObj.id && norm(eventObj.id) === norm(pEventName)) return true;
   return false;
+}
+
+/* ===== Helpers novos: Links úteis (evento/projeto) ===== */
+function extractEventLinks(ev) {
+  if (!ev) return {};
+  const manual =
+    ev.linkManual ||
+    ev.manualFeiraLink ||
+    ev.manualLink ||
+    ev.manual ||
+    ev.urlManual ||
+    ev.manulFeira ||
+    null;
+  const planta =
+    ev.linkPlanta ||
+    ev.plantaFeiraLink ||
+    ev.plantaLink ||
+    ev.planta ||
+    ev.urlPlanta ||
+    null;
+  return { manual, planta };
+}
+function extractProjectDriveLink(p) {
+  if (!p) return null;
+  return (
+    p.driveLink ||
+    p.linkDrive ||
+    p.pastaDrive ||
+    p.driveFolderUrl ||
+    p.driveFolder ||
+    p.urlDrive ||
+    null
+  );
+}
+
+/* ===== Helpers novos: Links e Imagens nos diários ===== */
+function isHttpUrl(u) {
+  try {
+    const x = new URL(String(u));
+    return x.protocol === "http:" || x.protocol === "https:";
+  } catch { return false; }
+}
+function isLikelyImage(att) {
+  const ct = (att?.contentType || att?.type || "").toString().toLowerCase();
+  if (ct.includes("image/")) return true;
+  const u = (att?.downloadURL || att?.url || att?.src || att?.href || "").toString().toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
+}
+function extractDiaryLinks(d) {
+  const links = [];
+  const candidates = [
+    d.linkUrl, d.link, d.url, d.href,
+    ...(Array.isArray(d.links) ? d.links : []),
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (Array.isArray(c)) {
+      for (const x of c) if (isHttpUrl(x)) links.push(String(x));
+    } else if (isHttpUrl(c)) {
+      links.push(String(c));
+    }
+  }
+  return Array.from(new Set(links));
+}
+function extractDiaryImages(d) {
+  const arrays =
+    (Array.isArray(d.attachments) && d.attachments) ||
+    (Array.isArray(d.anexos) && d.anexos) ||
+    (Array.isArray(d.fotos) && d.fotos) ||
+    (Array.isArray(d.images) && d.images) ||
+    (Array.isArray(d.imagens) && d.imagens) ||
+    [];
+  const urls = [];
+  for (const att of arrays) {
+    const candidate = att?.downloadURL || att?.url || att?.src || att?.href || null;
+    if (candidate && (isLikelyImage(att) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(candidate)))) {
+      if (isHttpUrl(candidate)) urls.push(String(candidate));
+    }
+  }
+  return Array.from(new Set(urls));
 }
 
 export default function ProjectSummaryPage() {
@@ -242,6 +322,10 @@ export default function ProjectSummaryPage() {
 
   const handlePrint = () => window.print();
 
+  // NOVO: Links úteis do evento e pasta do projeto
+  const { manual: linkManual, planta: linkPlanta } = extractEventLinks(selectedEventFull || {});
+  const linkDrive = extractProjectDriveLink(projectData);
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
       <style>{`
@@ -336,7 +420,7 @@ export default function ProjectSummaryPage() {
           </div>
         ) : (
           <>
-            {/* Dados + Datas */}
+            {/* Dados + Chamados + (NOVO) Links úteis */}
             <section className="print-block grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 rounded-2xl bg-white border border-neutral-200 shadow-sm">
                 <header className="border-b border-neutral-200 px-5 py-4">
@@ -394,6 +478,7 @@ export default function ProjectSummaryPage() {
                 </div>
               </div>
 
+              {/* KPIs de chamados */}
               <div className="rounded-2xl bg-white border border-neutral-200 shadow-sm">
                 <header className="border-b border-neutral-200 px-5 py-4">
                   <h2 className="text-lg font-semibold">Chamados</h2>
@@ -411,6 +496,18 @@ export default function ProjectSummaryPage() {
                     <KPI label={STATUS_LABELS.concluido} value={ticketsSummary?.byStatus?.concluido || 0} />
                     <KPI label={STATUS_LABELS.arquivado} value={ticketsSummary?.byStatus?.arquivado || 0} />
                   </div>
+                </div>
+              </div>
+
+              {/* (NOVO) Links úteis */}
+              <div className="rounded-2xl bg-white border border-neutral-200 shadow-sm">
+                <header className="border-b border-neutral-200 px-5 py-4">
+                  <h2 className="text-lg font-semibold">Links Úteis</h2>
+                </header>
+                <div className="p-5 space-y-3 text-sm">
+                  <LinkRow label="Manual da feira" href={linkManual} />
+                  <LinkRow label="Planta da feira" href={linkPlanta} />
+                  <LinkRow label="Pasta do projeto (Drive)" href={linkDrive} />
                 </div>
               </div>
             </section>
@@ -458,7 +555,7 @@ export default function ProjectSummaryPage() {
               </div>
             </section>
 
-            {/* Diários agrupados por dia */}
+            {/* Diários agrupados por dia (com links e imagens) */}
             <section className="print-block rounded-2xl bg-white border border-neutral-200 shadow-sm">
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Diários do Projeto</h2>
@@ -473,15 +570,66 @@ export default function ProjectSummaryPage() {
                     <div key={day} className="rounded-xl border border-neutral-200 bg-neutral-50">
                       <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">{day}</div>
                       <ul className="divide-y divide-neutral-200">
-                        {items.map((d) => (
-                          <li key={d.id} className="p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
-                              <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
-                            </div>
-                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">{(d.text || "").trim() || "—"}</p>
-                          </li>
-                        ))}
+                        {items.map((d) => {
+                          const links = extractDiaryLinks(d);
+                          const images = extractDiaryImages(d);
+                          return (
+                            <li key={d.id} className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
+                                <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
+                              </div>
+                              <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">{(d.text || "").trim() || "—"}</p>
+
+                              {/* Links do diário */}
+                              {links.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-xs text-neutral-500 mb-1">Links</div>
+                                  <ul className="space-y-1">
+                                    {links.map((href, i) => (
+                                      <li key={i}>
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-sm text-blue-700 underline-offset-2 hover:underline break-all"
+                                        >
+                                          {href}
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Imagens do diário */}
+                              {images.length > 0 && (
+                                <div className="mt-3">
+                                  <div className="text-xs text-neutral-500 mb-1">Imagens</div>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                    {images.map((src, i) => (
+                                      <a
+                                        key={i}
+                                        href={src}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block rounded-lg overflow-hidden border border-neutral-200 bg-white"
+                                        title="Abrir em nova guia"
+                                      >
+                                        <img
+                                          src={src}
+                                          alt={`Anexo ${i + 1}`}
+                                          className="w-full h-28 object-cover"
+                                          loading="lazy"
+                                        />
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   ))
@@ -519,6 +667,28 @@ function FieldRow({ label, value }) {
       <div className="col-span-1 text-neutral-500">{label}</div>
       <div className="col-span-2 font-medium">{String(value)}</div>
     </div>
+  );
+}
+function LinkRow({ label, href }) {
+  if (!href) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2">
+        <span className="text-sm text-neutral-700">{label}</span>
+        <span className="text-xs text-neutral-500">—</span>
+      </div>
+    );
+  }
+  const safeHref = String(href || "").startsWith("http") ? href : (href || "#");
+  return (
+    <a
+      className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 px-3 py-2"
+      href={safeHref}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <span className="text-sm text-neutral-700 underline-offset-2 hover:underline">{label}</span>
+      <span className="text-xs text-neutral-500 truncate max-w-[55%]">{safeHref}</span>
+    </a>
   );
 }
 function renderTeamsPills(raw) {
