@@ -1,3 +1,4 @@
+// src/App.jsx
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -27,6 +28,9 @@ import ContractorProjectPage from "./pages/ContractorProjectPage";
 
 // >>> NOVA IMPORTAÇÃO: Página de Diários (feed global)
 import AllDiariesPage from './pages/AllDiariesPage';
+
+// >>> NOVA IMPORTAÇÃO: Página de Perfil do Usuário
+import UserProfilePage from "./pages/UserProfilePage";
 
 import './App.css';
 
@@ -129,6 +133,16 @@ function App() {
                 element={
                   <ProtectedRoute requiredRole="administrador">
                     <UsersPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* >>> NOVA ROTA: Perfil do Usuário - qualquer usuário autenticado */}
+              <Route
+                path="/perfil"
+                element={
+                  <ProtectedRoute>
+                    <UserProfilePage />
                   </ProtectedRoute>
                 }
               />
