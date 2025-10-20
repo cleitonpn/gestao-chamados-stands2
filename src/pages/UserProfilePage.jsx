@@ -13,7 +13,7 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, storage } from "../config/firebase";
 
-// shadcn/ui components (already present in the repo)
+// shadcn/ui components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Save, Shield, Mail, Lock, Image as ImageIcon, User } from "lucide-react";
+import { Loader2, Save, Shield, Mail, Lock, User } from "lucide-react";
 
 function initialsFromName(name) {
   const parts = String(name || "").trim().split(/\s+/);
@@ -31,7 +31,7 @@ function initialsFromName(name) {
 }
 
 const UserProfilePage = () => {
-  const { userProfile, currentUser, loading } = useAuth();
+  const { user, userProfile, authInitialized } = useAuth();
   const navigate = useNavigate();
 
   const [displayName, setDisplayName] = useState("");
@@ -48,23 +48,23 @@ const UserProfilePage = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
 
-  const uid = useMemo(() => currentUser?.uid || userProfile?.id, [currentUser, userProfile]);
+  const uid = useMemo(() => user?.uid || userProfile?.id || userProfile?.uid, [user, userProfile]);
 
   useEffect(() => {
     if (userProfile) {
-      setDisplayName(userProfile?.nome || currentUser?.displayName || "");
-      setEmail(userProfile?.email || currentUser?.email || "");
-      setPhotoURL(userProfile?.fotoURL || currentUser?.photoURL || "");
-    } else if (currentUser) {
-      setDisplayName(currentUser.displayName || "");
-      setEmail(currentUser.email || "");
-      setPhotoURL(currentUser.photoURL || "");
+      setDisplayName(userProfile?.nome || user?.displayName || "");
+      setEmail(userProfile?.email || user?.email || "");
+      setPhotoURL(userProfile?.fotoURL || user?.photoURL || "");
+    } else if (user) {
+      setDisplayName(user.displayName || "");
+      setEmail(user.email || "");
+      setPhotoURL(user.photoURL || "");
     }
-  }, [userProfile, currentUser]);
+  }, [userProfile, user]);
 
   const handleUploadAvatar = async (file) => {
     if (!file || !uid) return null;
-    const ext = file.name.split(".").pop().toLowerCase() || "jpg";
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `avatars/${uid}/avatar-${Date.now()}.${ext}`;
     const storageRef = ref(storage, path);
     await uploadBytes(storageRef, file);
@@ -73,9 +73,9 @@ const UserProfilePage = () => {
   };
 
   const reauthWithPassword = async (password) => {
-    if (!currentUser?.email) throw new Error("Usuário sem e-mail.");
-    const credential = EmailAuthProvider.credential(currentUser.email, password);
-    await reauthenticateWithCredential(auth.currentUser, credential);
+    if (!user?.email) throw new Error("Usuário sem e-mail.");
+    const credential = EmailAuthProvider.credential(user.email, password);
+    await reauthenticateWithCredential(auth.currentUser || user, credential);
   };
 
   const handleSaveProfile = async () => {
@@ -90,10 +90,10 @@ const UserProfilePage = () => {
       }
 
       // 1) Atualiza Auth (displayName + photoURL)
-      if (auth.currentUser) {
-        await fbUpdateProfile(auth.currentUser, {
-          displayName: displayName || auth.currentUser.displayName || "",
-          photoURL: newPhotoURL || auth.currentUser.photoURL || "",
+      if (auth.currentUser || user) {
+        await fbUpdateProfile(auth.currentUser || user, {
+          displayName: displayName || (auth.currentUser?.displayName || user?.displayName) || "",
+          photoURL: newPhotoURL || (auth.currentUser?.photoURL || user?.photoURL) || "",
         });
       }
 
@@ -127,8 +127,8 @@ const UserProfilePage = () => {
       if (!currentPassword) throw new Error("Para trocar o e-mail, informe sua senha atual.");
       await reauthWithPassword(currentPassword);
 
-      if (auth.currentUser) {
-        await fbUpdateEmail(auth.currentUser, email);
+      if (auth.currentUser || user) {
+        await fbUpdateEmail(auth.currentUser || user, email);
       }
 
       if (uid) {
@@ -156,7 +156,7 @@ const UserProfilePage = () => {
       if (newPassword !== confirmPassword) throw new Error("As senhas não conferem.");
 
       await reauthWithPassword(currentPassword);
-      await fbUpdatePassword(auth.currentUser, newPassword);
+      await fbUpdatePassword(auth.currentUser || user, newPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -174,7 +174,7 @@ const UserProfilePage = () => {
     if (f) setLocalPhoto(f);
   };
 
-  if (loading) {
+  if (!authInitialized) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin mr-2" />
@@ -183,9 +183,9 @@ const UserProfilePage = () => {
     );
   }
 
-  if (!uid) {
+  if (authInitialized && !uid) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center p-4">
         <Alert>
           <AlertDescription>
             Não foi possível carregar seu perfil. Faça login novamente.
