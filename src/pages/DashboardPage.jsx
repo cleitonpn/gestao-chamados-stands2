@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 import NotificationCenter from '../components/NotificationCenter';
+import UserAvatar from '../components/UserAvatar';
 
 import {
   LogOut, Plus, AlertCircle, Clock, CheckCircle, Users, FolderOpen, BarChart3,
@@ -910,7 +911,7 @@ const DashboardPage = () => {
           </button>
         </div>
 
-        <nav className="mt-6 px-3">
+                <nav className="mt-6 px-3">
           <div className="space-y-1">
             {(userProfile?.funcao === 'produtor' || userProfile?.funcao === 'consultor' || userProfile?.funcao === 'administrador' ||
               (userProfile?.funcao === 'operador' && ['operacional','comunicacao_visual','almoxarifado','logistica'].includes(userProfile?.area))) && (
@@ -921,12 +922,13 @@ const DashboardPage = () => {
             )}
 
             {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
-              <Button onClick={() => navigate('/novo-projeto')} variant="outline" className="w-full justify-start mb-4">
+              <Button onClick={() => navigate('/projetos/novo')} variant="outline" className="w-full justify-start mb-4">
                 <Plus className="h-4 w-4 mr-3" />
                 Novo Projeto
               </Button>
             )}
 
+            {/* ver projetos */}
             {!isEmpreiteiro && (
               <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
                 <FolderOpen className="h-4 w-4 mr-3" />
@@ -934,7 +936,7 @@ const DashboardPage = () => {
               </Button>
             )}
 
-
+            {/* cronograma */}
             {!isEmpreiteiro && (
               <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
                 <Calendar className="h-4 w-4 mr-3" />
@@ -942,8 +944,15 @@ const DashboardPage = () => {
               </Button>
             )}
 
+            {/* eventos (admin) */}
+            {isAdmin && !isEmpreiteiro && (
+              <Button onClick={() => navigate('/eventos')} variant="ghost" className="w-full justify-start">
+                <Calendar className="h-4 w-4 mr-3" />
+                Eventos
+              </Button>
+            )}
 
-            {/* Atalho para a página de diários */}
+            {/* diario do projeto */}
             {!isEmpreiteiro && (
               <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
                 <BookOpen className="h-4 w-4 mr-3" />
@@ -951,26 +960,15 @@ const DashboardPage = () => {
               </Button>
             )}
 
-            {/* >>> NOVO: Meu Perfil */}
-            <Button onClick={() => navigate('/perfil')} variant="ghost" className="w-full justify-start">
-              <UserIcon className="h-4 w-4 mr-3" />
-              Meu Perfil
-            </Button>
-            
+            {/* resumo do projeto */}
+            {!isEmpreiteiro && (
               <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
                 Resumo do Projeto
               </Button>
-            
-
-            {!isEmpreiteiro && (
-              <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
-                <Trophy className="h-4 w-4 mr-3" />
-                Gamificação
-              </Button>
             )}
 
-            {/* Empreita — único visível para empreiteiro */}
+            {/* empreita */}
             {(isAdmin || isGerente || isEmpreiteiro) && (
               <Button onClick={() => navigate('/empreiteiro')} variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
@@ -978,28 +976,36 @@ const DashboardPage = () => {
               </Button>
             )}
 
-            {userProfile?.funcao === 'gerente' && !isEmpreiteiro && (
+            {/* gamificação */}
+            {!isEmpreiteiro && (
+              <Button onClick={() => navigate('/gaming')} variant="ghost" className="w-full justify-start">
+                <Trophy className="h-4 w-4 mr-3" />
+                Gamificação
+              </Button>
+            )}
+
+            {/* relatorios */}
+            {(isAdmin || isGerente) && !isEmpreiteiro && (
               <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
                 <BarChart3 className="h-4 w-4 mr-3" />
                 Relatórios
               </Button>
             )}
 
+            {/* analytics (admin) */}
+            {isAdmin && !isEmpreiteiro && (
+              <Button onClick={() => navigate('/analytics')} variant="ghost" className="w-full justify-start">
+                <BarChart3 className="h-4 w-4 mr-3" />
+                Analytics
+              </Button>
+            )}
 
-            {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
-              <>
-                
-                
-                
-                <Button onClick={() => navigate('/analytics')} variant="ghost" className="w-full justify-start">
-                  <BarChart3 className="h-4 w-4 mr-3" />
-                  Analytics
-                </Button>
-                <Button onClick={() => navigate('/admin/painel')} variant="ghost" className="w-full justify-start">
-                  <BarChart3 className="h-4 w-4 mr-3" />
-                  Painel Admin
-                </Button>
-              </>
+            {/* painel admin (admin) */}
+            {isAdmin && !isEmpreiteiro && (
+              <Button onClick={() => navigate('/admin/painel')} variant="ghost" className="w-full justify-start">
+                <BarChart3 className="h-4 w-4 mr-3" />
+                Painel Admin
+              </Button>
             )}
           </div>
         </nav>
@@ -1008,7 +1014,7 @@ const DashboardPage = () => {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start">
-                <UserIcon className="h-4 w-4 mr-3" />
+                <UserAvatar className="h-5 w-5 mr-3" />
                 {userProfile?.nome || user?.email}
               </Button>
             </DropdownMenuTrigger>
@@ -1045,6 +1051,7 @@ const DashboardPage = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <UserAvatar className="h-8 w-8" />
               <NotificationCenter />
             
               <Button
