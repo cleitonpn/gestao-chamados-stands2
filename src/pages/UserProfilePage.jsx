@@ -31,7 +31,7 @@ function initialsFromName(name) {
 }
 
 const UserProfilePage = () => {
-  const { user, userProfile, authInitialized } = useAuth();
+  const { user, userProfile, authInitialized, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   const [displayName, setDisplayName] = useState("");
@@ -109,6 +109,7 @@ const UserProfilePage = () => {
       setPhotoURL(newPhotoURL);
       setLocalPhoto(null);
       setSuccess("Perfil atualizado com sucesso!");
+      try { await refreshUser(); } catch {}
     } catch (err) {
       console.error(err);
       setError(err?.message || "Falha ao atualizar o perfil.");
