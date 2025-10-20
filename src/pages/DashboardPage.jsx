@@ -928,8 +928,12 @@ const DashboardPage = () => {
             )}
 
             {!isEmpreiteiro && (
-              
+              <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
+                <FolderOpen className="h-4 w-4 mr-3" />
+                Ver Projetos
+              </Button>
             )}
+
 
             {!isEmpreiteiro && (
               <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
@@ -975,8 +979,12 @@ const DashboardPage = () => {
             )}
 
             {userProfile?.funcao === 'gerente' && !isEmpreiteiro && (
-              
+              <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
+                <BarChart3 className="h-4 w-4 mr-3" />
+                Relatórios
+              </Button>
             )}
+
 
             {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
               <>
