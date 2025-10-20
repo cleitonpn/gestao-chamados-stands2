@@ -17,8 +17,7 @@ import { eventService } from "../services/eventService";
  * - Cards de chamados (totais) e lista detalhada:
  *   título, data, descrição, status, MENSAGENS e INFORMAÇÕES ESPECÍFICAS
  *   (inclui locação/compras). **Oculta** chamados financeiros sensíveis.
- * - Diários agrupados por dia (agora com links e imagens)
- * - Links Úteis (Manual/Planta/Pasta Drive + última atualização)
+ * - Diários agrupados por dia
  */
 
 const DASHBOARD_PATH = "/dashboard"; // ajuste se sua rota for outra
@@ -61,130 +60,6 @@ function projectMatchesEvent(project, eventObj) {
   if (pEventName && eventObj.name && norm(pEventName) === norm(eventObj.name)) return true;
   if (!pEventId && eventObj.id && norm(eventObj.id) === norm(pEventName)) return true;
   return false;
-}
-
-/* ----------------- Links úteis (mesma lógica da ContractorPage) ----------------- */
-function extractEventLinks(ev) {
-  if (!ev) return {};
-  const manual =
-    ev.linkManual ||
-    ev.manualFeiraLink ||
-    ev.manualLink ||
-    ev.manual ||
-    ev.urlManual ||
-    ev.manulFeira ||
-    null;
-  const planta =
-    ev.linkPlanta ||
-    ev.plantaFeiraLink ||
-    ev.plantaLink ||
-    ev.planta ||
-    ev.urlPlanta ||
-    null;
-  return { manual, planta };
-}
-function extractProjectDriveLink(p) {
-  if (!p) return null;
-  return (
-    p.driveLink ||
-    p.linkDrive ||
-    p.pastaDrive ||
-    p.driveFolderUrl ||
-    p.driveFolder ||
-    p.urlDrive ||
-    null
-  );
-}
-function LinkRow({ label, href }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="text-neutral-600">{label}</div>
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-700 underline-offset-2 hover:underline break-all text-sm"
-          title={href}
-        >
-          Abrir
-        </a>
-      ) : (
-        <span className="text-neutral-400 text-sm">—</span>
-      )}
-    </div>
-  );
-}
-
-/* ----------------- Diários: links & imagens (paridade com ContractorPage) ----------------- */
-function isHttpUrl(u) {
-  try { const x = new URL(String(u)); return x.protocol === "http:" || x.protocol === "https:"; }
-  catch { return false; }
-}
-function isLikelyImage(att) {
-  const ct = (att?.contentType || att?.type || "").toString().toLowerCase();
-  if (ct.includes("image/")) return true;
-  const u = (att?.downloadURL || att?.url || att?.src || att?.href || "").toString().toLowerCase();
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(u);
-}
-function extractDiaryLinks(d) {
-  const links = [];
-  const candidates = [
-    d.linkUrl, d.link, d.url, d.href,
-    ...(Array.isArray(d.links) ? d.links : []),
-  ].filter(Boolean);
-  for (const c of candidates) {
-    if (Array.isArray(c)) {
-      for (const x of c) if (isHttpUrl(x)) links.push(String(x));
-    } else if (isHttpUrl(c)) {
-      links.push(String(c));
-    }
-  }
-  return Array.from(new Set(links));
-}
-function extractDiaryImages(d) {
-  const arrays =
-    (Array.isArray(d.attachments) && d.attachments) ||
-    (Array.isArray(d.anexos) && d.anexos) ||
-    (Array.isArray(d.fotos) && d.fotos) ||
-    (Array.isArray(d.images) && d.images) ||
-    (Array.isArray(d.imagens) && d.imagens) ||
-    [];
-  const urls = [];
-  for (const att of arrays) {
-    const candidate = att?.downloadURL || att?.url || att?.src || att?.href || null;
-    if (candidate && (isLikelyImage(att) || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(candidate)))) {
-      if (isHttpUrl(candidate)) urls.push(String(candidate));
-    }
-  }
-  return Array.from(new Set(urls));
-}
-
-/* ----------------- Agrupar diários por dia ----------------- */
-function groupDiariesByDay(items) {
-  const map = new Map();
-  (items || []).forEach((d) => {
-    const ms = parseMillis(d.createdAt || d.date || d.data || d.timestamp);
-    const day = ms
-      ? new Date(ms).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })
-      : "Sem data";
-    if (!map.has(day)) map.set(day, []);
-    map.get(day).push(d);
-  });
-  // ordena cada grupo (mais recente primeiro)
-  for (const [, arr] of map) {
-    arr.sort((a, b) =>
-      parseMillis(b.updatedAt || b.createdAt || b.date || b.data) -
-      parseMillis(a.updatedAt || a.createdAt || a.date || a.data)
-    );
-  }
-  // ordena dias (mais recente primeiro)
-  return Array.from(map.entries())
-    .sort(([da], [db]) => {
-      const a = parseMillis(da); const b = parseMillis(db);
-      return b - a;
-    })
-    .reduce((acc, [k, v]) => (acc[k] = v, acc), {});
 }
 
 export default function ProjectSummaryPage() {
@@ -256,7 +131,7 @@ export default function ProjectSummaryPage() {
         });
         setEvents(Array.from(byKey.values()).sort((a, b) => norm(a.name).localeCompare(norm(b.name))));
 
-        // eventos (com datas) — AGORA preservando campos originais (manual/planta)
+        // eventos (com datas)
         const mappedFull = (evs || []).map((e) => ({
           id: e.id,
           name: e.nome || e.name || e.titulo || e.id,
@@ -267,8 +142,6 @@ export default function ProjectSummaryPage() {
           dataFimEvento: e.dataFimEvento || e.eventoFim,
           dataInicioDesmontagem: e.dataInicioDesmontagem || e.desmontagemInicio,
           dataFimDesmontagem: e.dataFimDesmontagem || e.desmontagemFim,
-          // mantém quaisquer campos extras do evento (ex.: links manual/planta)
-          ...e,
         }));
         setEventsFull(mappedFull);
       } catch (e) {
@@ -343,7 +216,7 @@ export default function ProjectSummaryPage() {
         setLoading(false);
       }
     })();
-  }, [selectedProjectId, projectsForEvent, allAccessibleProjects]);
+  }, [selectedProjectId]);
 
   const selectedEvent = useMemo(
     () => events.find((e) => String(e.id) === String(selectedEventId)) || null,
@@ -366,21 +239,6 @@ export default function ProjectSummaryPage() {
     const display = (u) => u.displayName || u.nome || u.name || u.email || "—";
     return { consultantName: display(c), producerName: display(p) };
   }, [projectData, usersMap]);
-
-  const { manual: linkManual, planta: linkPlanta } = useMemo(
-    () => extractEventLinks(selectedEventFull || {}),
-    [selectedEventFull]
-  );
-  const linkDrive = useMemo(() => extractProjectDriveLink(projectData || {}), [projectData]);
-  const lastUpdated = useMemo(
-    () =>
-      projectData?.updatedAt ||
-      projectData?.modifiedAt ||
-      projectData?.lastUpdate ||
-      projectData?.createdAt ||
-      null,
-    [projectData]
-  );
 
   const handlePrint = () => window.print();
 
@@ -536,7 +394,6 @@ export default function ProjectSummaryPage() {
                 </div>
               </div>
 
-              {/* Mantém o card de KPIs de chamados como estava */}
               <div className="rounded-2xl bg-white border border-neutral-200 shadow-sm">
                 <header className="border-b border-neutral-200 px-5 py-4">
                   <h2 className="text-lg font-semibold">Chamados</h2>
@@ -553,24 +410,6 @@ export default function ProjectSummaryPage() {
                     />
                     <KPI label={STATUS_LABELS.concluido} value={ticketsSummary?.byStatus?.concluido || 0} />
                     <KPI label={STATUS_LABELS.arquivado} value={ticketsSummary?.byStatus?.arquivado || 0} />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* NOVO: Links Úteis (igual ContractorPage) */}
-            <section className="print-block">
-              <div className="rounded-2xl bg-white border border-neutral-200 shadow-sm">
-                <header className="border-b border-neutral-200 px-5 py-4">
-                  <h2 className="text-lg font-semibold">Links Úteis</h2>
-                </header>
-                <div className="p-5 space-y-3 text-sm">
-                  <LinkRow label="Manual da feira" href={linkManual} />
-                  <LinkRow label="Planta da feira" href={linkPlanta} />
-                  <LinkRow label="Pasta do projeto (Drive)" href={linkDrive} />
-                  <div className="mt-2 pt-3 border-t border-neutral-200">
-                    <div className="text-xs text-neutral-500">Última atualização do projeto</div>
-                    <div className="text-[15px] font-medium">{formatDateTimeBR(lastUpdated)}</div>
                   </div>
                 </div>
               </div>
@@ -619,7 +458,7 @@ export default function ProjectSummaryPage() {
               </div>
             </section>
 
-            {/* Diários agrupados por dia (agora com LINKS e IMAGENS) */}
+            {/* Diários agrupados por dia */}
             <section className="print-block rounded-2xl bg-white border border-neutral-200 shadow-sm">
               <header className="border-b border-neutral-200 px-5 py-4">
                 <h2 className="text-lg font-semibold">Diários do Projeto</h2>
@@ -634,63 +473,15 @@ export default function ProjectSummaryPage() {
                     <div key={day} className="rounded-xl border border-neutral-200 bg-neutral-50">
                       <div className="px-4 py-2 border-b border-neutral-200 text-sm font-medium">{day}</div>
                       <ul className="divide-y divide-neutral-200">
-                        {items.map((d) => {
-                          const links = extractDiaryLinks(d);
-                          const images = extractDiaryImages(d);
-                          return (
-                            <li key={d.id} className="p-4">
-                              <div className="flex items-center justify-between">
-                                <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
-                                <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
-                              </div>
-                              <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">
-                                {(d.text || "").trim() || "—"}
-                              </p>
-
-                              {/* Links do diário */}
-                              {links.length > 0 && (
-                                <div className="mt-2">
-                                  <div className="text-xs text-neutral-500 mb-1">Links</div>
-                                  <ul className="space-y-1">
-                                    {links.map((href, i) => (
-                                      <li key={i}>
-                                        <a
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-sm text-blue-700 underline-offset-2 hover:underline break-all"
-                                        >
-                                          {href}
-                                        </a>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-
-                              {/* Imagens do diário */}
-                              {images.length > 0 && (
-                                <div className="mt-3">
-                                  <div className="text-xs text-neutral-500 mb-1">Imagens</div>
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                                    {images.map((src, i) => (
-                                      <a
-                                        key={i}
-                                        href={src}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="block rounded-lg overflow-hidden border border-neutral-200 bg-white"
-                                      >
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img src={src} alt={`Imagem ${i + 1}`} className="w-full h-32 object-cover" />
-                                      </a>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </li>
-                          );
-                        })}
+                        {items.map((d) => (
+                          <li key={d.id} className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium text-sm">{d.projectName || "Projeto"}</div>
+                              <div className="text-xs text-neutral-500">{d.authorName || "—"}</div>
+                            </div>
+                            <p className="mt-1 text-sm text-neutral-700 whitespace-pre-wrap">{(d.text || "").trim() || "—"}</p>
+                          </li>
+                        ))}
                       </ul>
                     </div>
                   ))
@@ -765,10 +556,12 @@ function prettyStatus(s) {
 
 /* ===== Regra de privacidade p/ Financeiro ===== */
 function isSensitiveFinanceTicket(t) {
+  // área/categoria precisa ser Financeiro
   const area = norm(t.area || t.setor || t.categoria || t.areaOriginal || "");
   const isFinance = ["financeiro", "financas", "finanças"].includes(area);
   if (!isFinance) return false;
 
+  // tipo do chamado (várias variações)
   const rawType = norm(
     t.tipo || t.tipoChamado || t.tipoDeChamado || t.category || t.subtipo || ""
   ).replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
@@ -833,6 +626,7 @@ function isComprasTicket(t) {
   if (["compras","compra","purchase","suprimentos","material","materiais"].includes(tipo)) return true;
   return has(t,"produto","descricaoProduto","valorUnitario","valorTotal","quantidade","prazoEntrega","fornecedor","nfNumero","pedidoNumero","cotacoes","camposEspecificos");
 }
+
 function renderExtraSections(t) {
   if (isLocacaoTicket(t)) {
     return (
@@ -882,6 +676,87 @@ function renderExtraSections(t) {
   return null;
 }
 
+/* ===== Informações Específicas (itens) ===== */
+function toArrayFromUnknown(x) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x;
+  if (typeof x === "object") return Object.keys(x).map((k) => ({ _key: k, ...x[k] }));
+  return [];
+}
+function extractSpecificItems(t) {
+  // prioridade para 'camposEspecificos' (como no seu Firestore)
+  const candidates = [
+    t.camposEspecificos,
+    t.informacoesEspecificasItens,
+    t.informacoesEspecificas,
+    t.itensEspecificos,
+    t.itens_especificos,
+    t.dadosEspecificos,
+    t.itemsEspec,
+    t.items,
+    t.itens,
+    t.lista,
+  ];
+
+  let arr = [];
+  for (const src of candidates) {
+    const tmp = toArrayFromUnknown(src);
+    if (tmp.length) { arr = tmp; break; }
+  }
+
+  return arr
+    .map((i, idx) => ({
+      idx,
+      // Firestore: codItem, id, item, quantidade
+      codigo: i.codItem || i.codigoDoItem || i.codigo_item || i.codigo || i.cod || i.codigoItem,
+      idItem: i.id || i.codigoInterno,
+      item: i.item || i.nome || i.descricao || i.descricaoItem || i.produto,
+      quantidade: i.quantidade || i.qtd || i.qtde,
+      unidade: i.unidade || i.um,
+      valorUnitario: i.valorUnitario || i.precoUnitario || i.vlrUnit,
+      valorTotal: i.valorTotal || i.precoTotal || i.vlrTotal,
+    }))
+    .filter((it) => it.item || it.codigo || it.quantidade || it.idItem);
+}
+function renderSpecificInfoBlock(t) {
+  const items = extractSpecificItems(t);
+  if (!items.length) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-neutral-500 mb-1">Informações Específicas</div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-3">
+        <ul className="space-y-2">
+          {items.map((it, idx) => (
+            <li key={it.idx ?? idx} className="text-sm">
+              <div className="font-medium">Item {idx + 1}</div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div><span className="text-neutral-500">Código:</span> {it.codigo || "—"}</div>
+                <div className="sm:col-span-2"><span className="text-neutral-500">Item:</span> {it.item || "—"}</div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div><span className="text-neutral-500">Quantidade:</span> {it.quantidade || "—"}</div>
+                <div><span className="text-neutral-500">Unidade:</span> {it.unidade || "—"}</div>
+                <div>
+                  <span className="text-neutral-500">Vlr Un:</span> {it.valorUnitario || "—"}
+                  {it.valorTotal ? ` | Vlr Total: ${it.valorTotal}` : ""}
+                </div>
+              </div>
+
+              {it.idItem && (
+                <div className="mt-1">
+                  <span className="text-neutral-500">ID do item:</span> {it.idItem}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 /* ===== Mensagens ===== */
 function renderMessages(t) {
   const candidates = [t.messages, t.mensagens, t.historico, t.comentarios, t.comments, t.updates];
@@ -892,29 +767,53 @@ function renderMessages(t) {
   if (!arr) return null;
 
   const items = arr.map((m, idx) => {
-    if (typeof m === "string") return { id: idx, text: m, createdAt: null, author: null };
+    if (typeof m === "string") return { id: idx, text: m, authorName: null, createdAt: null };
     if (typeof m === "object") {
       return {
         id: m.id || idx,
-        text: m.text || m.mensagem || m.descricao || m.body || "",
+        text: m.text || m.mensagem || m.message || m.descricao || "",
+        authorName: m.authorName || m.autorNome || m.userName || m.usuario || null,
         createdAt: m.createdAt || m.data || m.timestamp || null,
-        author: m.authorName || m.autor || m.user || m.by || null,
       };
     }
-    return { id: idx, text: String(m), createdAt: null, author: null };
-  });
+    return { id: idx, text: String(m), authorName: null, createdAt: null };
+  }).filter((x) => (x.text || "").trim().length > 0);
+
+  if (items.length === 0) return null;
 
   return (
     <div className="mt-3">
       <div className="text-xs text-neutral-500 mb-1">Mensagens</div>
-      <ul className="space-y-1">
+      <ul className="space-y-2">
         {items.map((m) => (
-          <li key={m.id} className="text-sm">
-            <span className="text-neutral-500">{formatDateTimeBR(m.createdAt)}{m.author ? ` • ${m.author}` : ""}</span>
-            <div className="whitespace-pre-wrap">{m.text || "—"}</div>
+          <li key={m.id} className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-neutral-500">{m.authorName || "—"}</div>
+              <div className="text-xs text-neutral-400">{formatDateTimeBR(m.createdAt)}</div>
+            </div>
+            <p className="text-sm text-neutral-800 whitespace-pre-wrap">{m.text}</p>
           </li>
         ))}
       </ul>
     </div>
   );
+}
+
+/* ===== Diários ===== */
+function groupDiariesByDay(feedItems) {
+  const groups = {};
+  for (const it of (feedItems || [])) {
+    const key = formatDateBR(it.createdAt) || "Sem data";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(it);
+  }
+  const ordered = {};
+  Object.entries(groups)
+    .sort((a, b) => {
+      const A = a[0].split("/").reverse().join("-");
+      const B = b[0].split("/").reverse().join("-");
+      return new Date(B) - new Date(A);
+    })
+    .forEach(([k, v]) => (ordered[k] = v));
+  return ordered;
 }
