@@ -1004,8 +1004,7 @@ const DashboardPage = () => {
               <UserAvatar className="h-5 w-5 mr-3" />
               Meu Perfil
             </Button>
-            )}
-            
+                
             {/* painel admin (admin) */}
             {isAdmin && !isEmpreiteiro && (
               <Button onClick={() => navigate('/admin/painel')} variant="ghost" className="w-full justify-start">
