@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
-import * as XLSX from 'xlsx'; // <--- NOVO: Importação da biblioteca SheetJS (xlsx)
+import * as XLSX from 'xlsx'; // Importação da biblioteca SheetJS (xlsx)
 
 /* =========================================================================
    Helpers de data / fuso e formatação
@@ -417,32 +417,40 @@ const ProjectsPage = () => {
   }, [filteredProjects]);
 
   /* =========================
-     Exportação Excel (com SheetJS) - ATUALIZADO
+     Exportação Excel (com SheetJS) - ATUALIZADO (Colunas Dinâmicas)
      ========================= */
   const downloadExcel = (data, filename = 'projetos.xlsx') => {
-    // 1. Definir os cabeçalhos
-    const headers = [
-      'ID',
-      'Nome do Projeto',
-      'Feira/Evento',
-      'Local',
-      'Pavilhão',
-      'Tipo Montagem',
-      'Metragem',
-      'Consultor', // <--- INCLUÍDO
-      'Produtor',  // <--- INCLUÍDO
-      'Status',
-      'Equipes Terceirizadas' // <--- INCLUÍDO
-    ];
+    // 1. Encontrar todas as chaves de equipes únicas (marcenaria, eletrica, etc.)
+    const allTeamKeys = new Set();
+    data.forEach(p => {
+      // A estrutura de equipes é um objeto/mapa
+      if (p.equipesEmpreiteiras && typeof p.equipesEmpreiteiras === 'object') {
+        Object.keys(p.equipesEmpreiteiras).forEach(key => {
+          if (p.equipesEmpreiteiras[key]) { // Adiciona apenas se houver valor
+            allTeamKeys.add(key);
+          }
+        });
+      }
+    });
+    // Ordena as chaves para garantir uma ordem de coluna consistente
+    const sortedTeamKeys = Array.from(allTeamKeys).sort((a, b) => a.localeCompare(b));
 
-    // 2. Mapear os dados para as linhas
+    // 2. Definir os cabeçalhos
+    const baseHeaders = [
+      'ID', 'Nome do Projeto', 'Feira/Evento', 'Local', 'Pavilhão',
+      'Tipo Montagem', 'Metragem', 'Consultor', 'Produtor', 'Status'
+    ];
+    
+    // Capitaliza os nomes das equipes para os cabeçalhos (ex: "marcenaria" -> "Marcenaria")
+    const capitalize = (s) => (s || '').charAt(0).toUpperCase() + s.slice(1);
+    const teamHeaders = sortedTeamKeys.map(capitalize);
+    
+    const headers = [...baseHeaders, ...teamHeaders];
+
+    // 3. Mapear os dados para as linhas
     const rows = data.map(p => {
-      // Formata as equipes (conforme lógica do card)
-      const equipes = Object.values(p.equipesEmpreiteiras || {})
-        .filter(Boolean)
-        .join(', ');
-      
-      return [
+      // Dados base
+      const baseRow = [
         p.id,
         p.nome,
         p.feira || p.evento,
@@ -450,19 +458,26 @@ const ProjectsPage = () => {
         p.pavilhao,
         p.tipoMontagem,
         p.metragem,
-        p.consultorNome, // Nome do Consultor
-        p.produtorNome,  // Nome do Produtor
+        p.consultorNome,
+        p.produtorNome,
         p.status,
-        equipes // Equipes formatadas
       ];
+      
+      // Dados dinâmicos das equipes
+      // Mapeia na *mesma ordem* dos cabeçalhos (sortedTeamKeys)
+      const teamValues = sortedTeamKeys.map(key => {
+        return p.equipesEmpreiteiras?.[key] || ''; // Usa a chave (ex: 'marcenaria') para pegar o valor
+      });
+
+      return [...baseRow, ...teamValues];
     });
 
-    // 3. Criar a planilha (worksheet)
+    // 4. Criar a planilha (worksheet) e definir larguras
     const worksheetData = [headers, ...rows];
     const ws = XLSX.utils.aoa_to_sheet(worksheetData);
     
-    // Opcional: ajustar largura das colunas
-    ws['!cols'] = [
+    // Larguras das colunas base
+    const baseCols = [
        { wch: 20 }, // ID
        { wch: 30 }, // Nome do Projeto
        { wch: 25 }, // Feira/Evento
@@ -473,10 +488,14 @@ const ProjectsPage = () => {
        { wch: 20 }, // Consultor
        { wch: 20 }, // Produtor
        { wch: 12 }, // Status
-       { wch: 40 }, // Equipes Terceirizadas
     ];
+    
+    // Larguras das colunas de equipe (dinâmicas)
+    const teamCols = sortedTeamKeys.map(() => ({ wch: 25 })); // Largura padrão de 25
+    
+    ws['!cols'] = [...baseCols, ...teamCols];
 
-    // 4. Criar o 'livro' (workbook) e fazer o download
+    // 5. Criar o 'livro' (workbook) e fazer o download
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Projetos');
     XLSX.writeFile(wb, filename);
@@ -487,12 +506,12 @@ const ProjectsPage = () => {
     const setIds = new Set(selectedIds);
     const rows = filteredProjects.filter(p => setIds.has(p.id));
     if (rows.length === 0) return;
-    downloadExcel(rows, 'projetos_selecionados.xlsx'); // <--- ATUALIZADO
+    downloadExcel(rows, 'projetos_selecionados.xlsx');
   };
 
   const exportFiltered = () => {
     if (filteredProjects.length === 0) return;
-    downloadExcel(filteredProjects, 'projetos_filtrados.xlsx'); // <--- ATUALIZADO
+    downloadExcel(filteredProjects, 'projetos_filtrados.xlsx');
   };
 
   /* UI */
@@ -542,7 +561,7 @@ const ProjectsPage = () => {
             onClick={exportSelected}
             disabled={selectedIds.size === 0}
             className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar projetos selecionados (Excel)" // <--- ATUALIZADO
+            title="Exportar projetos selecionados (Excel)"
           >
             <Download className="h-4 w-4" /> Exportar selecionados
           </button>
@@ -550,7 +569,7 @@ const ProjectsPage = () => {
             onClick={exportFiltered}
             disabled={filteredProjects.length === 0}
             className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar lista filtrada (Excel)" // <--- ATUALIZADO
+            title="Exportar lista filtrada (Excel)"
           >
             <Download className="h-4 w-4" /> Exportar filtrados
           </button>
