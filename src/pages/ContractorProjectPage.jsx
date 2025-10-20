@@ -436,6 +436,27 @@ export default function ContractorProjectPage() {
       flashError("Não consegui acessar a área de transferência.");
     }
   };
+  // Unifica: colar do clipboard (se disponível) e carregar
+  const handlePasteAndLoad = async () => {
+    try {
+      let pasted = null;
+      if (navigator?.clipboard?.readText) {
+        try {
+          pasted = (await navigator.clipboard.readText())?.trim();
+        } catch {}
+      }
+      if (pasted) {
+        setProjectIdInput(pasted);
+        await handleLoad(pasted);
+      } else {
+        await handleLoad();
+      }
+    } catch (e) {
+      console.error("Erro ao colar/carregar:", e);
+      flashError("Não foi possível colar/carregar. Tente novamente.");
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -475,22 +496,13 @@ export default function ContractorProjectPage() {
             {/* NOVO: Botão COLAR à esquerda do CARREGAR */}
             <button
               type="button"
-              onClick={handlePasteFromClipboard}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
-              title="Colar do clipboard"
-            >
-              📋 Colar
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleLoad()}
+              onClick={handlePasteAndLoad}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-neutral-800 active:bg-neutral-900"
-              title="Carregar projeto"
+              title="Colar do clipboard e carregar projeto"
             >
-              Carregar
+              📋 Colar e Carregar
             </button>
-            <button
+<button
               type="button"
               onClick={handlePrint}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
