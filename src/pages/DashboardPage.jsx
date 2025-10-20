@@ -928,10 +928,7 @@ const DashboardPage = () => {
             )}
 
             {!isEmpreiteiro && (
-              <Button onClick={() => navigate('/projetos')} variant="ghost" className="w-full justify-start">
-                <FolderOpen className="h-4 w-4 mr-3" />
-                Ver Projetos
-              </Button>
+              
             )}
 
             {!isEmpreiteiro && (
@@ -941,22 +938,21 @@ const DashboardPage = () => {
               </Button>
             )}
 
+
             {/* Atalho para a página de diários */}
             {!isEmpreiteiro && (
-              <Button onClick={() => navigate('/diari
-            {/* >>> NOVO: Meu Perfil */}
-            <Button onClick={() => navigate('/perfil')} variant="ghost" className="w-full justify-start">
-              <UserIcon className="h-4 w-4 mr-3" />
-              Meu Perfil
-            </Button>
-os')} variant="ghost" className="w-full justify-start">
+              <Button onClick={() => navigate('/diarios')} variant="ghost" className="w-full justify-start">
                 <BookOpen className="h-4 w-4 mr-3" />
                 Diário do Projeto
               </Button>
             )}
 
-            {/* Resumo do Projeto — agora oculto para empreiteiro */}
-            {!isEmpreiteiro && (
+            {/* >>> NOVO: Meu Perfil */}
+            <Button onClick={() => navigate('/perfil')} variant="ghost" className="w-full justify-start">
+              <UserIcon className="h-4 w-4 mr-3" />
+              Meu Perfil
+            </Button>
+
               <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
                 Resumo do Projeto
@@ -979,26 +975,14 @@ os')} variant="ghost" className="w-full justify-start">
             )}
 
             {userProfile?.funcao === 'gerente' && !isEmpreiteiro && (
-              <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
-                <BarChart3 className="h-4 w-4 mr-3" />
-                Relatórios
-              </Button>
+              
             )}
 
             {userProfile?.funcao === 'administrador' && !isEmpreiteiro && (
               <>
-                <Button onClick={() => navigate('/eventos')} variant="ghost" className="w-full justify-start">
-                  <Calendar className="h-4 w-4 mr-3" />
-                  Eventos
-                </Button>
-                <Button onClick={() => navigate('/usuarios')} variant="ghost" className="w-full justify-start">
-                  <Users className="h-4 w-4 mr-3" />
-                  Usuários
-                </Button>
-                <Button onClick={() => navigate('/relatorios')} variant="ghost" className="w-full justify-start">
-                  <BarChart3 className="h-4 w-4 mr-3" />
-                  Relatórios
-                </Button>
+                
+                
+                
                 <Button onClick={() => navigate('/analytics')} variant="ghost" className="w-full justify-start">
                   <BarChart3 className="h-4 w-4 mr-3" />
                   Analytics
@@ -1021,6 +1005,11 @@ os')} variant="ghost" className="w-full justify-start">
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              
+              <DropdownMenuItem onClick={() => navigate('/perfil')}>
+                <UserIcon className="h-4 w-4 mr-2" />
+                Meu Perfil
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={logout}>
                 <LogOut className="h-4 w-4 mr-2" />
                 Sair
@@ -1222,9 +1211,7 @@ os')} variant="ghost" className="w-full justify-start">
                         {getTicketCounts()[activeFilter]} chamado{getTicketCounts()[activeFilter] !== 1 ? 's' : ''}
                       </Badge>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => setActiveFilter('todos')} className="text-blue-600 hover:text-blue-800">
-                      <X className="h-4 w-4 mr-1" /> Limpar
-                    </Button>
+                    
                   </div>
                 )}
 
