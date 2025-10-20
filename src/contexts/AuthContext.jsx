@@ -1,106 +1,116 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
+// src/contexts/AuthContext.jsx
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import {
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
-  createUserWithEmailAndPassword 
+  createUserWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth deve ser usado dentro de um AuthProvider');
+  return ctx;
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
+  const [user, setUser] = useState(null);               // Firebase User
+  const [userProfile, setUserProfile] = useState(null); // Firestore: usuarios/{uid}
   const [loading, setLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
 
+  const profileUnsubRef = useRef(null);
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      try {
-        if (user) {
-          setUser(user);
-          // Buscar perfil do usuário no Firestore
-          try {
-            const userDoc = await getDoc(doc(db, 'usuarios', user.uid));
-            if (userDoc.exists()) {
-              setUserProfile(userDoc.data());
-            } else {
-              setUserProfile(null);
-            }
-          } catch (error) {
-            console.error('Erro ao buscar perfil do usuário:', error);
-            setUserProfile(null);
+    const unsubAuth = onAuthStateChanged(auth, async (u) => {
+      // Limpa listener de perfil anterior
+      if (profileUnsubRef.current) {
+        try { profileUnsubRef.current(); } catch {}
+        profileUnsubRef.current = null;
+      }
+
+      setUser(u || null);
+
+      if (u?.uid) {
+        // Escuta em tempo real o doc do usuário
+        const ref = doc(db, 'usuarios', u.uid);
+        profileUnsubRef.current = onSnapshot(ref, (snap) => {
+          if (snap.exists()) {
+            setUserProfile({ id: u.uid, ...snap.data() });
+          } else {
+            setUserProfile({ id: u.uid });
           }
-        } else {
-          setUser(null);
-          setUserProfile(null);
-        }
-      } catch (error) {
-        console.error('Erro no listener de autenticação:', error);
-        setUser(null);
+          setLoading(false);
+          setAuthInitialized(true);
+        }, (err) => {
+          console.error('Erro no snapshot do perfil:', err);
+          setUserProfile({ id: u.uid });
+          setLoading(false);
+          setAuthInitialized(true);
+        });
+
+        // fallback imediato (primeiro paint) lendo uma vez se necessário
+        try {
+          const once = await getDoc(ref);
+          if (once.exists()) setUserProfile({ id: u.uid, ...once.data() });
+          else setUserProfile({ id: u.uid });
+        } catch {}
+      } else {
         setUserProfile(null);
-      } finally {
         setLoading(false);
         setAuthInitialized(true);
       }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubAuth && unsubAuth();
+      if (profileUnsubRef.current) {
+        try { profileUnsubRef.current(); } catch {}
+        profileUnsubRef.current = null;
+      }
+    };
   }, []);
 
   const login = async (email, password) => {
-    try {
-      const result = await signInWithEmailAndPassword(auth, email, password);
-      return result;
-    } catch (error) {
-      throw error;
-    }
+    return await signInWithEmailAndPassword(auth, email, password);
   };
 
   const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      throw error;
-    }
+    await signOut(auth);
   };
 
   const register = async (email, password, userData) => {
-    try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Criar perfil do usuário no Firestore
-      await setDoc(doc(db, 'usuarios', result.user.uid), {
-        email: email,
-        ...userData,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-
-      return result;
-    } catch (error) {
-      throw error;
-    }
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    // Cria perfil inicial no Firestore
+    await setDoc(doc(db, 'usuarios', result.user.uid), {
+      email,
+      ...userData,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return result;
   };
+
+  const refreshUser = async () => {
+    try { await auth.currentUser?.reload(); } catch {}
+  };
+
+  const avatarURL = userProfile?.fotoURL || user?.photoURL || null;
 
   const value = {
     user,
     userProfile,
+    avatarURL,
     login,
     logout,
     register,
+    refreshUser,
     loading,
-    authInitialized
+    authInitialized,
   };
 
   return (
@@ -109,4 +119,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
-
