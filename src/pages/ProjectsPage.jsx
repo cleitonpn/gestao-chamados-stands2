@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { projectService } from '../services/projectService';
 import { ArrowLeft, Search, BarChart3, Download } from 'lucide-react';
+import * as XLSX from 'xlsx'; // <--- NOVO: Importação da biblioteca SheetJS (xlsx)
 
 /* =========================================================================
    Helpers de data / fuso e formatação
@@ -416,53 +417,82 @@ const ProjectsPage = () => {
   }, [filteredProjects]);
 
   /* =========================
-     Exportação CSV (selecionados ou filtrados)
+     Exportação Excel (com SheetJS) - ATUALIZADO
      ========================= */
-  const toCSVRow = (obj) => {
-    const escape = (v) => {
-      if (v === null || v === undefined) return '';
-      const s = String(v).replace(/"/g, '""');
-      return `"${s}"`;
-    };
-    return [
-      escape(obj.id),
-      escape(obj.nome),
-      escape(obj.feira || obj.evento),
-      escape(obj.local),
-      escape(obj.pavilhao),
-      escape(obj.tipoMontagem),
-      escape(obj.metragem),
-      escape(obj.consultorNome),
-      escape(obj.produtorNome),
-      escape(obj.status),
-    ].join(',');
+  const downloadExcel = (data, filename = 'projetos.xlsx') => {
+    // 1. Definir os cabeçalhos
+    const headers = [
+      'ID',
+      'Nome do Projeto',
+      'Feira/Evento',
+      'Local',
+      'Pavilhão',
+      'Tipo Montagem',
+      'Metragem',
+      'Consultor', // <--- INCLUÍDO
+      'Produtor',  // <--- INCLUÍDO
+      'Status',
+      'Equipes Terceirizadas' // <--- INCLUÍDO
+    ];
+
+    // 2. Mapear os dados para as linhas
+    const rows = data.map(p => {
+      // Formata as equipes (conforme lógica do card)
+      const equipes = Object.values(p.equipesEmpreiteiras || {})
+        .filter(Boolean)
+        .join(', ');
+      
+      return [
+        p.id,
+        p.nome,
+        p.feira || p.evento,
+        p.local,
+        p.pavilhao,
+        p.tipoMontagem,
+        p.metragem,
+        p.consultorNome, // Nome do Consultor
+        p.produtorNome,  // Nome do Produtor
+        p.status,
+        equipes // Equipes formatadas
+      ];
+    });
+
+    // 3. Criar a planilha (worksheet)
+    const worksheetData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+    
+    // Opcional: ajustar largura das colunas
+    ws['!cols'] = [
+       { wch: 20 }, // ID
+       { wch: 30 }, // Nome do Projeto
+       { wch: 25 }, // Feira/Evento
+       { wch: 20 }, // Local
+       { wch: 15 }, // Pavilhão
+       { wch: 15 }, // Tipo Montagem
+       { wch: 10 }, // Metragem
+       { wch: 20 }, // Consultor
+       { wch: 20 }, // Produtor
+       { wch: 12 }, // Status
+       { wch: 40 }, // Equipes Terceirizadas
+    ];
+
+    // 4. Criar o 'livro' (workbook) e fazer o download
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Projetos');
+    XLSX.writeFile(wb, filename);
   };
 
-  const downloadCSV = (rows, filename = 'projetos.csv') => {
-    const header = [
-      'id','nome','feira','local','pavilhao','tipoMontagem','metragem','consultor','produtor','status'
-    ].join(',');
-    const body = rows.map(toCSVRow).join('\n');
-    const csv = header + '\n' + body;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const exportSelected = () => {
     const setIds = new Set(selectedIds);
     const rows = filteredProjects.filter(p => setIds.has(p.id));
     if (rows.length === 0) return;
-    downloadCSV(rows, 'projetos_selecionados.csv');
+    downloadExcel(rows, 'projetos_selecionados.xlsx'); // <--- ATUALIZADO
   };
 
   const exportFiltered = () => {
     if (filteredProjects.length === 0) return;
-    downloadCSV(filteredProjects, 'projetos_filtrados.csv');
+    downloadExcel(filteredProjects, 'projetos_filtrados.xlsx'); // <--- ATUALIZADO
   };
 
   /* UI */
@@ -512,7 +542,7 @@ const ProjectsPage = () => {
             onClick={exportSelected}
             disabled={selectedIds.size === 0}
             className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${selectedIds.size === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar projetos selecionados (CSV)"
+            title="Exportar projetos selecionados (Excel)" // <--- ATUALIZADO
           >
             <Download className="h-4 w-4" /> Exportar selecionados
           </button>
@@ -520,7 +550,7 @@ const ProjectsPage = () => {
             onClick={exportFiltered}
             disabled={filteredProjects.length === 0}
             className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${filteredProjects.length === 0 ? 'bg-gray-200 text-gray-500' : 'bg-white border hover:bg-gray-50'}`}
-            title="Exportar lista filtrada (CSV)"
+            title="Exportar lista filtrada (Excel)" // <--- ATUALIZADO
           >
             <Download className="h-4 w-4" /> Exportar filtrados
           </button>
