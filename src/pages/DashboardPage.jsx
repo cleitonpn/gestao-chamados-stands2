@@ -956,7 +956,7 @@ const DashboardPage = () => {
               <UserIcon className="h-4 w-4 mr-3" />
               Meu Perfil
             </Button>
-
+            )}
               <Button onClick={() => navigate('/resumo-projeto')} variant="ghost" className="w-full justify-start">
                 <FileText className="h-4 w-4 mr-3" />
                 Resumo do Projeto
