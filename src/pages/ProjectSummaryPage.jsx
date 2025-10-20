@@ -15,8 +15,8 @@ import { eventService } from "../services/eventService";
  * - Botões: ← Dashboard e Imprimir
  * - Eventos + datas (via eventService) e projetos por evento (respeita papel)
  * - Cards de chamados (totais) e lista detalhada:
- *   título, data, descrição, status, MENSAGENS e INFORMAÇÕES ESPECÍFICAS
- *   (inclui locação/compras). **Oculta** chamados financeiros sensíveis.
+ * título, data, descrição, status, MENSAGENS e INFORMAÇÕES ESPECÍFICAS
+ * (inclui locação/compras). **Oculta** chamados financeiros sensíveis.
  * - Diários agrupados por dia + (NOVO) Links e Imagens
  * - (NOVO) Links Úteis: Manual da Feira, Planta da Feira e Pasta do Projeto (Drive)
  */
@@ -222,6 +222,7 @@ export default function ProjectSummaryPage() {
           dataFimEvento: e.dataFimEvento || e.eventoFim,
           dataInicioDesmontagem: e.dataInicioDesmontagem || e.desmontagemInicio,
           dataFimDesmontagem: e.dataFimDesmontagem || e.desmontagemFim,
+          ...e, // <-- CORREÇÃO APLICADA AQUI
         }));
         setEventsFull(mappedFull);
       } catch (e) {
