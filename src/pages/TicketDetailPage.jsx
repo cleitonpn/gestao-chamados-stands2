@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -672,6 +673,35 @@ const TicketDetailPage = () => {
       const userFound = users.find(u => u.uid === userId || u.id === userId);
       return userFound?.nome || 'Usuário desconhecido';
   };
+
+
+// Helper para foto de avatar no chat
+const getUserPhotoByMessage = (message) => {
+  if (!message) return null;
+  const id = message.userId || message.remetenteId || message.remetenteUid;
+  let u = null;
+  if (id && Array.isArray(users)) {
+    u = users.find(uu => uu?.uid === id || uu?.id === id);
+  }
+  // fallback: tentar por e-mail ou nome se existir no objeto da mensagem
+  if (!u && Array.isArray(users)) {
+    const email = message.remetenteEmail || message.email;
+    const nome  = message.remetenteNome || message.nome;
+    u = users.find(uu => (email && uu?.email === email) || (nome && uu?.nome === nome)) || null;
+  }
+  return u?.fotoURL || u?.photoURL || null;
+};
+
+const getInitials = (nameOrEmail) => {
+  const s = (nameOrEmail || '').trim();
+  if (!s) return 'U';
+  if (s.includes('@')) return s[0].toUpperCase();
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() || 'U';
+  return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+};
+
+
   
   useEffect(() => {
     if (ticket && users.length > 0) {
@@ -1803,9 +1833,10 @@ updateData.canceladoEm = new Date();
                     messages.map((message, index) => (
                       <div key={index} className="flex space-x-3">
                         <div className="flex-shrink-0">
-                          <div className="h-8 w-8 bg-blue-500 rounded-full flex items-center justify-center">
-                            <User className="h-4 w-4 text-white" />
-                          </div>
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={getUserPhotoByMessage(message) || undefined} alt={message.remetenteNome || 'Usuário'} />
+                            <AvatarFallback>{getInitials(message.remetenteNome || message.remetenteEmail || 'Usuário')}</AvatarFallback>
+                          </Avatar>
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center space-x-2">
