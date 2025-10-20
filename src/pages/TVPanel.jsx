@@ -28,6 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 /* ============================ helpers ============================ */
 const norm = (s) => (s || "").toString().trim().toLowerCase();
 const isText = (v) => typeof v === "string" && v.trim().length > 0;
@@ -136,6 +137,33 @@ const obfuscate = (nameOrEmail) => {
   if (parts.length === 1) return parts[0];
   return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
 };
+
+
+// === helpers de avatar ===
+const getInitials = (nameOrEmail) => {
+  const s = String(nameOrEmail || "").trim();
+  if (!s) return "U";
+  if (s.includes("@")) return s[0].toUpperCase();
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return (parts[0][0] || "U").toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+const findUserByCandidates = (usersByIdRef, usersByEmailRef, idCandidates = [], emailCandidates = []) => {
+  let u = null;
+  for (const id of idCandidates) {
+    if (id && usersByIdRef?.current?.[id]) { u = usersByIdRef.current[id]; break; }
+  }
+  if (!u) {
+    for (const em of emailCandidates) {
+      const e = (em || "").toLowerCase();
+      if (e && usersByEmailRef?.current?.[e]) { u = usersByEmailRef.current[e]; break; }
+    }
+  }
+  return u;
+};
+const avatarURLFromUser = (u) => u?.fotoURL || u?.photoURL || null;
+
+
 
 /* ============================ componente ============================ */
 function TVPanel() {
@@ -611,6 +639,8 @@ function TVPanel() {
           projectsMap={projectsMap}
           eventsMap={eventsMap}
           diaryError={diaryError}
+          usersByIdRef={usersByIdRef}
+          usersByEmailRef={usersByEmailRef}
         />
       )}
       {screen === 1 && (
@@ -653,7 +683,7 @@ function TVPanel() {
 /* ============================ TELAS ============================ */
 
 /* ---- TELA 1 — DIÁRIOS (3×4 cards) ---- */
-function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
+function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError, usersByIdRef, usersByEmailRef }) {
   return (
     <div className="flex flex-col h-[calc(100%-0rem)]">
       <div className="mb-2 text-lg font-bold flex items-center">
@@ -703,7 +733,24 @@ function ScreenDiary({ diaryItems, projectsMap, eventsMap, diaryError }) {
                 <div className="text-[16px] font-semibold text-cyan-300 truncate">{header}</div>
                 <div className="text-[12px] text-white/70 ml-2 whitespace-nowrap">{when ? formatTimeAgo(when) : "—"}</div>
               </div>
-              <div className="mt-1 text-[15px] font-medium">{obfuscate(d.authorName) || "—"}</div>
+              <div className="mt-1 flex items-center gap-2">
+  {(() => {
+    const idC = [d.authorId, d.autorId, d.userId, d.usuarioId, d.createdBy, d.criadoPorId].filter(Boolean);
+    const emC = [d.authorEmail, d.email, d.usuarioEmail, d.createdByEmail, d.criadoPorEmail].filter(Boolean);
+    const u = findUserByCandidates(usersByIdRef, usersByEmailRef, idC, emC);
+    const aURL = avatarURLFromUser(u);
+    const name = obfuscate(d.authorName || u?.nome || u?.displayName || u?.email || "");
+    return (
+      <>
+        <Avatar className="h-6 w-6">
+          <AvatarImage src={aURL || undefined} alt={name || "autor"} />
+          <AvatarFallback>{getInitials(name)}</AvatarFallback>
+        </Avatar>
+        <div className="text-[15px] font-medium">{name || "—"}</div>
+      </>
+    );
+  })()}
+</div>
               <div className="mt-1 text-[14px] text-white/90 line-clamp-4">{preview}</div>
               {thumb && (
                 <div className="mt-2 h-32 rounded-xl overflow-hidden bg-black/30">
@@ -918,7 +965,40 @@ function ScreenTickets({ ticketsFeed, usersByIdRef, usersByEmailRef, projectsMap
                     </div>
                   )}
                 </div>
-                <div className="text-[12px] text-white/60 whitespace-nowrap ml-2">{formatTimeAgo(when)}</div>
+                <div className="ml-2 flex flex-col items-end">
+  <div className="flex -space-x-2 mb-1">
+    {(() => {
+      const openedIdC = [t.createdBy, t.openedById, t.criadoPorId, t.abertoPorId, t.userId, t.solicitanteId].filter(Boolean);
+      const openedEmC = [t.openedByEmail, t.createdByEmail, t.criadoPorEmail, t.abertoPorEmail, t.solicitanteEmail, t.userEmail].filter(Boolean);
+      const uOpen = findUserByCandidates(usersByIdRef, usersByEmailRef, openedIdC, openedEmC);
+      const openURL = avatarURLFromUser(uOpen);
+      const openName = uOpen?.nome || uOpen?.displayName || uOpen?.email || "—";
+
+      const respIdCandidates = [t.atribuido_a, t.assigneeId, t.responsavelId, t.responsavel_atual_id].filter(Boolean);
+      const respEmailCandidates = [t.atribuido_a_email, t.responsavelEmail, t.responsavel_atual_email].filter(Boolean);
+
+      const lastIdC = [t.lastUpdatedBy, t.updatedById, t.ultimo_status_usuario_id, t.statusMudadoPorId, t.ultimaInteracaoUsuarioId, t.ultimaAtualizacaoUsuarioId].filter(Boolean);
+      const lastEmC = [t.lastUpdatedByEmail, t.updatedByEmail, t.ultimo_status_usuario_email, t.statusMudadoPorEmail].filter(Boolean);
+      const uLast = findUserByCandidates(usersByIdRef, usersByEmailRef, lastIdC, lastEmC) || findUserByCandidates(usersByIdRef, usersByEmailRef, respIdCandidates, respEmailCandidates) || uOpen;
+      const lastURL = avatarURLFromUser(uLast);
+      const lastName = uLast?.nome || uLast?.displayName || uLast?.email || "—";
+
+      return (
+        <>
+          <Avatar className="h-6 w-6 ring-1 ring-black/30">
+            <AvatarImage src={openURL || undefined} alt={openName} />
+            <AvatarFallback>{getInitials(openName)}</AvatarFallback>
+          </Avatar>
+          <Avatar className="h-6 w-6 ring-1 ring-black/30">
+            <AvatarImage src={lastURL || undefined} alt={lastName} />
+            <AvatarFallback>{getInitials(lastName)}</AvatarFallback>
+          </Avatar>
+        </>
+      );
+    })()}
+  </div>
+  <div className="text-[12px] text-white/60 whitespace-nowrap">{formatTimeAgo(when)}</div>
+</div>
               </div>
               <div className="mt-2">
                 <StatusBadge status={t.status} />
