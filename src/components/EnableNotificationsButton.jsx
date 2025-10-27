@@ -2,7 +2,12 @@
 import React, { useState } from 'react';
 import { ensurePushEnabled, sendSelfTestPush } from '../lib/pushClient';
 
-const VAPID_PUBLIC = import.meta?.env?.VITE_VAPID_PUBLIC_KEY;
+const VAPID_PUBLIC = (import.meta?.env?.VITE_VAPID_PUBLIC_KEY || '').trim();
+
+// 🔎 DEBUG: ver se o build recebeu a chave (mostra só o começo)
+console.debug('[PUSH] VITE_VAPID_PUBLIC_KEY =',
+  VAPID_PUBLIC ? VAPID_PUBLIC.slice(0, 12) + '…' : '<MISSING>'
+);
 
 export default function EnableNotificationsButton() {
   const [status, setStatus] = useState('idle');
