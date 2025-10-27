@@ -3,7 +3,7 @@
 // ⚠️ IMPORTANTE: ajuste o import do `db` para o arquivo correto do seu projeto.
 // Aqui estou importando de '../lib/firebase' pois é o padrão mais comum no seu repo.
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase'; // ← ajuste se o seu arquivo for outro
+import { db } from '../firebase'; // ← ajuste se o seu arquivo for outro
 
 // Usa o endpoint como ID estável (deduplica automaticamente)
 function endpointToId(endpoint) {
