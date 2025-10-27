@@ -72,6 +72,9 @@ export default function AllDiariesPage() {
   const [userRole, setUserRole] = useState(""); // administrador | gerente | operador | consultor | produtor | ...
   const [authReady, setAuthReady] = useState(false);
 
+  // highlights (top 3)
+  const [highlights, setHighlights] = useState([]);
+
   // feed
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [items, setItems] = useState([]);
@@ -146,6 +149,14 @@ export default function AllDiariesPage() {
     })();
   }, [currentUser, userRole]);
 
+  /* ----------------------- highlights (3 mais recentes) ----------------------- */
+  useEffect(() => {
+    (async () => {
+      const res = await diaryService.fetchFeedRecent({ pageSize: 3 });
+      setHighlights(res.items || []);
+    })();
+  }, []);
+
   /* ---------------- feed principal (últimos ou por projeto) ---------------- */
   const loadFeed = async () => {
     setLoadingFeed(true);
@@ -214,7 +225,9 @@ export default function AllDiariesPage() {
       { projectName }
     );
 
-    // atualiza feed
+    // atualiza destaques e feed
+    const hi = await diaryService.fetchFeedRecent({ pageSize: 3 });
+    setHighlights(hi.items || []);
     await loadFeed();
   };
 
@@ -265,7 +278,7 @@ export default function AllDiariesPage() {
   }, [projSearch, projects]);
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 md:px-6 py-4 space-y-4">
+    <div className="px-4 md:px-6 py-4 space-y-4 bg-slate-50 min-h-screen">
       {/* topo com voltar */}
       <div className="flex items-center gap-3">
         <button
@@ -280,11 +293,13 @@ export default function AllDiariesPage() {
         </h1>
       </div>
 
-      {/* layout principal (2 colunas visuais: esquerda 2/3 com form+feed, direita 1/3 com projetos) */}
+      {/* highlights: removidos conforme instrução */}
+
+      {/* Layout 2/3 + 1/3 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* coluna esquerda (principal): formulário + feed */}
+        {/* Coluna Principal (Esquerda) */}
         <div className="lg:col-span-2 space-y-4">
-          {/* formulário */}
+          {/* Bloco: Formulário */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900 mb-3">
               Novo diário
@@ -302,12 +317,14 @@ export default function AllDiariesPage() {
             )}
           </div>
 
-          {/* feed */}
+          {/* Bloco: Feed */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-slate-900">
-                  {selectedProjectId ? "Diários do projeto" : "Últimos diários"}
+                  {selectedProjectId
+                    ? "Diários do projeto"
+                    : "Últimos diários"}
                 </h2>
                 {selectedProjectId && (
                   <button
@@ -392,7 +409,7 @@ export default function AllDiariesPage() {
           </div>
         </div>
 
-        {/* coluna direita (sidebar): apenas projetos ativos */}
+        {/* Coluna Lateral (Direita) */}
         <div className="lg:col-span-1">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900">
