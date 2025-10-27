@@ -2,7 +2,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 // -> usa o serviço que você já criou e que salvou no Firestore (push_subscriptions)
-import { savePushSubscription } from "../services/pushclient";
+import { savePushSubscription } from "../services/pushSubscriptionService";
 
 const DEBUG = true; // deixe true por enquanto; depois pode trocar p/ false
 
