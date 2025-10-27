@@ -1,97 +1,140 @@
 // src/lib/pushClient.js
+// Cliente de Push unificado (SEM overlay).
+// - Registra o Service Worker
+// - Garante permission
+// - Cria ou recupera a subscription
+// - Converte VAPID
 
-async function fetchPublicKeyFromApi() {
+const VAPID_FROM_ENV =
+  (import.meta.env && import.meta.env.VITE_VAPID_PUBLIC_KEY) || undefined;
+
+async function fetchVapidFromMeta() {
   try {
-    const r = await fetch("/api/push/public-key");
-    if (!r.ok) throw new Error(await r.text());
-    const { key } = await r.json();
-    if (!key || typeof key !== "string") throw new Error("Resposta inválida da /api/push/public-key");
-    return key;
-  } catch (e) {
-    console.error("[PUSH] Falha ao obter chave pública via API:", e);
-    throw e;
+    const res = await fetch('/api/push/meta');
+    if (!res.ok) return undefined;
+    const { vapidPublicKey } = await res.json();
+    return vapidPublicKey || undefined;
+  } catch {
+    return undefined;
   }
 }
 
-async function getVapidPublicKey({ debug = false } = {}) {
-  const fromVite = import.meta?.env?.VITE_VAPID_PUBLIC_KEY;
-  const fromMeta = document.querySelector('meta[name="vapid-public-key"]')?.content;
-  const fromWindow = window.__VAPID_PUBLIC_KEY;
-
-  if (debug) {
-    console.log("[PUSH] VAPID (Vite):", fromVite);
-    console.log("[PUSH] VAPID (meta):", fromMeta);
-    console.log("[PUSH] VAPID (win):", fromWindow);
-  }
-
-  const candidate = fromVite || fromMeta || fromWindow;
-  if (candidate && typeof candidate === "string") return candidate;
-
-  // Fallback robusto (runtime): busca no servidor.
-  const fromApi = await fetchPublicKeyFromApi();
-  if (debug) console.log("[PUSH] VAPID (api):", fromApi);
-  return fromApi;
+export async function getVapidPublicKey() {
+  // 1) tenta env
+  if (VAPID_FROM_ENV) return VAPID_FROM_ENV;
+  // 2) tenta meta tag
+  const tag = document.querySelector('meta[name="vapid-public-key"]');
+  if (tag?.content) return tag.content.trim();
+  // 3) tenta endpoint
+  return await fetchVapidFromMeta();
 }
 
-async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    throw new Error("Este navegador não suporta Service Worker.");
+export async function ensurePermission() {
+  if (!('Notification' in window)) {
+    throw new Error('Browser não suporta Notification API.');
   }
-  const reg = await navigator.serviceWorker.register("/sw.js");
+  let perm = Notification.permission;
+  if (perm === 'default') {
+    perm = await Notification.requestPermission();
+  }
+  if (perm !== 'granted') {
+    throw new Error('Permissão de notificação negada.');
+  }
+  return true;
+}
+
+export async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    throw new Error('Service Worker não suportado.');
+  }
+  // Use o SW do seu PWA (ajuste se o seu arquivo tiver outro nome)
+  const reg = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
   return reg;
 }
 
-export async function ensureVapidKeyAndSubscribe({ debug = false } = {}) {
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") throw new Error("Permissão de notificação negada.");
-
-  const vapidPublicKey = await getVapidPublicKey({ debug });
-  if (!vapidPublicKey || !vapidPublicKey.startsWith("B")) {
-    throw new Error("VAPID public key inválida. Confira a env no Vercel.");
-  }
-
-  const registration = await registerServiceWorker();
-  const existing = await registration.pushManager.getSubscription();
-  if (existing) {
-    if (debug) console.log("[PUSH] Já inscrito.", existing);
-    return existing;
-  }
-
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-  });
-
-  const res = await fetch("/api/push/subscribe", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ subscription }),
-  });
-  if (!res.ok) throw new Error("Falha ao registrar assinatura: " + (await res.text()));
-
-  if (debug) console.log("[PUSH] Assinatura registrada.", subscription);
-  return subscription;
-}
-
-export async function testRealPush({ debug = false } = {}) {
-  const r = await fetch("/api/push/send", { method: "POST" });
-  if (!r.ok) throw new Error(await r.text());
-  if (debug) console.log("[PUSH] Envio de teste requisitado.");
-}
-
-export async function clearBadge() {
-  try {
-    if (navigator.setAppBadge) await navigator.setAppBadge(0);
-    if ("clearAppBadge" in navigator) await navigator.clearAppBadge();
-  } catch {}
-}
-
 function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+export async function getOrCreateSubscription(reg) {
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) return existing;
+
+  const vapid = await getVapidPublicKey();
+  if (!vapid) throw new Error('VAPID public key indisponível.');
+
+  return await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapid),
+  });
+}
+
+/**
+ * Salva/atualiza a subscription no Firestore
+ * (ajuste o import do seu SDK de firebase se necessário)
+ */
+export async function saveSubscriptionInFirestore(subscription, extra = {}) {
+  // lazy-import para não pesar o bundle
+  const { initializeApp } = await import('firebase/app');
+  const { getFirestore, doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+  const { getAuth } = await import('firebase/auth');
+  // seus arquivos de config
+  const { default: firebaseConfig } = await import('../config/firebase.js'); // ajuste este caminho se o seu config estiver em outro arquivo
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  const uid = auth?.currentUser?.uid || 'anon';
+  const key = btoa(subscription.endpoint).replace(/=+$/g, '').slice(-120);
+
+  await setDoc(
+    doc(db, 'push_subscriptions', key),
+    {
+      userId: uid,
+      createdAt: serverTimestamp(),
+      active: true,
+      device: navigator.userAgent,
+      endpoint: subscription.endpoint,
+      subscription: subscription.toJSON(),
+      ...extra,
+    },
+    { merge: true }
+  );
+
+  return key;
+}
+
+/** Envia push “real” (para ESTA subscription) via /api/push/send */
+export async function sendRealPush(subscription, payload = {}) {
+  const res = await fetch('/api/push/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription, payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+/** Broadcast (envia para todas no Firestore) via /api/push/broadcast */
+export async function sendBroadcast(payload = {}) {
+  const res = await fetch('/api/push/broadcast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  return data;
 }
