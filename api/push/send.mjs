@@ -10,7 +10,7 @@ function getEnv(name) {
 }
 
 // (Opcional) Força runtime Node em vez de Edge:
-export const config = { runtime: 'nodejs20.x' };
+export const config = { runtime: 'nodejs' };
 
 webpush.setVapidDetails(
   getEnv('VAPID_SUBJECT'),
