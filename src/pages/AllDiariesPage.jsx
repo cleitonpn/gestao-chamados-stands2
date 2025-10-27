@@ -72,9 +72,6 @@ export default function AllDiariesPage() {
   const [userRole, setUserRole] = useState(""); // administrador | gerente | operador | consultor | produtor | ...
   const [authReady, setAuthReady] = useState(false);
 
-  // highlights (top 3)
-  const [highlights, setHighlights] = useState([]);
-
   // feed
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [items, setItems] = useState([]);
@@ -149,14 +146,6 @@ export default function AllDiariesPage() {
     })();
   }, [currentUser, userRole]);
 
-  /* ----------------------- highlights (3 mais recentes) ----------------------- */
-  useEffect(() => {
-    (async () => {
-      const res = await diaryService.fetchFeedRecent({ pageSize: 3 });
-      setHighlights(res.items || []);
-    })();
-  }, []);
-
   /* ---------------- feed principal (últimos ou por projeto) ---------------- */
   const loadFeed = async () => {
     setLoadingFeed(true);
@@ -225,9 +214,7 @@ export default function AllDiariesPage() {
       { projectName }
     );
 
-    // atualiza destaques e feed
-    const hi = await diaryService.fetchFeedRecent({ pageSize: 3 });
-    setHighlights(hi.items || []);
+    // atualiza feed
     await loadFeed();
   };
 
@@ -278,7 +265,7 @@ export default function AllDiariesPage() {
   }, [projSearch, projects]);
 
   return (
-    <div className="px-4 md:px-6 py-4 space-y-4">
+    <div className="min-h-screen bg-slate-50 px-4 md:px-6 py-4 space-y-4">
       {/* topo com voltar */}
       <div className="flex items-center gap-3">
         <button
@@ -293,50 +280,11 @@ export default function AllDiariesPage() {
         </h1>
       </div>
 
-      {/* highlights: últimos 3 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {highlights.map((h) => {
-          const createdAt = h.createdAt?.toDate
-            ? h.createdAt.toDate()
-            : h.createdAt?._seconds
-            ? new Date(h.createdAt._seconds * 1000)
-            : null;
-          const preview =
-            (h.text || "").length > 160
-              ? (h.text || "").slice(0, 160) + "…"
-              : h.text || "";
-          return (
-            <div
-              key={h.id}
-              className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm"
-            >
-              <div className="text-xs text-slate-500">
-                {createdAt ? createdAt.toLocaleString() : "—"}
-              </div>
-              <button
-                className="mt-1 text-blue-600 hover:underline font-medium"
-                onClick={() => gotoProject(h.projectId)}
-              >
-                {h.projectName || "Projeto"}
-              </button>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {h.authorName || "—"}
-              </div>
-              <p className="mt-2 text-sm text-slate-700">{preview}</p>
-            </div>
-          );
-        })}
-        {highlights.length === 0 && (
-          <div className="md:col-span-3 text-sm text-slate-500">
-            Nenhum diário recente.
-          </div>
-        )}
-      </div>
-
-      {/* 3 colunas: form | feed | projetos */}
+      {/* layout principal (2 colunas visuais: esquerda 2/3 com form+feed, direita 1/3 com projetos) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* coluna esquerda: formulário */}
-        <div className="lg:col-span-1">
+        {/* coluna esquerda (principal): formulário + feed */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* formulário */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900 mb-3">
               Novo diário
@@ -353,17 +301,13 @@ export default function AllDiariesPage() {
               </p>
             )}
           </div>
-        </div>
 
-        {/* coluna central: feed */}
-        <div className="lg:col-span-1">
+          {/* feed */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-slate-900">
-                  {selectedProjectId
-                    ? "Diários do projeto"
-                    : "Últimos diários"}
+                  {selectedProjectId ? "Diários do projeto" : "Últimos diários"}
                 </h2>
                 {selectedProjectId && (
                   <button
@@ -448,7 +392,7 @@ export default function AllDiariesPage() {
           </div>
         </div>
 
-        {/* coluna direita: seleção de projetos (apenas os permitidos) */}
+        {/* coluna direita (sidebar): apenas projetos ativos */}
         <div className="lg:col-span-1">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <h2 className="text-base font-semibold text-slate-900">
@@ -465,7 +409,7 @@ export default function AllDiariesPage() {
               />
             </div>
 
-            <div className="mt-3 h-[60vh] overflow-y-auto pr-1">
+            <div className="mt-3 h-[85vh] overflow-y-auto pr-1">
               {filteredProjects.length === 0 && (
                 <div className="text-sm text-slate-500">
                   Nenhum projeto encontrado.
