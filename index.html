@@ -1,210 +1,48 @@
 <!doctype html>
 <html lang="pt-BR">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    
-    <!-- PWA Meta Tags -->
-    <meta name="application-name" content="Gestão de Chamados" />
-    <meta name="apple-mobile-web-app-title" content="Gestão Chamados" />
-    <meta name="description" content="Sistema completo de gestão de chamados para montagem de stands e eventos" />
-    <meta name="theme-color" content="#3b82f6" />
-    <meta name="background-color" content="#ffffff" />
-    
-    <!-- Apple PWA Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-touch-fullscreen" content="yes" />
-    
-    <!-- Microsoft PWA Meta Tags -->
-    <meta name="msapplication-TileColor" content="#3b82f6" />
-    <meta name="msapplication-tap-highlight" content="no" />
-    
-    <!-- Icons -->
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
-    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512x512.png" />
-    
-    <!-- Manifest -->
-    <link rel="manifest" href="/manifest.json" />
-    
-    <!-- Preload critical resources -->
-    <link rel="preload" href="/src/main.jsx" as="script" />
-    
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <title>Gestão de Chamados - Montagem de Stands</title>
-    
-    <!-- Splash Screen for iOS -->
-    <style>
-      /* Splash screen styles */
-      .splash-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        z-index: 9999;
-        color: white;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      
-      .splash-logo {
-        width: 120px;
-        height: 120px;
-        background: white;
-        border-radius: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 24px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-      }
-      
-      .splash-title {
-        font-size: 24px;
-        font-weight: 600;
-        margin-bottom: 8px;
-        text-align: center;
-      }
-      
-      .splash-subtitle {
-        font-size: 16px;
-        opacity: 0.8;
-        text-align: center;
-      }
-      
-      .splash-spinner {
-        width: 32px;
-        height: 32px;
-        border: 3px solid rgba(255, 255, 255, 0.3);
-        border-top: 3px solid white;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin-top: 32px;
-      }
-      
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      
-      /* Hide splash when app loads */
-      .app-loaded .splash-screen {
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.3s ease-out;
-      }
-    </style>
+
+    <!-- Descrição e tema -->
+    <meta
+      name="description"
+      content="Sistema completo de gestão de chamados para montagem de stands e eventos"
+    />
+    <meta name="theme-color" content="#111827" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="application-name" content="Gestão Chamados" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Android (Chrome) -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS (instalado via Tela Inicial) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Gestão Chamados" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png" />
+
+    <!-- Windows / Edge -->
+    <meta name="msapplication-TileColor" content="#111827" />
+    <meta name="msapplication-navbutton-color" content="#111827" />
+
+    <!-- Favicons básicos -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-72x72.png" />
   </head>
   <body>
-    <!-- Splash Screen -->
-    <div class="splash-screen" id="splash-screen">
-      <div class="splash-logo">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M9 12h6M9 16h6" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div class="splash-title">Gestão de Chamados</div>
-      <div class="splash-subtitle">Montagem de Stands</div>
-      <div class="splash-spinner"></div>
-    </div>
-    
+    <noscript>Ative o JavaScript para usar este aplicativo.</noscript>
     <div id="root"></div>
-    
-    <script>
-      // Register Service Worker
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-              console.log('SW registered: ', registration);
-              
-              // Check for updates
-              registration.addEventListener('updatefound', () => {
-                const newWorker = registration.installing;
-                newWorker.addEventListener('statechange', () => {
-                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // New content available, show update notification
-                    if (confirm('Nova versão disponível! Deseja atualizar?')) {
-                      window.location.reload();
-                    }
-                  }
-                });
-              });
-            })
-            .catch((registrationError) => {
-              console.log('SW registration failed: ', registrationError);
-            });
-        });
-      }
-      
-      // Hide splash screen when app loads
-      window.addEventListener('load', () => {
-        setTimeout(() => {
-          document.body.classList.add('app-loaded');
-          setTimeout(() => {
-            const splash = document.getElementById('splash-screen');
-            if (splash) {
-              splash.remove();
-            }
-          }, 300);
-        }, 1500);
-      });
-      
-      // PWA Install Prompt
-      let deferredPrompt;
-      
-      window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        
-        // Show install button or banner
-        console.log('PWA install prompt available');
-      });
-      
-      // Function to trigger PWA install
-      window.installPWA = () => {
-        if (deferredPrompt) {
-          deferredPrompt.prompt();
-          deferredPrompt.userChoice.then((choiceResult) => {
-            if (choiceResult.outcome === 'accepted') {
-              console.log('User accepted the install prompt');
-            } else {
-              console.log('User dismissed the install prompt');
-            }
-            deferredPrompt = null;
-          });
-        }
-      };
-      
-      // Track PWA usage
-      window.addEventListener('appinstalled', (evt) => {
-        console.log('PWA was installed');
-      });
-      
-      // Handle offline/online status
-      window.addEventListener('online', () => {
-        console.log('App is online');
-        // Sync pending data if any
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'SYNC_PENDING_DATA'
-          });
-        }
-      });
-      
-      window.addEventListener('offline', () => {
-        console.log('App is offline');
-      });
-    </script>
-    
+    <!-- Se usa Vite/React: -->
     <script type="module" src="/src/main.jsx"></script>
+    <!-- Se o seu projeto não for Vite, mantenha a entrada padrão do seu bundler aqui. -->
   </body>
 </html>
