@@ -62,7 +62,8 @@
     "tailwindcss": "^4.1.7",
     "vaul": "^1.1.2",
     "xlsx": "^0.18.5",
-    "zod": "^3.24.4"
+    "zod": "^3.24.4",
+    "web-push": "^3.6.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
