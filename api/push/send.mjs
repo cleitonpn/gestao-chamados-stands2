@@ -1,21 +1,20 @@
 // api/push/send.mjs
 import webpush from 'web-push';
 
-// Garanta que estas variáveis estão no Vercel (Project → Settings → Environment Variables):
-// VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (ex.: mailto:voce@dominio.com)
+// Se quiser, você pode remover completamente este config.
+// O default do Vercel já usa Node (atual). Mantido aqui apenas para clareza.
+export const config = { runtime: 'nodejs' };
+
 function getEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Env ${name} não definido`);
   return v;
 }
 
-// (Opcional) Força runtime Node em vez de Edge:
-export const config = { runtime: 'nodejs' };
-
 webpush.setVapidDetails(
-  getEnv('VAPID_SUBJECT'),
-  getEnv('VAPID_PUBLIC_KEY'),
-  getEnv('VAPID_PRIVATE_KEY')
+  getEnv('VAPID_SUBJECT'),           // ex.: 'mailto:seu-email@dominio.com'
+  getEnv('VAPID_PUBLIC_KEY'),        // PUBLIC KEY
+  getEnv('VAPID_PRIVATE_KEY')        // PRIVATE KEY
 );
 
 export default async function handler(req, res) {
