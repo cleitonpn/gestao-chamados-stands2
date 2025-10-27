@@ -4,118 +4,105 @@ import * as admin from 'firebase-admin';
 
 export const config = { runtime: 'nodejs' };
 
-// ---- Init Firebase Admin (singleton) ----
-const _global = globalThis;
-if (!_global.__FIREBASE_ADMIN__) {
-  const hasDirectCreds = process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY;
-  const hasJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!hasDirectCreds && !hasJson) {
-    console.warn('[broadcast] Credenciais do Firebase Admin ausentes. Defina FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY OU FIREBASE_SERVICE_ACCOUNT_JSON.');
+function setVapid() {
+  const subj = (process.env.VAPID_SUBJECT || '').trim();
+  const pub  = (process.env.VAPID_PUBLIC_KEY || '').trim();
+  const priv = (process.env.VAPID_PRIVATE_KEY || '').trim();
+  if (!subj || !pub || !priv) {
+    throw new Error('VAPID_* ausentes: defina VAPID_SUBJECT, VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY no Vercel.');
   }
+  webpush.setVapidDetails(
+    /^https?:\/\//.test(subj) || subj.startsWith('mailto:') ? subj : `mailto:${subj}`,
+    pub,
+    priv
+  );
+}
+
+function getAdmin() {
+  const g = globalThis;
+  if (g.__ADMIN__) return g.__ADMIN__;
 
   let credential;
-  if (hasJson) {
-    try {
-      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      credential = admin.credential.cert(parsed);
-    } catch (e) {
-      console.error('[broadcast] FIREBASE_SERVICE_ACCOUNT_JSON inválido:', e);
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      credential = admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON));
+    } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+      credential = admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      });
+    } else {
+      throw new Error('Credenciais do Firebase ausentes: use FIREBASE_SERVICE_ACCOUNT_JSON (recomendado).');
     }
-  }
-  if (!credential && hasDirectCreds) {
-    credential = admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    });
+  } catch (e) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON inválido: ' + (e?.message || e));
   }
 
-  admin.initializeApp({ credential });
-  _global.__FIREBASE_ADMIN__ = { admin, db: admin.firestore() };
+  const app = admin.apps.length ? admin.app() : admin.initializeApp({ credential });
+  const db  = admin.firestore();
+  g.__ADMIN__ = { app, db };
+  return g.__ADMIN__;
 }
 
-const { db } = _global.__FIREBASE_ADMIN__;
-
-// ---- VAPID ----
-function envOrNull(name) { return (process.env[name] || '').trim() || null; }
-function normalizeSubject(subject) {
-  if (!subject) return null;
-  if (/^https?:\/\//i.test(subject) || /^mailto:/i.test(subject)) return subject;
-  return `mailto:${subject}`;
-}
-
-// ---- Helpers ----
-async function readJsonBody(req) {
+async function readJson(req) {
   if (req.body) return req.body;
-  let data = '';
-  for await (const chunk of req) data += chunk;
-  try { return JSON.parse(data || '{}'); } catch { return {}; }
+  let data = ''; for await (const c of req) data += c;
+  return data ? JSON.parse(data) : {};
 }
 
 export default async function handler(req, res) {
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+
   if (req.method !== 'POST') {
-    res.status(405).json({ ok:false, error:'Method not allowed' });
-    return;
+    res.status(405).end(JSON.stringify({ ok:false, error:'Method not allowed' })); return;
   }
-
-  const body = await readJsonBody(req);
-  const { filters = {}, payload = {} } = body || {};
-
-  const subject = normalizeSubject(envOrNull('VAPID_SUBJECT'));
-  const pub = envOrNull('VAPID_PUBLIC_KEY');
-  const priv = envOrNull('VAPID_PRIVATE_KEY');
-  if (!subject || !pub || !priv) {
-    res.status(500).json({ ok:false, error:'VAPID env ausente', missing: { subject: !!subject, pub: !!pub, priv: !!priv } });
-    return;
-  }
-  webpush.setVapidDetails(subject, pub, priv);
 
   try {
-    // Query básica: só "active == true" (evita índice composto).
-    let q = db.collection('push_subscriptions').where('active', '==', true);
-    if (filters.userId) q = q.where('userId', '==', String(filters.userId));
-    const snap = await q.get();
-    const subs = [];
-    snap.forEach((d) => {
-      const data = d.data();
-      // filtro adicional por área (em memória, sem índice)
-      if (filters.area && data?.area !== filters.area) return;
-      subs.push({ id: d.id, ...data });
-    });
+    setVapid();
+    const { db } = getAdmin();
 
-    const results = { sent: 0, failed: 0, total: subs.length, deactivated: 0, errors: [] };
-    const notif = JSON.stringify({
-      title: payload.title || '🔔 Novo evento',
-      body: payload.body || 'Você tem novas notificações.',
-      url: payload.url || '/dashboard',
-      tag: payload.tag || 'broadcast',
+    const body = await readJson(req);
+    const { filters = {}, payload = {} } = body || {};
+
+    // busca assinaturas ativas (com filtros simples)
+    let query = db.collection('push_subscriptions').where('active', '==', true);
+    if (filters.userId) query = query.where('userId', '==', String(filters.userId));
+    if (filters.area)   query = query.where('area', '==', String(filters.area));
+
+    const snap = await query.get();
+    const subs = [];
+    snap.forEach(d => subs.push({ id:d.id, ...d.data() }));
+
+    const msg = JSON.stringify({
+      title: payload.title || '🔔 Broadcast',
+      body : payload.body  || 'Teste de broadcast',
+      url  : payload.url   || '/dashboard',
+      tag  : payload.tag   || 'broadcast',
       badgeCount: payload.badgeCount || 1,
     });
 
-    // Envia em sequência (poucos envios). Para alto volume, usar Promise.allSettled com throttling.
+    let sent = 0, failed = 0, deactivated = 0, errors = [];
     for (const s of subs) {
       try {
         const subscription = s.subscription || { endpoint: s.endpoint, keys: s.keys };
-        if (!subscription || !subscription.endpoint) throw new Error('assinatura inválida');
-        await webpush.sendNotification(subscription, notif, { TTL: 60, urgency: 'high' });
-        results.sent += 1;
+        await webpush.sendNotification(subscription, msg, { TTL: 90, urgency:'high' });
+        sent += 1;
       } catch (err) {
-        results.failed += 1;
+        failed += 1;
         const body = err?.body || err?.message || String(err);
-        results.errors.push({ id: s.id, endpoint: s.endpoint, error: body });
-
-        // 404/410/NotRegistered → desativa
+        errors.push({ endpoint: s.endpoint, error: body });
         if (err?.statusCode === 404 || err?.statusCode === 410 || /not\s*registered|invalid/i.test(body)) {
           try {
-            await db.collection('push_subscriptions').doc(s.id).update({ active: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-            results.deactivated += 1;
+            await db.collection('push_subscriptions').doc(s.id).update({ active:false, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+            deactivated += 1;
           } catch {}
         }
       }
     }
 
-    res.status(200).json({ ok:true, ...results });
+    res.status(200).end(JSON.stringify({ ok:true, total: subs.length, sent, failed, deactivated, errors }));
   } catch (e) {
-    res.status(500).json({ ok:false, error: e?.message || String(e) });
+    res.status(500).end(JSON.stringify({ ok:false, error: e?.message || String(e) }));
   }
 }
