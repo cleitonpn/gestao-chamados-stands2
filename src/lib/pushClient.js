@@ -1,7 +1,7 @@
 // src/lib/pushClient.js
 // Cliente de Push: assina, salva no Firestore e dispara push (real/broadcast)
 
-import { db } from './firebaseClient'; // mantém esse caminho
+import { db } from './lib/firebaseClient'; // mantém esse caminho
 import {
   doc,
   setDoc,
