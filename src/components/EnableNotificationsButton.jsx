@@ -1,229 +1,149 @@
 // src/components/EnableNotificationsButton.jsx
-import React, { useEffect, useMemo, useState } from "react";
-// IMPORT RELATIVO (evita erro no Vercel se o alias "@" não estiver configurado)
+import React, { useRef, useState } from 'react';
 import {
-  ensureVapidKeyAndSubscribe,
-  testRealPush,
-  clearBadge,
-} from "../lib/pushClient";
+  ensurePermission,
+  registerServiceWorker,
+  getOrCreateSubscription,
+  saveSubscriptionInFirestore,
+  sendRealPush,
+  sendBroadcast,
+} from '../lib/pushClient';
 
-function Pill({ color = "slate", children }) {
-  const cls =
-    color === "green"
-      ? "bg-emerald-600"
-      : color === "red"
-      ? "bg-rose-600"
-      : color === "yellow"
-      ? "bg-amber-600"
-      : "bg-slate-700";
-  return (
-    <span className={`inline-block text-white text-xs px-2 py-1 rounded ${cls}`}>
-      {children}
-    </span>
-  );
-}
+// HUD de debug OFF por padrão.
+// Ligue só se quiser: localStorage.setItem('push:debug', 'on')
+const wantDebug = typeof window !== 'undefined' && localStorage.getItem('push:debug') === 'on';
 
 export default function EnableNotificationsButton() {
+  const subRef = useRef(null);
   const [busy, setBusy] = useState(false);
-  const [statusMsg, setStatusMsg] = useState("");
-  const [lastError, setLastError] = useState("");
-  const [perm, setPerm] = useState(Notification?.permission || "default");
+  const [perm, setPerm] = useState(Notification?.permission ?? 'default');
   const [swReady, setSwReady] = useState(false);
-  const [hasVapidHint, setHasVapidHint] = useState(false);
 
-  // Detecta presença de VAPID no bundle (Vite) / meta / window (só como indicador)
-  const vapidInBundle = useMemo(() => {
-    try {
-      // Vite (em build) injeta import.meta.env.* quando disponíveis
-      const k = import.meta?.env?.VITE_VAPID_PUBLIC_KEY;
-      return Boolean(k && typeof k === "string" && k.startsWith("B"));
-    } catch {
-      return false;
-    }
-  }, []);
+  async function ensureReady() {
+    await ensurePermission();
+    setPerm('granted');
+    const reg = await registerServiceWorker();
+    setSwReady(true);
+    const sub = await getOrCreateSubscription(reg);
+    subRef.current = sub;
+    await saveSubscriptionInFirestore(sub);
+    return sub;
+  }
 
-  useEffect(() => {
-    const metaKey = document.querySelector('meta[name="vapid-public-key"]')?.content;
-    const winKey = window.__VAPID_PUBLIC_KEY;
-    setHasVapidHint(Boolean(metaKey || winKey || vapidInBundle));
-
-    // Checa SW
-    (async () => {
-      try {
-        if ("serviceWorker" in navigator) {
-          const reg = await navigator.serviceWorker.getRegistration();
-          setSwReady(Boolean(reg));
-        } else {
-          setSwReady(false);
-        }
-      } catch {
-        setSwReady(false);
-      }
-    })();
-  }, [vapidInBundle]);
-
-  const handleAskPermissionLocal = async () => {
+  async function handleSubscribe() {
     try {
       setBusy(true);
-      setLastError("");
-      const permission = await Notification.requestPermission();
-      setPerm(permission);
+      await ensureReady();
+      alert('✅ Assinado com sucesso! Esta aba já pode receber push.');
+    } catch (err) {
+      console.error(err);
+      alert('Falha ao assinar push: ' + (err?.message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      if (permission !== "granted") {
-        setStatusMsg("Permissão negada pelo usuário.");
-        return;
-      }
-
-      // Notificação local simples (sem push) para validar UI do sistema
-      new Notification("🔔 Notificações ativas", {
-        body: "Teste local exibido com sucesso.",
-        tag: "local-test",
+  async function handleTestReal() {
+    try {
+      setBusy(true);
+      let sub = subRef.current;
+      if (!sub) sub = await ensureReady(); // garante que existe
+      const resp = await sendRealPush(sub, {
+        title: 'Teste (real)',
+        body: 'Ping do sistema de push',
       });
-      setStatusMsg("Teste local enviado.");
+      alert('✅ Push real enviado: ' + JSON.stringify(resp));
     } catch (err) {
       console.error(err);
-      setLastError(err?.message || String(err));
-      setStatusMsg("Falha ao testar local.");
+      alert('Falha ao enviar push real: ' + (err?.message || err));
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleSubscribeReal = async () => {
+  async function handleBroadcast() {
     try {
       setBusy(true);
-      setLastError("");
-      setStatusMsg("Assinando push real…");
-
-      await ensureVapidKeyAndSubscribe({ debug: true });
-
-      setStatusMsg("Dispositivo assinado para push real ✅");
+      const resp = await sendBroadcast({
+        title: 'Broadcast de teste',
+        body: 'Mensagem para todos os inscritos ativos',
+      });
+      alert('✅ Broadcast enviado: ' + JSON.stringify(resp));
     } catch (err) {
       console.error(err);
-      setLastError(err?.message || String(err));
-      // Mantém o alerta — útil para usuários
-      alert(err?.message || "Falha ao assinar push.");
-      setStatusMsg("Falha ao assinar push real.");
+      alert('Falha no broadcast: ' + (err?.message || err));
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleTestRealPush = async () => {
-    try {
-      setBusy(true);
-      setLastError("");
-      setStatusMsg("Solicitando envio…");
-
-      await testRealPush({ debug: true });
-
-      setStatusMsg("Disparo solicitado. Verifique a barra de notificações.");
-    } catch (err) {
-      console.error(err);
-      setLastError(err?.message || String(err));
-      alert("Falha ao enviar push real: " + (err?.message || err));
-      setStatusMsg("Falha ao solicitar envio.");
-    } finally {
-      setBusy(false);
+  function clearBadge() {
+    if ('setAppBadge' in navigator) {
+      try { navigator.clearAppBadge(); } catch {}
     }
-  };
-
-  const handleClearBadge = async () => {
-    try {
-      setBusy(true);
-      setLastError("");
-      await clearBadge();
-      setStatusMsg("Contador/bolinha limpo.");
-    } catch (err) {
-      console.warn(err);
-      setLastError(err?.message || String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  }
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Linha de botões */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          disabled={busy}
-          onClick={handleAskPermissionLocal}
-          className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-          title="Pede permissão e mostra uma notificação local (sem push)"
+    <div className="flex items-center gap-3">
+      <button
+        className="px-4 py-2 rounded bg-emerald-600 text-white disabled:opacity-60"
+        onClick={handleSubscribe}
+        disabled={busy}
+      >
+        Assinar Push real
+      </button>
+
+      <button
+        className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-60"
+        onClick={handleTestReal}
+        disabled={busy}
+      >
+        Testar Push real
+      </button>
+
+      <button
+        className="px-4 py-2 rounded bg-violet-600 text-white disabled:opacity-60"
+        onClick={handleBroadcast}
+        disabled={busy}
+      >
+        Broadcast (teste)
+      </button>
+
+      <button
+        className="px-4 py-2 rounded bg-slate-700 text-white disabled:opacity-60"
+        onClick={clearBadge}
+        disabled={busy}
+      >
+        Limpar bolinha
+      </button>
+
+      {wantDebug && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 8,
+            left: 8,
+            zIndex: 9999,
+            padding: '8px 10px',
+            background: 'rgba(20,20,30,0.92)',
+            color: '#fff',
+            borderRadius: 8,
+            fontSize: 12,
+          }}
         >
-          Ativar & Testar (local)
-        </button>
-
-        <button
-          disabled={busy}
-          onClick={handleSubscribeReal}
-          className="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
-          title="Registra a assinatura com a VAPID key (push real)"
-        >
-          Assinar Push real
-        </button>
-
-        <button
-          disabled={busy}
-          onClick={handleTestRealPush}
-          className="px-4 py-2 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60"
-          title="Dispara um push real via endpoint do servidor"
-        >
-          Testar Push real
-        </button>
-
-        <button
-          disabled={busy}
-          onClick={handleClearBadge}
-          className="px-4 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-60"
-          title="Zera o contador/bolinha do app"
-        >
-          Limpar bolinha
-        </button>
-
-        {/* Status curto */}
-        {statusMsg ? (
-          <span className="text-sm text-slate-300 ml-2">• {statusMsg}</span>
-        ) : null}
-      </div>
-
-      {/* Painel de debug */}
-      <div className="text-xs grid grid-cols-1 md:grid-cols-2 gap-2 p-3 rounded-lg bg-slate-800/70 border border-slate-700">
-        <div className="flex items-center gap-2">
-          <span className="text-slate-300">Permissão:</span>
-          {perm === "granted" ? (
-            <Pill color="green">granted</Pill>
-          ) : perm === "denied" ? (
-            <Pill color="red">denied</Pill>
-          ) : (
-            <Pill>default</Pill>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-slate-300">SW registrado:</span>
-          {swReady ? <Pill color="green">sim</Pill> : <Pill color="red">não</Pill>}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-slate-300">VAPID no bundle/meta:</span>
-          {hasVapidHint ? <Pill color="green">presente</Pill> : <Pill color="yellow">via API</Pill>}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-slate-300">Busy:</span>
-          {busy ? <Pill color="yellow">sim</Pill> : <Pill>não</Pill>}
-        </div>
-
-        {lastError ? (
-          <div className="md:col-span-2">
-            <div className="mt-1 p-2 rounded bg-rose-900/40 text-rose-200 border border-rose-800">
-              <strong>Erro:</strong> {lastError}
-            </div>
+          <div>Permissão: <b>{perm}</b></div>
+          <div>SW registrado: <b>{swReady ? 'sim' : 'não'}</b></div>
+          <div>Busy: <b>{busy ? 'sim' : 'não'}</b></div>
+          <div style={{ marginTop: 6 }}>
+            <button
+              onClick={() => { localStorage.removeItem('push:debug'); location.reload(); }}
+              style={{ padding: '4px 6px', background: '#444', borderRadius: 6 }}
+            >
+              Fechar debug
+            </button>
           </div>
-        ) : null}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
