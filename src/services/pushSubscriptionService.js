@@ -1,9 +1,8 @@
 // src/services/pushSubscriptionService.js
 // Salva/atualiza a assinatura de push no Firestore usando o client SDK.
-// ⚠️ IMPORTANTE: ajuste o import do `db` para o arquivo correto do seu projeto.
-// Aqui estou importando de '../lib/firebase' pois é o padrão mais comum no seu repo.
+// Importa o `db` do arquivo do seu projeto em src/config/firebase.js
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase'; // ← ajuste se o seu arquivo for outro
+import { db } from '../config/firebase'; // ✅ caminho corrigido
 
 // Usa o endpoint como ID estável (deduplica automaticamente)
 function endpointToId(endpoint) {
