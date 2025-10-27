@@ -18,6 +18,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 
 import NotificationCenter from '../components/NotificationCenter';
 import UserAvatar from '../components/UserAvatar';
+import EnableNotificationsButton from '../components/EnableNotificationsButton';
+
 
 import {
   LogOut, Plus, AlertCircle, Clock, CheckCircle, Users, FolderOpen, BarChart3,
@@ -1058,6 +1060,11 @@ const DashboardPage = () => {
             <div className="flex items-center space-x-4">
               <UserAvatar className="h-8 w-8" />
               <NotificationCenter />
+
+              {/* Botão de ativar/testar notificações (mostra no md+ e desktop) */}
+              <div className="hidden md:block">
+                <EnableNotificationsButton />
+              </div>
             
               <Button
                 variant="ghost"
