@@ -1,100 +1,62 @@
 // functions/index.js
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-const webpush = require("web-push");
+import * as functions from 'firebase-functions';
+import admin from 'firebase-admin';
+import webpush from 'web-push';
 
 admin.initializeApp();
 
-// Lê VAPID das configs do Firebase Functions (recomendado)
-//   firebase functions:config:set vapid.public="..." vapid.private="..." vapid.subject="mailto:voce@exemplo.com"
-const cfg = functions.config() || {};
-const VAPID_PUBLIC = (cfg.vapid && cfg.vapid.public) || process.env.VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE = (cfg.vapid && cfg.vapid.private) || process.env.VAPID_PRIVATE_KEY;
-const VAPID_SUBJECT = (cfg.vapid && cfg.vapid.subject) || process.env.VAPID_SUBJECT || "mailto:admin@sistemastands.com.br";
+const cfg = functions.config().messaging;
+webpush.setVapidDetails(
+  cfg.vapid_subject,           // ex: "mailto:voce@dominio.com"
+  cfg.vapid_public_key,
+  cfg.vapid_private_key
+);
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
-
-function toText(s) {
-  return String(s || "")
-    .replace(/\*\*/g, "")        // simples: tira **markdown**
-    .replace(/[#>_`]/g, "")
-    .trim();
+// Envia Web Push para um array de PushSubscriptions
+async function sendWebPushToSubs(subs, payload) {
+  const results = await Promise.allSettled(
+    subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
+  );
+  return {
+    ok: true,
+    sent: results.filter(r => r.status === 'fulfilled').length,
+    failed: results.filter(r => r.status === 'rejected').length,
+    results: results.map(r => r.status === 'fulfilled' ? 'ok' : r.reason?.message || 'error')
+  };
 }
 
-exports.onMensagemCreate = functions.firestore
-  .document("mensagens/{msgId}")
-  .onCreate(async (snap, context) => {
-    const msg = snap.data() || {};
+// Exemplo de endpoint HTTP que lê subscriptions e envia:
+export const notify = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok:false, error:'method not allowed' });
 
-    // Monte um payload amigável pro seu SW (firebase-messaging-sw.js)
-    const title =
-      toText(msg.titulo) ||
-      toText(msg.conteudo?.split("\n")[0]) ||
-      "Notificação";
+  try {
+    const { title='Notificação', body='Olá!', url='/' } = req.body || {};
 
-    const body = toText(msg.conteudo) || "Você tem uma atualização.";
-    const url =
-      msg.link ||
-      (msg.ticketId ? `/chamado/${msg.ticketId}` : "/dashboard");
+    // 1) Obter as subscriptions (ex.: todas ativas em push_subscriptions)
+    const snap = await admin.firestore().collection('push_subscriptions')
+      .where('enabled', '==', true).get();
 
+    const subs = snap.docs.map(d => {
+      const { endpoint, keys } = d.data();
+      return { endpoint, keys };
+    });
+
+    if (!subs.length) return res.json({ ok:true, sent:0, failed:0, results:[] });
+
+    // 2) Montar payload exibido pelo seu SW
     const payload = {
       title,
       body,
-      url,
-      tag: msg.ticketId || "mensagens",
-      renotify: true,
-      // se quiser enviar dados extras:
-      data: { url, ticketId: msg.ticketId || null, tipo: msg.type || null },
-      badge: "/icons/badge.png",
-      icon: "/icons/icon-192.png",
+      url, // seu SW usa notification.data.url
+      tag: 'default'
     };
 
-    const db = admin.firestore();
-    const subsSnap = await db
-      .collection("push_subscriptions")
-      .where("enabled", "==", true)
-      .get();
+    // 3) Enviar via Web Push
+    const out = await sendWebPushToSubs(subs, payload);
+    return res.json(out);
 
-    if (subsSnap.empty) {
-      console.log("[push] Nenhuma inscrição ativa.");
-      return null;
-    }
-
-    const subs = subsSnap.docs.map((d) => ({
-      ref: d.ref,
-      sub: {
-        endpoint: d.get("endpoint"),
-        keys: {
-          p256dh: d.get("keys.p256dh"),
-          auth: d.get("keys.auth"),
-        },
-      },
-    }));
-
-    const results = await Promise.allSettled(
-      subs.map((s) =>
-        webpush.sendNotification(s.sub, JSON.stringify(payload))
-      )
-    );
-
-    // Remove inscrições expiradas/inválidas (404/410)
-    const toDelete = [];
-    results.forEach((r, i) => {
-      if (r.status === "rejected") {
-        const code = r.reason?.statusCode;
-        if (code === 404 || code === 410) {
-          toDelete.push(subs[i].ref);
-        }
-      }
-    });
-    if (toDelete.length) {
-      await Promise.all(toDelete.map((ref) => ref.delete()));
-      console.log(`[push] Removidas ${toDelete.length} inscrições inválidas.`);
-    }
-
-    const sent = results.filter((r) => r.status === "fulfilled").length;
-    const failed = results.length - sent;
-    console.log(`[push] Enviadas: ${sent} | Falhas: ${failed}`);
-
-    return null;
-  });
+  } catch (err) {
+    console.error('[notify]', err);
+    return res.status(500).json({ ok:false, error: String(err?.message || err) });
+  }
+});
