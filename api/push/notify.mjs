@@ -1,73 +1,106 @@
-
-// /api/push/notify.js (Vercel Edge/Node runtime)
-// Envia push em lote para todos os inscritos na coleção `push_subscriptions`.
-// Aceita docs com dois formatos:
-//   - {kind:'fcm', token}
-//   - {kind:'webpush', endpoint, keys}
-//
-// Para FCM, usa a variável de ambiente FCM_SERVER_KEY (Legacy HTTP API).
-// Para WebPush, se quiser suportar também, precisará configurar WEB_PUSH_PUBLIC/PRIVATE_KEY e usar a lib 'web-push'.
-// Abaixo, enviamos apenas via FCM. Para webpush puro, extraímos o token do endpoint
-// (quando o endpoint é do FCM) por conveniência.
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-
-function initAdmin() {
-  if (getApps().length) return;
-  const raw = process.env.FIREBASE_ADMIN_JSON;
-  if (!raw) throw new Error('FIREBASE_ADMIN_JSON não configurado');
-  const json = JSON.parse(raw);
-  initializeApp({ credential: cert(json) });
-}
+// /api/push/notify.mjs
+// Broadcast para TODAS as subscriptions do Firestore (coleção: push_subscriptions).
+// Requer envs no Vercel:
+//  - VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
+//  - FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY (com \n)
+// Runtime Node (não Edge).
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method not allowed' });
-
   try {
-    const serverKey = process.env.FCM_SERVER_KEY;
-    if (!serverKey) return res.status(500).json({ ok: false, error: 'FCM_SERVER_KEY ausente' });
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Allow', 'POST');
+      return res.end('Method Not Allowed');
+    }
 
-    initAdmin();
-    const db = getFirestore();
-    const snap = await db.collection('push_subscriptions').get();
+    const body = await readJson(req);
+    const title = body?.title || 'Broadcast (teste)';
+    const messageBody = body?.body || 'Ping do broadcast';
 
-    const tokens = [];
-    snap.forEach((doc) => {
-      const d = doc.data();
-      if (d?.kind === 'fcm' && d?.token) tokens.push(d.token);
-      else if (d?.endpoint && typeof d.endpoint === 'string' && d.endpoint.includes('/fcm/send/')) {
-        const token = d.endpoint.split('/').pop();
-        if (token) tokens.push(token);
+    const VAPID_PUBLIC_KEY =
+      process.env.VAPID_PUBLIC_KEY ||
+      process.env.WEB_PUSH_PUBLIC_KEY ||
+      process.env.VITE_VAPID_PUBLIC_KEY;
+    const VAPID_PRIVATE_KEY =
+      process.env.VAPID_PRIVATE_KEY || process.env.WEB_PUSH_PRIVATE_KEY;
+
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+      return json(res, 500, {
+        ok: false,
+        error: 'VAPID keys ausentes. Defina VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY no Vercel.'
+      });
+    }
+
+    const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+    if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
+      return json(res, 500, {
+        ok: false,
+        error: 'Credenciais Firebase Admin ausentes. Defina FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY.'
+      });
+    }
+
+    const { default: admin } = await import('firebase-admin');
+    if (!admin.apps?.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: FIREBASE_PROJECT_ID,
+          clientEmail: FIREBASE_CLIENT_EMAIL,
+          privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        })
+      });
+    }
+    const db = admin.firestore();
+
+    const snapshot = await db.collection('push_subscriptions').get();
+    const subs = snapshot.docs.map((d) => d.data()).filter((d) => d && d.endpoint);
+
+    const { default: webpush } = await import('web-push');
+    webpush.setVapidDetails('mailto:push@sistemastands.com.br', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+    let sent = 0, failed = 0;
+    await Promise.all(
+      subs.map(async (s) => {
+        try {
+          const payload = JSON.stringify({
+            title,
+            body: messageBody,
+            icon: '/icon-192.png',
+            badge: '/icon-72.png',
+            data: { ts: Date.now(), subscriptionId: s.id || null }
+          });
+          await webpush.sendNotification(s, payload);
+          sent++;
+        } catch (e) {
+          console.error('[notify.mjs] falha em uma subscription:', e?.message || e);
+          failed++;
+        }
+      })
+    );
+
+    return json(res, 200, { ok: true, sent, failed, total: subs.length });
+  } catch (err) {
+    console.error('[notify.mjs] erro:', err);
+    return json(res, 500, { ok: false, error: err?.message || String(err) });
+  }
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => (data += c));
+    req.on('end', () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch (e) {
+        reject(e);
       }
     });
+    req.on('error', reject);
+  });
+}
 
-    if (!tokens.length) return res.status(200).json({ ok: true, sent: 0, failed: 0, reason: 'no-tokens' });
-
-    const payload = {
-      notification: {
-        title: (req.body?.title || 'Broadcast'),
-        body: (req.body?.body || 'Ping'),
-        click_action: req.body?.url || undefined,
-      },
-      registration_ids: tokens,
-    };
-
-    const r = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `key=${serverKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await r.json().catch(() => ({}));
-    const failed = Array.isArray(json?.results) ? json.results.filter((x) => x.error).length : 0;
-    const sent = Array.isArray(json?.results) ? json.results.length - failed : 0;
-
-    return res.status(200).json({ ok: true, sent, failed, raw: json });
-  } catch (e) {
-    console.error('[notify] error', e);
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
+function json(res, status, obj) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(obj));
 }
