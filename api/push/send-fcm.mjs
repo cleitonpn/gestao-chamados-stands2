@@ -1,71 +1,36 @@
 // /api/push/send-fcm.mjs
-// Atualizado para a API v1 (HTTP) usando firebase-admin/messaging
+import admin from "firebase-admin";
 
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getMessaging } from 'firebase-admin/messaging';
-
-// A mesma função de inicialização do 'notify'
-function initAdmin() {
-  if (getApps().length) return;
-  
-  const raw = process.env.FIREBASE_ADMIN_JSON;
-  if (!raw) throw new Error('FIREBASE_ADMIN_JSON não configurado');
-  
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    throw new Error('FIREBASE_ADMIN_JSON inválido (JSON inválido).');
-  }
-
-  if (json.private_key) {
-    json.private_key = json.private_key.replace(/\\n/g, '\n');
-  }
-
-  initializeApp({ credential: cert(json) });
+const svcJson = process.env.FIREBASE_ADMIN_JSON;
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(JSON.parse(svcJson)),
+  });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "method not allowed" });
   }
 
   try {
-    // Não precisamos mais da FCM_SERVER_KEY
-    initAdmin(); 
-
-    const { token, title, body, url } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ ok: false, error: 'token é obrigatório' });
+    const { tokens = [], title = "Notificação", body = "Mensagem", url = "/" } = req.body || {};
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return res.status(400).json({ ok: false, error: "tokens obrigatórios" });
     }
 
-    // Payload para a API v1 (enviando para UM token)
-    const payload = {
-      notification: {
-        title: (title || 'Teste (Real)'),
-        body: (body || 'Ping do sistema de push'),
-      },
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      data: { url },
       webpush: {
-        fcm_options: {
-          link: url || undefined,
-        },
+        notification: { title, body, icon: "/icons/icon-192.png", badge: "/icons/badge.png" },
+        fcmOptions: { link: url },
       },
-      token: token, // 'token' para um único dispositivo
-    };
-
-    // Usando a função 'send' do Admin SDK
-    const messaging = getMessaging();
-    const response = await messaging.send(payload);
-
-    return res.status(200).json({ ok: true, sent: 1, failed: 0, raw: response });
-
-  } catch (e) {
-    console.error('[send-fcm] error', e);
-    // Erros do Firebase (como token inválido) vêm como exceção
-    return res.status(500).json({ 
-      ok: false, 
-      error: e?.message || String(e), 
-      code: e?.code 
     });
+
+    res.status(200).json({ ok: true, sent: resp.successCount, failed: resp.failureCount });
+  } catch (e) {
+    console.error("[send-fcm.mjs] erro:", e);
+    res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 }
