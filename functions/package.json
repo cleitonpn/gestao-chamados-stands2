@@ -1,15 +1,11 @@
 {
   "name": "gc-functions",
   "private": true,
-  "engines": {
-    "node": "18"
-  },
-  "main": "index.js",
-  "type": "module",
+  "engines": { "node": "18" },
+  "main": "lib/index.js",
+  "type": "commonjs",
   "scripts": {
-    "build": "echo \"no build step\"",
-    "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions --project gestao-chamados-stands"
   },
   "dependencies": {
     "firebase-admin": "^13.4.0",
