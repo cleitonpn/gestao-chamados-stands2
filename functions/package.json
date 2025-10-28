@@ -2,15 +2,15 @@
   "name": "gc-functions",
   "private": true,
   "engines": { "node": "18" },
-  "type": "commonjs",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "build": "echo \"no build step\"",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },
   "dependencies": {
-    "firebase-admin": "^12.6.0",
+    "firebase-admin": "^12.7.0",
     "firebase-functions": "^4.9.0",
     "web-push": "^3.6.6"
   }
