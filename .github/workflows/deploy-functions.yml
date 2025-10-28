@@ -5,7 +5,6 @@ on:
     branches: [ "main" ]
     paths:
       - "functions/**"
-      - "firebase.json"
       - ".github/workflows/deploy-functions.yml"
 
 jobs:
@@ -13,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Post Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node
@@ -24,28 +23,24 @@ jobs:
       - name: Install Firebase CLI
         run: npm i -g firebase-tools
 
-      - name: Install functions deps
-        working-directory: functions
-        run: npm ci
-
-      # Se você quer definir as configs via CLI (recomendado)
+      # carrega variáveis VAPID para functions:config
       - name: Set functions:config (VAPID)
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          VAPID_SUBJECT: ${{ secrets.MESSAGING__VAPID_SUBJECT }}
-          VAPID_PUBLIC: ${{ secrets.MESSAGING__VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE: ${{ secrets.MESSAGING__VAPID_PRIVATE_KEY }}
         run: |
-          echo '${{ secrets.GCP_SA_KEY }}' > $HOME/gcp-key.json
-          gcloud auth activate-service-account --key-file=$HOME/gcp-key.json
-          firebase functions:config:set messaging.vapid_subject="$VAPID_SUBJECT" messaging.vapid_public_key="$VAPID_PUBLIC" messaging.vapid_private_key="$VAPID_PRIVATE" --project $FIREBASE_PROJECT_ID
+          firebase functions:config:set \
+            messaging.vapid_subject="${{ secrets.WEBPUSH_SUBJECT }}" \
+            messaging.vapid_public_key="${{ secrets.WEBPUSH_PUBLIC_KEY }}" \
+            messaging.vapid_private_key="${{ secrets.WEBPUSH_PRIVATE_KEY }}" \
+            --project ${{ secrets.FIREBASE_PROJECT_ID }} --force
+          firebase functions:config:get --project ${{ secrets.FIREBASE_PROJECT_ID }}
+
+      - name: Install functions deps (npm install, gera lock novo)
+        working-directory: functions
+        run: |
+          rm -f package-lock.json
+          npm install --no-fund --no-audit
 
       - name: Deploy Functions
+        run: |
+          firebase deploy --only functions --project ${{ secrets.FIREBASE_PROJECT_ID }}
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-        run: |
-          echo '${{ secrets.GCP_SA_KEY }}' > $HOME/gcp-key.json
-          gcloud auth activate-service-account --key-file=$HOME/gcp-key.json
-          firebase deploy --only functions --project $FIREBASE_PROJECT_ID --force
