@@ -1,5 +1,5 @@
 // src/App.jsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { NewNotificationProvider } from './contexts/NewNotificationContext';
@@ -20,21 +20,85 @@ import OperationalPanel from './pages/OperationalPanel';
 import TVPanel from './pages/TVPanel';
 import CronogramaPage from './pages/CronogramaPage';
 import AdminPanelPage from './pages/AdminPanelPage';
-import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage'; // NOVA IMPORTAÇÃO
-import EventsPage from './pages/EventsPage'; // NOVA IMPORTAÇÃO: Página de eventos
+import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';
+import EventsPage from './pages/EventsPage';
 import GamingPage from './pages/GamingPage';
 import ProjectSummaryPage from "./pages/ProjectSummaryPage";
 import ContractorProjectPage from "./pages/ContractorProjectPage";
-
-// >>> NOVA IMPORTAÇÃO: Página de Diários (feed global)
 import AllDiariesPage from './pages/AllDiariesPage';
-
-// >>> NOVA IMPORTAÇÃO: Página de Perfil do Usuário
 import UserProfilePage from "./pages/UserProfilePage";
 
 import './App.css';
 
+// ---------- PUSH / SERVICE WORKER ----------
+const urlB64ToUint8Array = (b64) => {
+  const padding = '='.repeat((4 - (b64.length % 4)) % 4);
+  const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; ++i) arr[i] = raw.charCodeAt(i);
+  return arr;
+};
+
+async function registerServiceWorkerAndSubscribe() {
+  try {
+    // checagens básicas
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      console.warn('[push] SW/Push não suportado neste navegador.');
+      return;
+    }
+
+    // registra o SW do Firebase Messaging (está em /public)
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready; // garante que está pronto
+
+    // pede permissão se necessário
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        console.warn('[push] Permissão negada ou ignorada.');
+        return;
+      }
+    }
+
+    // assina (caso ainda não exista)
+    const existing = await registration.pushManager.getSubscription();
+    if (existing) {
+      window.__PUSH_DEBUG__ = { hasSubscription: true };
+      return; // já está assinado
+    }
+
+    const publicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (!publicKey) {
+      console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente; não vou assinar.');
+      return;
+    }
+
+    const sub = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8Array(publicKey),
+    });
+
+    // envia a inscrição para o backend salvar
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+
+    window.__PUSH_DEBUG__ = { hasSubscription: true, endpoint: sub?.endpoint };
+    console.log('[push] Inscrição criada e enviada ao servidor.');
+  } catch (err) {
+    console.error('[push] Falha ao registrar/assinar:', err);
+  }
+}
+
 function App() {
+  // registra o SW e tenta assinar na montagem do app
+  useEffect(() => {
+    registerServiceWorkerAndSubscribe();
+  }, []);
+
   return (
     <AuthProvider>
       <NewNotificationProvider>
@@ -99,7 +163,7 @@ function App() {
                 }
               />
 
-              {/* NOVA ROTA: Cronograma de Eventos - Acessível a todos logados */}
+              {/* Cronograma de Eventos */}
               <Route
                 path="/cronograma"
                 element={
@@ -109,7 +173,7 @@ function App() {
                 }
               />
 
-              {/* NOVA ROTA: Eventos - Apenas administradores */}
+              {/* Eventos - apenas administradores */}
               <Route
                 path="/eventos"
                 element={
@@ -137,7 +201,7 @@ function App() {
                 }
               />
 
-              {/* >>> NOVA ROTA: Perfil do Usuário - qualquer usuário autenticado */}
+              {/* Perfil do Usuário */}
               <Route
                 path="/perfil"
                 element={
@@ -203,17 +267,13 @@ function App() {
 
               <Route path="/resumo-projeto" element={<ProjectSummaryPage />} />
 
-              {/* Rota para painel operacional - sem header */}
+              {/* Painéis sem header */}
               <Route path="/painel-operacional" element={<OperationalPanel />} />
-
               <Route path="/empreiteiro" element={<ContractorProjectPage />} />
-              
               <Route path="/empreiteiro/:projectId" element={<ContractorProjectPage />} />
-
-              {/* Rota para painel TV - sem header, sem login */}
               <Route path="/painel-tv" element={<TVPanel />} />
 
-              {/* >>> NOVA ROTA: Todos os Diários (feed) */}
+              {/* Feed de diários */}
               <Route
                 path="/diarios"
                 element={
@@ -223,10 +283,8 @@ function App() {
                 }
               />
 
-              {/* Redirecionar raiz para dashboard */}
+              {/* Redirecionamentos */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-
-              {/* Rota 404 - redirecionar para dashboard */}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </div>
