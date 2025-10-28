@@ -1,72 +1,65 @@
 name: Deploy Firebase Functions
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
-
-concurrency:
-  group: deploy-functions
-  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Post Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "18"
 
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      # Autenticação recomendada: Service Account (seu secret GCP_SA_KEY em JSON)
+      # grava a credencial do GCP (service account JSON) vinda do secret GCP_SA_KEY
       - name: Write GCP credentials file
-        shell: bash
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
-          echo '${{ secrets.GCP_SA_KEY }}' > $HOME/gcp-key.json
+          echo "$GCP_SA_KEY" > $HOME/gcp-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/gcp-key.json" >> $GITHUB_ENV
 
-      # Define as variáveis das Functions (VAPID) a partir dos secrets do repo.
-      # >>> sem --force <<<
+      # configura as chaves VAPID no functions:config
       - name: Set functions:config (VAPID)
-        shell: bash
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          VAPID_SUBJECT:      ${{ secrets.VAPID_SUBJECT }}
+          VAPID_PUBLIC:       ${{ secrets.VAPID_PUBLIC }}
+          VAPID_PRIVATE:      ${{ secrets.VAPID_PRIVATE }}
         run: |
           firebase functions:config:set \
-            messaging.vapid_subject="${{ secrets.VAPID_SUBJECT }}" \
-            messaging.vapid_public_key="${{ secrets.VAPID_PUBLIC }}" \
-            messaging.vapid_private_key="${{ secrets.VAPID_PRIVATE }}" \
-            --project "${{ secrets.FIREBASE_PROJECT_ID }}"
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}
+            messaging.vapid_subject="$VAPID_SUBJECT" \
+            messaging.vapid_public_key="$VAPID_PUBLIC" \
+            messaging.vapid_private_key="$VAPID_PRIVATE" \
+            --project "$FIREBASE_PROJECT_ID"
 
-      # Instala dependências SOMENTE da pasta functions/
+      # instala deps ***apenas*** dentro de functions/
       - name: Install functions deps
         working-directory: functions
-        shell: bash
-        run: |
-          npm ci || npm i --legacy-peer-deps --no-audit --no-fund
+        run: npm ci || npm i
 
-      # (Opcional) Mostra versões pra debug
+      # (opcional) mostra versões
       - name: Show versions
-        working-directory: functions
         run: |
           node -v
           npm -v
-          npm ls --depth=0 || true
+          firebase --version
 
-      # Deploy apenas das Cloud Functions
-      - name: Deploy Functions
-        shell: bash
-        run: |
-          firebase deploy --only functions --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+      # DEPLOY ***somente*** da função notify (não deleta nada)
+      - name: Deploy Functions (only notify)
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          firebase deploy --only "functions:notify" --project "$FIREBASE_PROJECT_ID"
