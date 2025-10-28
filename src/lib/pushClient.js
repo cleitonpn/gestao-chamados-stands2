@@ -1,4 +1,3 @@
-
 // src/lib/pushClient.js
 // Cliente de Push unificado: lida com VAPID (WebPush) e FCM (firebase/messaging).
 // Normaliza o "subscription" antes de salvar no Firestore para evitar
@@ -129,12 +128,33 @@ export async function saveSubscriptionInFirestore(subscription, extra = {}) {
   return { id: docId, ...payload };
 }
 
-export async function sendRealPush({ title = 'Teste (real)', body = 'Ping do sistema de push', url, icon } = {}) {
-  const res = await fetch('/api/push/send', {
+// ==================================================================
+// FUNÇÃO ATUALIZADA
+// Agora recebe 'subscription' para extrair o token e chama a nova API
+// ==================================================================
+export async function sendRealPush(subscription, { title = 'Teste (real)', body = 'Ping do sistema de push', url, icon } = {}) {
+  if (!subscription) throw new Error('Subscription (para sendRealPush) não pode ser nulo.');
+
+  // Extrai o token FCM, não importa o formato da subscription
+  let token = null;
+  if (subscription.kind === 'fcm' && subscription.token) {
+    token = subscription.token;
+  } else if (subscription.endpoint && typeof subscription.endpoint === 'string' && subscription.endpoint.includes('/fcm/send/')) {
+    // Se for um endpoint 'webpush' que na verdade é do FCM
+    token = subscription.endpoint.split('/').pop();
+  }
+
+  if (!token) {
+    throw new Error('Não foi possível extrair um token FCM válido da subscription.');
+  }
+
+  const res = await fetch('/api/push/send-fcm', { // <--- CHAMANDO A NOVA API
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title, body, url, icon }),
+    // Enviando o token e o resto do payload
+    body: JSON.stringify({ token, title, body, url, icon }),
   });
+  
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Falha no push real: ${res.status} ${JSON.stringify(json)}`);
   return { ok: true, result: json };
