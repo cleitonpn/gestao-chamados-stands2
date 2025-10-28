@@ -2,20 +2,14 @@ name: Deploy Firebase Functions
 
 on:
   push:
-    branches: [ main ]
     paths:
       - "functions/**"
-      - ".firebaserc"
-      - "firebase.json"
+      - ".github/workflows/deploy-functions.yml"
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - name: Checkout
@@ -24,28 +18,38 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-
-      - name: Auth to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: functions/package-lock.json
 
       - name: Install Firebase CLI
         run: npm i -g firebase-tools
 
-      - name: Set functions runtime config (webpush)
+      - name: Install functions deps
+        run: |
+          cd functions
+          npm ci
+
+      # >>> CONFIGS DAS FUNCTIONS (idempotente; roda em todo deploy)
+      - name: Set functions:config (messaging)
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID:     ${{ secrets.FIREBASE_PROJECT_ID }} # ex.: gestao-chamados-stands
+          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+          VAPID_PUBLIC:   ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE:  ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT:  ${{ secrets.VAPID_SUBJECT }}
         run: |
           firebase functions:config:set \
-            webpush.public_key="${{ secrets.WEBPUSH_PUBLIC_KEY }}" \
-            webpush.private_key="${{ secrets.WEBPUSH_PRIVATE_KEY }}" \
-            webpush.subject="${{ secrets.WEBPUSH_SUBJECT }}" \
-            --project gestao-chamados-stands
-        # ↑ ajuste o project id se for diferente
+            messaging.fcm_server_key="$FCM_SERVER_KEY" \
+            messaging.vapid_public_key="$VAPID_PUBLIC" \
+            messaging.vapid_private_key="$VAPID_PRIVATE" \
+            messaging.vapid_subject="$VAPID_SUBJECT" \
+            --project "$PROJECT_ID" --token "$FIREBASE_TOKEN"
 
-      - name: Install Functions deps
-        working-directory: functions
-        run: npm ci
-
-      - name: Deploy Functions
-        run: firebase deploy --only functions --project gestao-chamados-stands
+      - name: Deploy only Functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID:     ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          firebase deploy --only functions --project "$PROJECT_ID" --token "$FIREBASE_TOKEN"
