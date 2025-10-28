@@ -1,20 +1,23 @@
 // src/lib/firebaseClient.js
-// Inicializa Firebase uma única vez e exporta `app` e **db`
-// Também salva `db` em globalThis.__FIREBASE_DB como fallback.
+// Inicializa Firebase uma única vez. Exporta `app` e **db`.
+// Aceita config via default export, named export, FIREBASE_CONFIG ou via ENV.
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
-// Import robusto: aceita default export OU named exports
+// Import robusto: funciona com qualquer formato do arquivo de config
 import * as CfgModule from '../config/firebase.js';
 
 let firebaseConfig =
-  (CfgModule && (CfgModule.default || CfgModule.firebaseConfig || CfgModule.FIREBASE_CONFIG || CfgModule.config)) ||
+  CfgModule?.default ||
+  CfgModule?.firebaseConfig ||
+  CfgModule?.FIREBASE_CONFIG ||
+  CfgModule?.config ||
   null;
 
-// Fallback por variáveis de ambiente do Vite (opcional)
+// Fallback via ENV do Vite (se preferir configurar no Vercel)
 if (!firebaseConfig || !firebaseConfig.projectId) {
-  const maybeFromEnv = {
+  const maybeEnv = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
     projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -22,9 +25,7 @@ if (!firebaseConfig || !firebaseConfig.projectId) {
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
   };
-  if (maybeFromEnv.projectId) {
-    firebaseConfig = maybeFromEnv;
-  }
+  if (maybeEnv.projectId) firebaseConfig = maybeEnv;
 }
 
 if (!firebaseConfig || !firebaseConfig.projectId) {
@@ -38,7 +39,7 @@ if (!firebaseConfig || !firebaseConfig.projectId) {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Fallback global (usado caso outro módulo importe antes)
+// Fallback global (outros módulos podem usar se o import ocorrer fora de ordem)
 try {
   globalThis.__FIREBASE_DB = db;
 } catch (_) {}
