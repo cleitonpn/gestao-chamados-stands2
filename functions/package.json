@@ -3,7 +3,7 @@
   "private": true,
   "engines": { "node": "18" },
   "type": "commonjs",
-  "main": "lib/index.js",
+  "main": "index.js",
   "scripts": {
     "build": "echo \"no build step\"",
     "serve": "firebase emulators:start --only functions",
