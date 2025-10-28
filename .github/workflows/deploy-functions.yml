@@ -24,13 +24,14 @@ jobs:
         run: npm i -g firebase-tools
 
       # Seta as config (sem --force) – usa os seus Secrets
-      - name: Set functions:config (VAPID)
-        run: |
-          firebase functions:config:set \
-            messaging.vapid_subject="${{ secrets.VAPID_SUBJECT }}" \
-            messaging.vapid_public_key="${{ secrets.VAPID_PUBLIC }}" \
-            messaging.vapid_private_key="${{ secrets.VAPID_PRIVATE }}" \
-            --project ${{ secrets.FIREBASE_PROJECT_ID }}
+     - name: Set functions:config (VAPID)
+  run: |
+    firebase functions:config:set \
+      messaging.vapid_subject="${{ secrets.VAPID_SUBJECT }}" \
+      messaging.vapid_public_key="${{ secrets.VAPID_PUBLIC }}" \
+      messaging.vapid_private_key="${{ secrets.VAPID_PRIVATE }}" \
+      --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
