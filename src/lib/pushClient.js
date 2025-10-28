@@ -1,140 +1,151 @@
-// src/lib/pushClient.js
-// Cliente de push: assina, salva no Firestore e dispara push real/broadcast.
+// Cliente de Push: assina, salva no Firestore e dispara push (real/broadcast)
 
-import { db as dbFromImport } from './firebaseClient';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from "./firebaseClient";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-// ---------- DB (com fallback global) ----------
-const db = dbFromImport || globalThis.__FIREBASE_DB;
-if (!db) {
-  throw new Error(
-    'pushClient: Firestore (db) não disponível. Garanta que src/lib/firebaseClient.js exporte { db } ' +
-    'ou que globalThis.__FIREBASE_DB tenha sido definido.'
+// ------------------------ helpers ------------------------
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = typeof atob !== "undefined" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+export function getVapidPublicKey() {
+  return (
+    (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_VAPID_PUBLIC_KEY) ||
+    process.env?.VITE_VAPID_PUBLIC_KEY ||
+    globalThis.__VAPID_PUBLIC_KEY ||
+    ""
   );
 }
 
-// ---------- Helpers ----------
-const isHttps = () =>
-  location.protocol === 'https:' || location.hostname === 'localhost';
-
-const urlBase64ToUint8Array = (base64String) => {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const output = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
-  return output;
-};
-
-const getVapidPublicKey = () =>
-  import.meta.env.VITE_VAPID_PUBLIC_KEY || import.meta.env.VAPID_PUBLIC_KEY || '';
-
-// ---------- APIs ----------
+// ------------------- SW / Permission / Subscription -------------------
 export async function ensurePermission() {
-  if (!('Notification' in window)) throw new Error('Navegador não suporta Notification API.');
-  const current = Notification.permission;
-  if (current === 'granted') return 'granted';
-  if (current === 'denied') throw new Error('Permissão negada pelo usuário.');
-  const result = await Notification.requestPermission();
-  if (result !== 'granted') throw new Error('Permissão não concedida.');
-  return result;
+  if (!("Notification" in globalThis)) throw new Error("Notifications não suportadas");
+  const status = await Notification.requestPermission();
+  if (status !== "granted") throw new Error("Permissão negada");
 }
 
 export async function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) throw new Error('Service Worker não suportado.');
-  if (!isHttps()) throw new Error('Service Worker exige HTTPS (ou localhost).');
-
-  const candidates = ['/sw.js', '/firebase-messaging-sw.js', '/service-worker.js'];
-  let reg = null, lastErr = null;
-
-  for (const url of candidates) {
+  if (!("serviceWorker" in navigator)) throw new Error("Service Worker não suportado");
+  let reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) {
+    // tenta primeiro o SW do Firebase; se não existir, usa /sw.js
     try {
-      reg = await navigator.serviceWorker.register(url);
-      if (reg) break;
-    } catch (e) { lastErr = e; }
+      reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+    } catch {
+      reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    }
   }
-  if (!reg) throw new Error(`Falha ao registrar SW. Último erro: ${lastErr?.message || lastErr}`);
-  await navigator.serviceWorker.ready;
   return reg;
 }
 
-export async function getOrCreateSubscription(reg) {
-  const key = getVapidPublicKey();
-  if (!key) throw new Error('VAPID_PUBLIC_KEY ausente. Defina VITE_VAPID_PUBLIC_KEY no Vercel.');
-
+export async function getOrCreateSubscription() {
+  const reg = await registerServiceWorker();
   const existing = await reg.pushManager.getSubscription();
   if (existing) return existing;
 
+  const vapid = getVapidPublicKey();
+  if (!vapid) throw new Error("VITE_VAPID_PUBLIC_KEY ausente");
+
   return reg.pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(key),
+    applicationServerKey: urlBase64ToUint8Array(vapid),
   });
 }
 
-export async function saveSubscriptionInFirestore(userId, sub) {
-  if (!userId) throw new Error('saveSubscriptionInFirestore: userId obrigatório.');
-
-  const payload = {
-    endpoint: sub?.endpoint || null,
-    keys: sub?.toJSON?.().keys || null,
-    createdAt: serverTimestamp(),
-    userAgent: navigator.userAgent,
-  };
-  await setDoc(doc(db, 'push_subscriptions', userId), payload, { merge: true });
-  return true;
+// ------------------------ Firestore ------------------------
+export async function saveSubscriptionInFirestore(subscription, { uid = "anonymous" } = {}) {
+  if (!db) throw new Error("db não disponível (exporte `db` de src/lib/firebaseClient.js)");
+  const json = subscription.toJSON ? subscription.toJSON() : subscription;
+  const id = btoa(json.endpoint).replace(/=+$/g, "");
+  const ref = doc(db, "push_subscriptions", id);
+  await setDoc(
+    ref,
+    {
+      uid,
+      endpoint: json.endpoint,
+      keys: json.keys || {},
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return id;
 }
 
-export async function sendRealPush(payload = { title: 'Ping (real)', body: 'Teste do sistema de push' }) {
-  const key = getVapidPublicKey();
-  if (!key) throw new Error('VAPID_PUBLIC_KEY não encontrado. Defina VITE_VAPID_PUBLIC_KEY no Vercel.');
-
-  const res = await fetch('/api/push/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload }),
+// ------------------------ Envio ------------------------
+export async function sendRealPush({ title = "Teste (real)", body = "Ping do sistema de push", data = {} } = {}) {
+  // Garante que a subscription exista e ENVIE-A no corpo
+  const subscription = await getOrCreateSubscription();
+  const res = await fetch("/api/push/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ subscription, title, body, data }),
   });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Falha no push real: ${res.status} ${txt}`);
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok || result?.ok === false) {
+    throw new Error(`Falha no push real: ${res.status} ${JSON.stringify(result)}`);
   }
-  return res.json().catch(() => ({}));
+  return result;
 }
 
-export async function sendBroadcast(payload = { title: 'Broadcast', body: 'Mensagem para todos' }) {
-  const res = await fetch('/api/push/broadcast', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload }),
+export async function sendBroadcast({ title = "Broadcast (teste)", body = "Ping broadcast", data = {} } = {}) {
+  const res = await fetch("/api/push/notify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title, body, data }),
   });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Falha no broadcast: ${res.status} ${txt}`);
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok || result?.ok === false) {
+    throw new Error(`Falha no broadcast: ${res.status} ${JSON.stringify(result)}`);
   }
-  return res.json().catch(() => ({}));
+  return result;
 }
 
 export function clearBadge() {
-  if ('setAppBadge' in navigator) {
-    try { navigator.clearAppBadge(); } catch {}
-  }
+  // evita crash em navegadores sem API
+  try {
+    if ("clearAppBadge" in navigator) navigator.clearAppBadge();
+  } catch {}
 }
 
-// 👍 Export presente para o botão usar sem erro de build
+// Usado pelo botão "Debug" para mostrar o estado no topo
 export async function getDebugInfo() {
-  const key = getVapidPublicKey();
-  const swReg = (await navigator.serviceWorker?.getRegistration()) || null;
-  const sub = swReg ? await swReg.pushManager.getSubscription() : null;
+  const envHasViteVapid = !!getVapidPublicKey();
+  const vapidPrefix = getVapidPublicKey()?.slice(0, 10) || "";
+  const permission = (globalThis.Notification && Notification.permission) || "unsupported";
+  const isHttps = location.protocol === "https:";
+  let swRegistered = false;
+  let swScope = null;
+  let hasSubscription = false;
+  let endpoint = null;
+
+  if ("serviceWorker" in navigator) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    swRegistered = !!reg;
+    if (reg) {
+      swScope = reg.scope;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        hasSubscription = true;
+        endpoint = sub.endpoint;
+      }
+    }
+  }
 
   return {
-    permission: (typeof Notification !== 'undefined' && Notification.permission) || 'n/a',
-    swRegistered: !!swReg,
-    swScope: swReg?.scope || null,
-    hasSubscription: !!sub,
-    endpoint: sub?.endpoint || null,
-    hasVapid: !!key,
-    vapidPrefix: key ? key.slice(0, 8) + '...' : null,
-    envHasViteVapid: !!import.meta.env.VITE_VAPID_PUBLIC_KEY,
-    envHasPlainVapid: !!import.meta.env.VAPID_PUBLIC_KEY,
-    isHttps: isHttps(),
+    endpoint,
+    envHasPlainVapid: false,
+    envHasViteVapid,
+    hasSubscription,
+    hasVapid: !!getVapidPublicKey(),
+    isHttps,
+    permission,
+    swRegistered,
+    swScope,
+    vapidPrefix,
   };
 }
