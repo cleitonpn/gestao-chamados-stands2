@@ -1,3 +1,4 @@
+
 // src/components/EnableNotificationsButton.jsx
 import React, { useRef, useState } from 'react';
 import {
@@ -8,89 +9,80 @@ import {
   sendRealPush,
   sendBroadcast,
   clearBadge,
-  getDebugInfo, // agora exportado de fato por pushClient
+  getDebugInfo,
 } from '../lib/pushClient';
 
-export default function EnableNotificationsButton({ userId, className = '' }) {
+export default function EnableNotificationsButton() {
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const debugRef = useRef(null);
+  const lastInfoRef = useRef(null);
 
-  async function handleEnable() {
+  async function doDebug() {
+    const info = await getDebugInfo();
+    lastInfoRef.current = info;
+    console.log('[Push Debug]', info);
+    alert('Debug gerado. Veja o console para detalhes.');
+  }
+
+  async function doSubscribe() {
+    setBusy(true);
     try {
-      setBusy(true);
-      setMsg('');
       await ensurePermission();
       const reg = await registerServiceWorker();
       const sub = await getOrCreateSubscription(reg);
-      await saveSubscriptionInFirestore(userId || 'anon', sub);
-      setMsg('Assinatura criada! ✅');
+      const saved = await saveSubscriptionInFirestore(sub, { scope: reg.scope });
+      alert('Assinatura salva: ' + JSON.stringify({ id: saved.id, kind: saved.kind }).slice(0, 120));
     } catch (e) {
-      alert(`Falha ao assinar push: ${e?.message || e}`);
+      alert('Falha ao assinar push: ' + (e?.message || e));
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleTestReal() {
+  async function doTestReal() {
+    setBusy(true);
     try {
-      setBusy(true);
-      const res = await sendRealPush({ title: 'Teste (real)', body: 'Ping do sistema de push' });
-      alert(`Push real enviado: ${JSON.stringify(res)}`);
+      const out = await sendRealPush({ title: 'Teste (real)', body: 'Ping do sistema de push', url: location.origin });
+      alert('Push real enviado: ' + JSON.stringify(out?.result || out).slice(0, 160));
     } catch (e) {
-      alert(`Falha no push real: ${e?.message || e}`);
+      alert('Falha no push real: ' + (e?.message || e));
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleBroadcast() {
+  async function doBroadcast() {
+    setBusy(true);
     try {
-      setBusy(true);
-      const res = await sendBroadcast({ title: 'Broadcast', body: 'Olá assinantes!' });
-      alert(`Broadcast enviado: ${JSON.stringify(res)}`);
+      const out = await sendBroadcast({ title: 'Broadcast (teste)', body: 'Ping do broadcast', url: location.origin });
+      alert('Broadcast enviado: ' + JSON.stringify(out?.result || out).slice(0, 160));
     } catch (e) {
-      alert(`Falha no broadcast: ${e?.message || e}`);
+      alert('Falha no broadcast: ' + (e?.message || e));
     } finally {
       setBusy(false);
     }
   }
 
-  function handleClearBadge() {
-    try { clearBadge(); setMsg('Badges limpos'); } catch {}
-  }
-
-  async function handleDebug() {
-    try {
-      const info = await getDebugInfo();
-      debugRef.current = info;
-      console.log('[Push Debug]', info);
-      alert('Info de debug registrada no console.');
-    } catch (e) {
-      alert(`Falha ao coletar debug: ${e?.message || e}`);
-    }
+  async function doClearBadge() {
+    try { await clearBadge(); } catch {}
   }
 
   return (
-    <div className={className}>
-      <div className="flex gap-2 flex-wrap">
-        <button className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-60" onClick={handleEnable} disabled={busy}>
-          Assinar Push
-        </button>
-        <button className="px-3 py-2 rounded bg-emerald-600 text-white disabled:opacity-60" onClick={handleTestReal} disabled={busy}>
-          Testar Push real
-        </button>
-        <button className="px-3 py-2 rounded bg-purple-600 text-white disabled:opacity-60" onClick={handleBroadcast} disabled={busy}>
-          Broadcast (teste)
-        </button>
-        <button className="px-3 py-2 rounded bg-zinc-700 text-white disabled:opacity-60" onClick={handleClearBadge} disabled={busy}>
-          Limpar bolinha
-        </button>
-        <button className="px-3 py-2 rounded bg-slate-500 text-white disabled:opacity-60" onClick={handleDebug} disabled={busy} title="Mostra informações de debug no console">
-          Debug
-        </button>
-      </div>
-      {msg && <p className="text-sm text-zinc-500 mt-2">{msg}</p>}
+    <div className="flex flex-wrap gap-2">
+      <button className="px-3 py-2 rounded bg-emerald-600 text-white" onClick={doSubscribe} disabled={busy}>
+        Assinar Push
+      </button>
+      <button className="px-3 py-2 rounded bg-teal-600 text-white" onClick={doTestReal} disabled={busy}>
+        Testar Push real
+      </button>
+      <button className="px-3 py-2 rounded bg-fuchsia-600 text-white" onClick={doBroadcast} disabled={busy}>
+        Broadcast (teste)
+      </button>
+      <button className="px-3 py-2 rounded bg-slate-600 text-white" onClick={doClearBadge}>
+        Limpar bolinha
+      </button>
+      <button className="px-3 py-2 rounded bg-slate-800 text-white" onClick={doDebug}>
+        Debug
+      </button>
     </div>
   );
 }
