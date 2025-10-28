@@ -1,21 +1,18 @@
 // src/lib/firebaseClient.js
-// Inicializa Firebase uma única vez e exporta `app` e **db`.
-// Também expõe `globalThis.__FIREBASE_DB = db` como fallback.
+// Inicializa Firebase uma única vez e exporta `app` e **db`
+// Também salva `db` em globalThis.__FIREBASE_DB como fallback.
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
-// IMPORT ROBUSTO: aceita default export OU named export.
+// Import robusto: aceita default export OU named exports
 import * as CfgModule from '../config/firebase.js';
-// cobre: export default {...}  |  export const firebaseConfig = {...}  |  export const FIREBASE_CONFIG = {...}
+
 let firebaseConfig =
-  CfgModule.default ||
-  CfgModule.firebaseConfig ||
-  CfgModule.FIREBASE_CONFIG ||
-  CfgModule.config ||
+  (CfgModule && (CfgModule.default || CfgModule.firebaseConfig || CfgModule.FIREBASE_CONFIG || CfgModule.config)) ||
   null;
 
-// Fallback opcional via variáveis do Vite (se você preferir configurar por env)
+// Fallback por variáveis de ambiente do Vite (opcional)
 if (!firebaseConfig || !firebaseConfig.projectId) {
   const maybeFromEnv = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -34,14 +31,14 @@ if (!firebaseConfig || !firebaseConfig.projectId) {
   throw new Error(
     'firebaseClient: config do Firebase não encontrado. ' +
       'Exporte default OU named (firebaseConfig/FIREBASE_CONFIG) em src/config/firebase.js ' +
-      'ou defina as variáveis VITE_FIREBASE_* no Vercel.'
+      'ou defina VITE_FIREBASE_* no Vercel.'
   );
 }
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Fallback global (usado pelo pushClient se o import acontecer em outra ordem)
+// Fallback global (usado caso outro módulo importe antes)
 try {
   globalThis.__FIREBASE_DB = db;
 } catch (_) {}
