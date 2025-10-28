@@ -30,71 +30,71 @@ import UserProfilePage from "./pages/UserProfilePage";
 
 import './App.css';
 
-// ---------- PUSH / SERVICE WORKER ----------
-const urlB64ToUint8Array = (b64) => {
-  const padding = '='.repeat((4 - (b64.length % 4)) % 4);
-  const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+// === HELPERS para Web Push ===
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base64);
-  const arr = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; ++i) arr[i] = raw.charCodeAt(i);
-  return arr;
-};
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
+  return output;
+}
 
 async function registerServiceWorkerAndSubscribe() {
   try {
-    // checagens básicas
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('[push] SW/Push não suportado neste navegador.');
+      console.warn('[push] Browser não suporta ServiceWorker/Push.');
       return;
     }
 
-    // registra o SW do Firebase Messaging (está em /public)
-    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
-    await navigator.serviceWorker.ready; // garante que está pronto
+    // pede permissão
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.warn('[push] Permissão negada.');
+      return;
+    }
 
-    // pede permissão se necessário
-    if ('Notification' in window && Notification.permission !== 'granted') {
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') {
-        console.warn('[push] Permissão negada ou ignorada.');
+    // registra o SW (arquivo está em /public/firebase-messaging-sw.js)
+    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+
+    // assinatura
+    let subscription = await reg.pushManager.getSubscription();
+    if (!subscription) {
+      if (!VAPID_PUBLIC_KEY) {
+        console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente; não é possível assinar.');
         return;
       }
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
     }
 
-    // assina (caso ainda não exista)
-    const existing = await registration.pushManager.getSubscription();
-    if (existing) {
-      window.__PUSH_DEBUG__ = { hasSubscription: true };
-      return; // já está assinado
-    }
+    // envia para o backend salvar
+    const json = subscription.toJSON ? subscription.toJSON() : {
+      endpoint: subscription.endpoint,
+      keys: subscription.keys || null,
+    };
+    const uid = localStorage.getItem('uid') || localStorage.getItem('userId') || '';
 
-    const publicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-    if (!publicKey) {
-      console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente; não vou assinar.');
-      return;
-    }
-
-    const sub = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlB64ToUint8Array(publicKey),
-    });
-
-    // envia a inscrição para o backend salvar
     await fetch('/api/push/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sub),
-    });
-
-    window.__PUSH_DEBUG__ = { hasSubscription: true, endpoint: sub?.endpoint };
-    console.log('[push] Inscrição criada e enviada ao servidor.');
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': uid || '',
+      },
+      body: JSON.stringify({ ...json, userId: uid || null }),
+    }).catch((e) => console.error('[push] Falha ao registrar inscrição:', e));
   } catch (err) {
-    console.error('[push] Falha ao registrar/assinar:', err);
+    console.error('[push] Erro no registro/inscrição:', err);
   }
 }
 
 function App() {
-  // registra o SW e tenta assinar na montagem do app
+  // registra e assina push uma única vez
   useEffect(() => {
     registerServiceWorkerAndSubscribe();
   }, []);
@@ -163,7 +163,7 @@ function App() {
                 }
               />
 
-              {/* Cronograma de Eventos */}
+              {/* Cronograma */}
               <Route
                 path="/cronograma"
                 element={
@@ -173,7 +173,7 @@ function App() {
                 }
               />
 
-              {/* Eventos - apenas administradores */}
+              {/* Eventos */}
               <Route
                 path="/eventos"
                 element={
@@ -201,7 +201,7 @@ function App() {
                 }
               />
 
-              {/* Perfil do Usuário */}
+              {/* Perfil */}
               <Route
                 path="/perfil"
                 element={
@@ -267,13 +267,16 @@ function App() {
 
               <Route path="/resumo-projeto" element={<ProjectSummaryPage />} />
 
-              {/* Painéis sem header */}
+              {/* Painel operacional (sem header) */}
               <Route path="/painel-operacional" element={<OperationalPanel />} />
+
               <Route path="/empreiteiro" element={<ContractorProjectPage />} />
               <Route path="/empreiteiro/:projectId" element={<ContractorProjectPage />} />
+
+              {/* Painel TV (sem login) */}
               <Route path="/painel-tv" element={<TVPanel />} />
 
-              {/* Feed de diários */}
+              {/* Diários */}
               <Route
                 path="/diarios"
                 element={
