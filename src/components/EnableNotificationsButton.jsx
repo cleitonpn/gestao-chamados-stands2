@@ -1,7 +1,5 @@
 // src/components/EnableNotificationsButton.jsx
-import React, { useMemo, useState } from "react";
-
-// ⚠️ Import RELATIVO garante que o Vercel resolva o caminho corretamente.
+import React, { useRef, useState } from 'react';
 import {
   ensurePermission,
   registerServiceWorker,
@@ -10,165 +8,89 @@ import {
   sendRealPush,
   sendBroadcast,
   clearBadge,
-  getDebugInfo,
-} from "../lib/pushClient";
+  getDebugInfo, // agora exportado de fato por pushClient
+} from '../lib/pushClient';
 
-function Badge({ ok }) {
-  return (
-    <span
-      className={`ml-2 inline-block h-2 w-2 rounded-full ${
-        ok ? "bg-emerald-500" : "bg-zinc-400"
-      }`}
-      title={ok ? "ok" : "não"}
-    />
-  );
-}
-
-export default function EnableNotificationsButton() {
+export default function EnableNotificationsButton({ userId, className = '' }) {
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const debugRef = useRef(null);
 
-  const dbg = useMemo(() => getDebugInfo?.() || {}, [busy]);
-
-  const alertJSON = (title, payload) => {
+  async function handleEnable() {
     try {
-      window.alert(`${title}: ${JSON.stringify(payload)}`);
-    } catch {
-      window.alert(title);
-    }
-  };
-
-  const handleEnable = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      // 1) Garantir permissão do navegador
-      const perm = await ensurePermission();
-      if (perm !== "granted") {
-        window.alert("Permissão de notificação negada/cancelada.");
-        return;
-      }
-
-      // 2) Registrar (ou obter) o Service Worker
+      setBusy(true);
+      setMsg('');
+      await ensurePermission();
       const reg = await registerServiceWorker();
-      if (!reg) {
-        window.alert("Falha ao registrar o Service Worker.");
-        return;
-      }
-
-      // 3) Criar (ou obter) a assinatura Web Push
       const sub = await getOrCreateSubscription(reg);
-      if (!sub) {
-        window.alert("Não foi possível criar/obter a assinatura Web Push.");
-        return;
-      }
-
-      // 4) Persistir no Firestore (coleção push_subscriptions)
-      const saved = await saveSubscriptionInFirestore(sub);
-      alertJSON("Assinatura salva", { ok: saved ? true : false });
-    } catch (err) {
-      console.error(err);
-      window.alert(`Falha ao assinar push: ${String(err?.message || err)}`);
+      await saveSubscriptionInFirestore(userId || 'anon', sub);
+      setMsg('Assinatura criada! ✅');
+    } catch (e) {
+      alert(`Falha ao assinar push: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleTestRealPush = async () => {
-    if (busy) return;
-    setBusy(true);
+  async function handleTestReal() {
     try {
-      const res = await sendRealPush({
-        title: "Teste (real)",
-        body: "Ping do sistema de push",
-        url: "https://www.sistemastands.com.br",
-      });
-      alertJSON("✅ Push real enviado", res);
-    } catch (err) {
-      console.error(err);
-      window.alert(`Falha no push real: ${String(err?.message || err)}`);
+      setBusy(true);
+      const res = await sendRealPush({ title: 'Teste (real)', body: 'Ping do sistema de push' });
+      alert(`Push real enviado: ${JSON.stringify(res)}`);
+    } catch (e) {
+      alert(`Falha no push real: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleBroadcast = async () => {
-    if (busy) return;
-    setBusy(true);
+  async function handleBroadcast() {
     try {
-      const res = await sendBroadcast({
-        title: "Broadcast (teste)",
-        body: "Ping geral do sistema de push",
-      });
-      alertJSON("✅ Broadcast enviado", res);
-    } catch (err) {
-      console.error(err);
-      window.alert(`Falha no broadcast: ${String(err?.message || err)}`);
+      setBusy(true);
+      const res = await sendBroadcast({ title: 'Broadcast', body: 'Olá assinantes!' });
+      alert(`Broadcast enviado: ${JSON.stringify(res)}`);
+    } catch (e) {
+      alert(`Falha no broadcast: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleClearBadge = async () => {
+  function handleClearBadge() {
+    try { clearBadge(); setMsg('Badges limpos'); } catch {}
+  }
+
+  async function handleDebug() {
     try {
-      await clearBadge();
-      window.alert("Badge/bolinha limpa.");
-    } catch (err) {
-      console.error(err);
-      window.alert(`Falha ao limpar badge: ${String(err?.message || err)}`);
+      const info = await getDebugInfo();
+      debugRef.current = info;
+      console.log('[Push Debug]', info);
+      alert('Info de debug registrada no console.');
+    } catch (e) {
+      alert(`Falha ao coletar debug: ${e?.message || e}`);
     }
-  };
+  }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={handleEnable}
-        disabled={busy}
-        className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-      >
-        Assinar Push real
-      </button>
-
-      <button
-        type="button"
-        onClick={handleTestRealPush}
-        disabled={busy}
-        className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-      >
-        Testar Push real
-      </button>
-
-      <button
-        type="button"
-        onClick={handleBroadcast}
-        disabled={busy}
-        className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50"
-      >
-        Broadcast (teste)
-      </button>
-
-      <button
-        type="button"
-        onClick={handleClearBadge}
-        className="rounded-md bg-zinc-600 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-      >
-        Limpar bolinha
-      </button>
-
-      {/* Indicadores rápidos (sem overlay flutuando na tela) */}
-      <div className="ml-3 text-xs text-zinc-500">
-        Permissão: <strong>{dbg.permission ?? "—"}</strong>
-        <Badge ok={dbg.permission === "granted"} />
-        <span className="mx-2">|</span>
-        SW registrado: <strong>{dbg.swRegistered ? "sim" : "não"}</strong>
-        <Badge ok={!!dbg.swRegistered} />
-        <span className="mx-2">|</span>
-        VAPID: <strong>{dbg.vapidMode ?? "—"}</strong>
-        <Badge ok={!!dbg.vapidMode} />
-        <span className="mx-2">|</span>
-        Busy: <strong>{busy ? "sim" : "não"}</strong>
-        <Badge ok={!busy} />
+    <div className={className}>
+      <div className="flex gap-2 flex-wrap">
+        <button className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-60" onClick={handleEnable} disabled={busy}>
+          Assinar Push
+        </button>
+        <button className="px-3 py-2 rounded bg-emerald-600 text-white disabled:opacity-60" onClick={handleTestReal} disabled={busy}>
+          Testar Push real
+        </button>
+        <button className="px-3 py-2 rounded bg-purple-600 text-white disabled:opacity-60" onClick={handleBroadcast} disabled={busy}>
+          Broadcast (teste)
+        </button>
+        <button className="px-3 py-2 rounded bg-zinc-700 text-white disabled:opacity-60" onClick={handleClearBadge} disabled={busy}>
+          Limpar bolinha
+        </button>
+        <button className="px-3 py-2 rounded bg-slate-500 text-white disabled:opacity-60" onClick={handleDebug} disabled={busy} title="Mostra informações de debug no console">
+          Debug
+        </button>
       </div>
+      {msg && <p className="text-sm text-zinc-500 mt-2">{msg}</p>}
     </div>
   );
 }
