@@ -1,13 +1,9 @@
-// /api/push/notify.mjs (Vercel Edge/Node runtime)
-// Envia push em lote para todos os inscritos na coleção `push_subscriptions`.
-// Aceita docs com dois formatos:
-//   - {kind:'fcm', token}
-//   - {kind:'webpush', endpoint, keys}
-//
-// Para FCM, usa a variável de ambiente FCM_SERVER_KEY (Legacy HTTP API).
+// /api/push/notify.mjs
+// Atualizado para a API v1 (HTTP) usando firebase-admin/messaging
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 
 function initAdmin() {
   if (getApps().length) return;
@@ -22,10 +18,7 @@ function initAdmin() {
     throw new Error('FIREBASE_ADMIN_JSON inválido (JSON inválido).');
   }
 
-  // ==================================================================
-  // ✨ A CORREÇÃO ESTÁ AQUI ✨
-  // Esta linha corrige a formatação da chave privada (problema de \n)
-  // ==================================================================
+  // Corrige a formatação da chave privada (problema de \n)
   if (json.private_key) {
     json.private_key = json.private_key.replace(/\\n/g, '\n');
   }
@@ -37,10 +30,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method not allowed' });
 
   try {
-    const serverKey = process.env.FCM_SERVER_KEY;
-    if (!serverKey) return res.status(500).json({ ok: false, error: 'FCM_SERVER_KEY ausente' });
-
-    initAdmin(); // Agora esta função é segura
+    // A API v1 usa o Admin SDK, não precisamos mais da FCM_SERVER_KEY
+    initAdmin(); 
     const db = getFirestore();
     const snap = await db.collection('push_subscriptions').get();
 
@@ -56,29 +47,38 @@ export default async function handler(req, res) {
 
     if (!tokens.length) return res.status(200).json({ ok: true, sent: 0, failed: 0, reason: 'no-tokens' });
 
+    // Este é o novo payload para a API v1 (via Admin SDK)
     const payload = {
       notification: {
         title: (req.body?.title || 'Broadcast'),
         body: (req.body?.body || 'Ping'),
-        click_action: req.body?.url || undefined,
       },
-      registration_ids: tokens,
+      webpush: {
+        fcm_options: {
+          // A 'click_action' agora fica dentro de 'webpush.fcm_options.link'
+          link: req.body?.url || undefined,
+        },
+      },
+      tokens: tokens, // A lista de tokens
     };
 
-    const r = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `key=${serverKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    // Usando a função sendMulticast (envio em lote) do Admin SDK
+    const messaging = getMessaging();
+    const response = await messaging.sendMulticast(payload);
 
-    const json = await r.json().catch(() => ({}));
-    const failed = Array.isArray(json?.results) ? json.results.filter((x) => x.error).length : 0;
-    const sent = Array.isArray(json?.results) ? json.results.length - failed : 0;
+    const sent = response.successCount;
+    const failed = response.failureCount;
 
-    return res.status(200).json({ ok: true, sent, failed, raw: json });
+    // Log para falhas (se houver)
+    if (failed > 0) {
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          console.error(`[notify] Falha ao enviar para ${tokens[idx]}:`, resp.error);
+        }
+      });
+    }
+
+    return res.status(200).json({ ok: true, sent, failed, raw: response });
   } catch (e) {
     console.error('[notify] error', e);
     return res.status(500).json({ ok: false, error: e?.message || String(e) });
