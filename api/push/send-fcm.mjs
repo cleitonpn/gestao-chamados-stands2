@@ -1,10 +1,29 @@
 // /api/push/send-fcm.mjs
-// (Vercel Edge/Node runtime)
-// Envia push para UM ÚNICO token FCM.
-// Espera { token, title, body, url } no corpo da requisição.
+// Atualizado para a API v1 (HTTP) usando firebase-admin/messaging
 
-// NOTA: Esta API não precisa do 'firebase-admin' porque não lê o banco,
-// ela apenas envia para o FCM usando a chave do servidor.
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
+
+// A mesma função de inicialização do 'notify'
+function initAdmin() {
+  if (getApps().length) return;
+  
+  const raw = process.env.FIREBASE_ADMIN_JSON;
+  if (!raw) throw new Error('FIREBASE_ADMIN_JSON não configurado');
+  
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    throw new Error('FIREBASE_ADMIN_JSON inválido (JSON inválido).');
+  }
+
+  if (json.private_key) {
+    json.private_key = json.private_key.replace(/\\n/g, '\n');
+  }
+
+  initializeApp({ credential: cert(json) });
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -12,50 +31,41 @@ export default async function handler(req, res) {
   }
 
   try {
-    const serverKey = process.env.FCM_SERVER_KEY;
-    if (!serverKey) {
-      return res.status(500).json({ ok: false, error: 'FCM_SERVER_KEY ausente' });
-    }
+    // Não precisamos mais da FCM_SERVER_KEY
+    initAdmin(); 
 
-    // 1. Obter os dados do corpo da requisição
     const { token, title, body, url } = req.body || {};
     if (!token) {
       return res.status(400).json({ ok: false, error: 'token é obrigatório' });
     }
 
-    // 2. Montar o payload para um ÚNICO token
-    //    Usamos 'to' para um token, e 'registration_ids' para múltiplos
+    // Payload para a API v1 (enviando para UM token)
     const payload = {
       notification: {
         title: (title || 'Teste (Real)'),
         body: (body || 'Ping do sistema de push'),
-        click_action: url || undefined,
       },
-      to: token,
+      webpush: {
+        fcm_options: {
+          link: url || undefined,
+        },
+      },
+      token: token, // 'token' para um único dispositivo
     };
 
-    // 3. Enviar para a API do FCM
-    const r = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `key=${serverKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    // Usando a função 'send' do Admin SDK
+    const messaging = getMessaging();
+    const response = await messaging.send(payload);
 
-    const json = await r.json().catch(() => ({}));
-
-    // 4. Verificar falhas
-    if (!r.ok || json.failure) {
-      console.error('[send-fcm] Falha ao enviar:', json);
-      return res.status(500).json({ ok: false, error: 'FCM API error', raw: json });
-    }
-
-    return res.status(200).json({ ok: true, sent: json.success, failed: json.failure, raw: json });
+    return res.status(200).json({ ok: true, sent: 1, failed: 0, raw: response });
 
   } catch (e) {
     console.error('[send-fcm] error', e);
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    // Erros do Firebase (como token inválido) vêm como exceção
+    return res.status(500).json({ 
+      ok: false, 
+      error: e?.message || String(e), 
+      code: e?.code 
+    });
   }
 }
