@@ -1,136 +1,154 @@
-// Cliente de Push (Web Push + Firestore): assina, salva e dispara notificações.
-import { db as exportedDb } from './firebaseClient';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+// src/lib/pushClient.js
+// Cliente de push: assina, salva no Firestore e dispara push real/broadcast.
 
-// ---------- Helpers de ambiente ----------
+import { db as dbFromImport } from './firebaseClient';
+import {
+  doc,
+  setDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 
-function getDb() {
-  // Usa o export… ou o fallback global, se por algum motivo o import ainda não vier.
-  const d = exportedDb || globalThis.__FIREBASE_DB;
-  if (!d) {
-    throw new Error(
-      "Não consegui obter o Firestore (db). Exporte `db` em src/lib/firebaseClient.js (ou src/firebase.js) ou deixe globalThis.__FIREBASE_DB = db."
-    );
-  }
-  return d;
+// ---------- DB: usa import, com fallback para global ----------
+const db = dbFromImport || globalThis.__FIREBASE_DB;
+if (!db) {
+  throw new Error(
+    'pushClient: Firestore (db) não disponível. Garanta que src/lib/firebaseClient.js exporte { db } ' +
+    'ou que globalThis.__FIREBASE_DB tenha sido definido.'
+  );
 }
 
-function getVapidPublicKey() {
-  // Em projetos Vite, variáveis visíveis no cliente PRECISAM ter prefixo VITE_
-  const fromVite =
-    (import.meta.env && (import.meta.env.VITE_VAPID_PUBLIC_KEY || import.meta.env.VAPID_PUBLIC_KEY)) || null;
+// ---------- Helpers ----------
+const isHttps = () => location.protocol === 'https:' || location.hostname === 'localhost';
 
-  const fromWindow =
-    (typeof window !== 'undefined' && (window.__VAPID_PUBLIC_KEY ||
-      document.querySelector('meta[name="vapid-key"]')?.content)) || null;
+const urlBase64ToUint8Array = (base64String) => {
+  // Polyfill comum para VAPID key
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
+  return output;
+};
 
-  const fromGlobal = typeof globalThis !== 'undefined' ? globalThis.__VAPID_PUBLIC_KEY : null;
-
-  const key = fromVite || fromWindow || fromGlobal;
-
-  if (!key) {
-    throw new Error(
-      'VAPID_PUBLIC_KEY não encontrado. Defina VITE_VAPID_PUBLIC_KEY no Vercel (Environment: Production) e redeploy.'
-    );
-  }
-  return key;
-}
-
-// ---------- API pública usada pelo seu botão ----------
+// Lê VAPID de env (Vite expõe apenas VITE_*) — aceita dois nomes
+const getVapidPublicKey = () =>
+  import.meta.env.VITE_VAPID_PUBLIC_KEY || import.meta.env.VAPID_PUBLIC_KEY || '';
 
 export async function ensurePermission() {
-  if (!('Notification' in window)) throw new Error('Navegador sem suporte a Notification API.');
-  const status = await Notification.requestPermission();
-  if (status !== 'granted') throw new Error('Permissão negada para notificações.');
-  return true;
+  if (!('Notification' in window)) {
+    throw new Error('Navegador não suporta Notification API.');
+  }
+  const current = Notification.permission;
+  if (current === 'granted') return 'granted';
+  if (current === 'denied') throw new Error('Permissão negada pelo usuário.');
+  const result = await Notification.requestPermission();
+  if (result !== 'granted') throw new Error('Permissão não concedida.');
+  return result;
 }
 
 export async function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) throw new Error('ServiceWorker não suportado.');
-  // O arquivo deve estar em /public
-  const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+  if (!('serviceWorker' in navigator)) {
+    throw new Error('Service Worker não suportado no navegador.');
+  }
+  if (!isHttps()) {
+    throw new Error('Service Worker exige HTTPS (ou localhost).');
+  }
+
+  // tenta caminhos comuns
+  const candidates = ['/sw.js', '/firebase-messaging-sw.js', '/service-worker.js'];
+  let reg = null;
+  let lastErr = null;
+
+  for (const url of candidates) {
+    try {
+      reg = await navigator.serviceWorker.register(url);
+      if (reg) break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!reg) throw new Error(`Falha ao registrar SW. Último erro: ${lastErr?.message || lastErr}`);
   await navigator.serviceWorker.ready;
   return reg;
 }
 
-export async function getOrCreateSubscription() {
-  // Usa Push API pura (VAPID) – independente do FCM.
-  const registration = await navigator.serviceWorker.ready;
+export async function getOrCreateSubscription(reg) {
+  const key = getVapidPublicKey();
+  if (!key) throw new Error('VAPID_PUBLIC_KEY ausente. Defina VITE_VAPID_PUBLIC_KEY no Vercel.');
 
-  // Checa se já existe:
-  let sub = await registration.pushManager.getSubscription();
-  if (sub) return sub;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) return existing;
 
-  const vapidKey = urlBase64ToUint8Array(getVapidPublicKey());
-  sub = await registration.pushManager.subscribe({
+  return reg.pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: vapidKey,
+    applicationServerKey: urlBase64ToUint8Array(key),
   });
-  return sub;
 }
 
-export async function saveSubscriptionInFirestore({ sub, area = null, userId = null, active = true, device = null }) {
-  const d = getDb();
-  const endpoint = sub?.endpoint || '';
-  if (!endpoint) throw new Error('Subscription sem endpoint.');
+export async function saveSubscriptionInFirestore(userId, sub) {
+  if (!userId) throw new Error('saveSubscriptionInFirestore: userId obrigatório.');
 
-  const id = btoa(endpoint).replace(/=+$/g, ''); // id estável
   const payload = {
-    endpoint,
+    endpoint: sub?.endpoint || null,
+    keys: sub?.toJSON?.().keys || null,
     createdAt: serverTimestamp(),
-    active: !!active,
-    area: area ?? null,
-    userId: userId ?? null,
-    device:
-      device ||
-      (typeof navigator !== 'undefined'
-        ? `${navigator.userAgent}`
-        : 'unknown'),
-    subscription: JSON.parse(JSON.stringify(sub)),
+    userAgent: navigator.userAgent,
   };
-
-  await setDoc(doc(d, 'push_subscriptions', id), payload, { merge: true });
-  return { id, ...payload };
+  await setDoc(doc(db, 'push_subscriptions', userId), payload, { merge: true });
+  return true;
 }
 
-export async function sendRealPush({ title = 'Teste (real)', body = 'Ping do sistema de push', data = {} } = {}) {
-  // Endpoint: /api/push/send (já está no seu repo)
-  const r = await fetch('/api/push/send', {
+export async function sendRealPush(payload = { title: 'Ping (real)', body: 'Teste do sistema de push' }) {
+  const key = getVapidPublicKey();
+  if (!key) throw new Error('VAPID_PUBLIC_KEY não encontrado. Defina VITE_VAPID_PUBLIC_KEY no Vercel.');
+
+  const res = await fetch('/api/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, body, data }),
+    body: JSON.stringify({ ...payload }),
   });
-  const json = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(json?.error || 'Falha ao enviar push real');
-  return json;
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Falha no push real: ${res.status} ${txt}`);
+  }
+  return res.json().catch(() => ({}));
 }
 
-export async function sendBroadcast({ title = 'Broadcast', body = 'Aviso geral', data = {} } = {}) {
-  // Endpoint: /api/push/broadcast (já está no seu repo)
-  const r = await fetch('/api/push/broadcast', {
+export async function sendBroadcast(payload = { title: 'Broadcast', body: 'Mensagem para todos' }) {
+  const res = await fetch('/api/push/broadcast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, body, data }),
+    body: JSON.stringify({ ...payload }),
   });
-  const json = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(json?.error || 'Falha no broadcast');
-  return json;
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Falha no broadcast: ${res.status} ${txt}`);
+  }
+  return res.json().catch(() => ({}));
 }
 
 export function clearBadge() {
-  try {
-    if (navigator.setAppBadge) navigator.setAppBadge(0);
-    if (navigator.clearAppBadge) navigator.clearAppBadge();
-  } catch {}
+  if ('setAppBadge' in navigator) {
+    try { navigator.clearAppBadge(); } catch {}
+  }
 }
 
-// ---------- Utils ----------
+// Função extra que seu botão está importando
+export async function getDebugInfo() {
+  const key = getVapidPublicKey();
+  const swReg = (await navigator.serviceWorker?.getRegistration()) || null;
+  const sub = swReg ? await swReg.pushManager.getSubscription() : null;
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(base64);
-  const output = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
-  return output;
+  return {
+    permission: (typeof Notification !== 'undefined' && Notification.permission) || 'n/a',
+    swRegistered: !!swReg,
+    swScope: swReg?.scope || null,
+    hasSubscription: !!sub,
+    endpoint: sub?.endpoint || null,
+    hasVapid: !!key,
+    vapidPrefix: key ? key.slice(0, 8) + '...' : null,
+    envHasViteVapid: !!import.meta.env.VITE_VAPID_PUBLIC_KEY,
+    envHasPlainVapid: !!import.meta.env.VAPID_PUBLIC_KEY,
+    isHttps: isHttps(),
+  };
 }
