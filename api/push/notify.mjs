@@ -1,86 +1,74 @@
 // /api/push/notify.mjs
-// Atualizado para a API v1 (HTTP) usando firebase-admin/messaging
+import admin from "firebase-admin";
 
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { getMessaging } from 'firebase-admin/messaging';
-
-function initAdmin() {
-  if (getApps().length) return;
-  
-  const raw = process.env.FIREBASE_ADMIN_JSON;
-  if (!raw) throw new Error('FIREBASE_ADMIN_JSON não configurado');
-  
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    throw new Error('FIREBASE_ADMIN_JSON inválido (JSON inválido).');
+const svcJson = process.env.FIREBASE_ADMIN_JSON;
+if (!admin.apps.length) {
+  if (!svcJson) {
+    throw new Error("FIREBASE_ADMIN_JSON ausente");
   }
-
-  // Corrige a formatação da chave privada (problema de \n)
-  if (json.private_key) {
-    json.private_key = json.private_key.replace(/\\n/g, '\n');
-  }
-
-  initializeApp({ credential: cert(json) });
+  admin.initializeApp({
+    credential: admin.credential.cert(JSON.parse(svcJson)),
+  });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "method not allowed" });
+  }
 
   try {
-    // A API v1 usa o Admin SDK, não precisamos mais da FCM_SERVER_KEY
-    initAdmin(); 
-    const db = getFirestore();
-    const snap = await db.collection('push_subscriptions').get();
+    const { title = "Notificação", body = "Mensagem", url = "/" } = req.body || {};
+    const db = admin.firestore();
 
+    // Busca TODAS as inscrições ativas
+    const snap = await db.collection("push_subscriptions").where("enabled", "==", true).get();
+
+    // Extrai o token FCM do endpoint (última parte após /send/)
     const tokens = [];
     snap.forEach((doc) => {
-      const d = doc.data();
-      if (d?.kind === 'fcm' && d?.token) tokens.push(d.token);
-      else if (d?.endpoint && typeof d.endpoint === 'string' && d.endpoint.includes('/fcm/send/')) {
-        const token = d.endpoint.split('/').pop();
+      const endpoint = doc.get("endpoint");
+      if (endpoint && typeof endpoint === "string") {
+        const pieces = endpoint.split("/send/");
+        const token = pieces[1] || "";
         if (token) tokens.push(token);
       }
     });
 
-    if (!tokens.length) return res.status(200).json({ ok: true, sent: 0, failed: 0, reason: 'no-tokens' });
-
-    // Este é o novo payload para a API v1 (via Admin SDK)
-    const payload = {
-      notification: {
-        title: (req.body?.title || 'Broadcast'),
-        body: (req.body?.body || 'Ping'),
-      },
-      webpush: {
-        fcm_options: {
-          // A 'click_action' agora fica dentro de 'webpush.fcm_options.link'
-          link: req.body?.url || undefined,
-        },
-      },
-      tokens: tokens, // A lista de tokens
-    };
-
-    // Usando a função sendMulticast (envio em lote) do Admin SDK
-    const messaging = getMessaging();
-    const response = await messaging.sendMulticast(payload);
-
-    const sent = response.successCount;
-    const failed = response.failureCount;
-
-    // Log para falhas (se houver)
-    if (failed > 0) {
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          console.error(`[notify] Falha ao enviar para ${tokens[idx]}:`, resp.error);
-        }
-      });
+    if (tokens.length === 0) {
+      return res.status(200).json({ ok: false, error: "sem tokens válidos" });
     }
 
-    return res.status(200).json({ ok: true, sent, failed, raw: response });
+    const messaging = admin.messaging();
+
+    const message = {
+      tokens,
+      data: { url }, // útil para tratar clique
+      webpush: {
+        notification: {
+          title,
+          body,
+          icon: "/icons/icon-192.png",
+          badge: "/icons/badge.png",
+          tag: "default",
+          renotify: true,
+        },
+        fcmOptions: {
+          link: url, // abre esta URL ao clicar
+        },
+      },
+    };
+
+    // >>> método correto nas versões recentes:
+    const resp = await messaging.sendEachForMulticast(message);
+
+    return res.status(200).json({
+      ok: true,
+      sent: resp.successCount,
+      failed: resp.failureCount,
+      results: resp.responses.map((r) => (r.error ? r.error.message : "ok")),
+    });
   } catch (e) {
-    console.error('[notify] error', e);
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    console.error("[notify.mjs] erro:", e);
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 }
