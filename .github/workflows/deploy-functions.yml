@@ -1,47 +1,72 @@
 name: Deploy Firebase Functions
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Post Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: "20"
 
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools
+        run: npm i -g firebase-tools@13
 
-      # Seta as config (sem --force) – usa os seus Secrets
-     - name: Set functions:config (VAPID)
-  run: |
-    firebase functions:config:set \
-      messaging.vapid_subject="${{ secrets.VAPID_SUBJECT }}" \
-      messaging.vapid_public_key="${{ secrets.VAPID_PUBLIC }}" \
-      messaging.vapid_private_key="${{ secrets.VAPID_PRIVATE }}" \
-      --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+      # Autenticação recomendada: Service Account (seu secret GCP_SA_KEY em JSON)
+      - name: Write GCP credentials file
+        shell: bash
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > $HOME/gcp-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/gcp-key.json" >> $GITHUB_ENV
 
+      # Define as variáveis das Functions (VAPID) a partir dos secrets do repo.
+      # >>> sem --force <<<
+      - name: Set functions:config (VAPID)
+        shell: bash
+        run: |
+          firebase functions:config:set \
+            messaging.vapid_subject="${{ secrets.VAPID_SUBJECT }}" \
+            messaging.vapid_public_key="${{ secrets.VAPID_PUBLIC }}" \
+            messaging.vapid_private_key="${{ secrets.VAPID_PRIVATE }}" \
+            --project "${{ secrets.FIREBASE_PROJECT_ID }}"
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}
 
-      # Instala dentro de functions/
-      - name: Install functions deps (lock novo)
+      # Instala dependências SOMENTE da pasta functions/
+      - name: Install functions deps
+        working-directory: functions
+        shell: bash
+        run: |
+          npm ci || npm i --legacy-peer-deps --no-audit --no-fund
+
+      # (Opcional) Mostra versões pra debug
+      - name: Show versions
         working-directory: functions
         run: |
-          npm i --package-lock-only
-          npm i --no-audit --no-fund --legacy-peer-deps
+          node -v
+          npm -v
+          npm ls --depth=0 || true
 
+      # Deploy apenas das Cloud Functions
       - name: Deploy Functions
+        shell: bash
         run: |
-          firebase deploy --only functions --project ${{ secrets.FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_TOKEN }}
+          firebase deploy --only functions --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}
