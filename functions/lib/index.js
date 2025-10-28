@@ -1,88 +1,109 @@
 // functions/index.js
-import * as functions from 'firebase-functions';
-import admin from 'firebase-admin';
-import webpush from 'web-push';
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
+const webpush = require('web-push');
 
-admin.initializeApp();
+// Init Admin only once
+try { admin.app(); } catch { admin.initializeApp(); }
 
-// Se seu projeto usa southamerica-east1, defina aqui:
-const region = 'southamerica-east1';
-
-const cfg = functions.config().messaging;
-if (!cfg?.vapid_subject || !cfg?.vapid_public_key || !cfg?.vapid_private_key) {
-  console.error('[init] VAPID config ausente. Rode: firebase functions:config:set ...');
+// Load VAPID keys from functions config: messaging.vapid_subject, messaging.vapid_public_key, messaging.vapid_private_key
+const cfg = functions.config().messaging || {};
+if (cfg.vapid_public_key && cfg.vapid_private_key) {
+  webpush.setVapidDetails(cfg.vapid_subject || 'mailto:admin@example.com',
+                          cfg.vapid_public_key,
+                          cfg.vapid_private_key);
+} else {
+  console.warn('[functions] VAPID keys not set (functions:config:set messaging.*) — notify endpoints will fail.');
 }
 
-webpush.setVapidDetails(
-  cfg.vapid_subject,      // ex: "mailto:voce@dominio.com"
-  cfg.vapid_public_key,
-  cfg.vapid_private_key
-);
+// Helper: get push subscriptions (optionally filtered by userId)
+async function getSubsForUser(userId = null) {
+  let ref = admin.firestore().collection('push_subscriptions').where('enabled', '==', true);
+  if (userId) ref = ref.where('userId', '==', userId);
 
-// Envia Web Push para um array de PushSubscriptions
+  const snap = await ref.get();
+  const subs = snap.docs.map(d => {
+    const { endpoint, keys } = d.data() || {};
+    return endpoint && keys ? { endpoint, keys } : null;
+  }).filter(Boolean);
+
+  return subs;
+}
+
+// Helper: send Web Push to an array of subscriptions
 async function sendWebPushToSubs(subs, payload) {
   const results = await Promise.allSettled(
     subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
   );
-
-  // Opcional: remover inscrições inválidas (410/404)
-  const toDelete = [];
-  results.forEach((r, idx) => {
-    if (r.status === 'rejected') {
-      const msg = String(r.reason?.message || '');
-      if (msg.includes('410') || msg.includes('404') || msg.includes('not found')) {
-        // marcar para remoção pelo endpoint
-        toDelete.push(subs[idx].endpoint);
-      }
-    }
-  });
-
-  if (toDelete.length) {
-    const batch = admin.firestore().batch();
-    const snap = await admin.firestore().collection('push_subscriptions').get();
-    snap.docs.forEach((doc) => {
-      const d = doc.data();
-      if (toDelete.includes(d.endpoint)) batch.delete(doc.ref);
-    });
-    await batch.commit().catch(() => {});
-  }
-
   return {
     ok: true,
     sent: results.filter(r => r.status === 'fulfilled').length,
     failed: results.filter(r => r.status === 'rejected').length,
-    results: results.map(r => (r.status === 'fulfilled' ? 'ok' : (r.reason?.message || 'error'))),
+    results: results.map(r => r.status === 'fulfilled' ? 'ok' : (r.reason && r.reason.message) || 'error')
   };
 }
 
-// Endpoint HTTP para disparo manual: POST /notify
-export const notify = functions.region(region).https.onRequest(async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method not allowed' });
+// Helper: build a standard payload from a 'mensagens' doc
+function buildPayloadFromMessage(data = {}) {
+  const title = data.titulo || data.title || 'Atualização';
+  const body = data.conteudo || data.mensagem || data.body || 'Você tem uma atualização.';
+  const url =
+    data.link || data.url ||
+    (data.ticketId ? `/chamado/${data.ticketId}` : '/');
+  const tag = data.type || data.tipo || 'default';
+
+  return { title, body, url, tag };
+}
+
+// HTTP endpoint to manually trigger a broadcast push to all enabled subscriptions
+exports.notify = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok:false, error:'method not allowed' });
 
   try {
-    const { title = 'Notificação', body = 'Olá!', url = '/', tag = 'default' } = req.body || {};
+    const { title='Notificação', body='Olá!', url='/' } = req.body || {};
+    const subs = await getSubsForUser(null);
 
-    // 1) Buscar subscriptions ativas
-    const snap = await admin.firestore()
-      .collection('push_subscriptions')
-      .where('enabled', '==', true)
-      .get();
+    if (!subs.length) return res.json({ ok:true, sent:0, failed:0, results:[] });
 
-    const subs = snap.docs.map((d) => {
-      const { endpoint, keys } = d.data();
-      return { endpoint, keys };
-    });
-
-    if (!subs.length) return res.json({ ok: true, sent: 0, failed: 0, results: [] });
-
-    // 2) Payload que seu SW irá exibir (firebase-messaging-sw.js)
-    const payload = { title, body, url, tag };
-
-    // 3) Enviar via Web Push
+    const payload = { title, body, url, tag: 'default' };
     const out = await sendWebPushToSubs(subs, payload);
     return res.json(out);
   } catch (err) {
     console.error('[notify]', err);
-    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    return res.status(500).json({ ok:false, error: String(err && err.message || err) });
   }
 });
+
+// Firestore trigger: whenever a document in 'mensagens' is created or updated, send push
+exports.onMensagemWrite = functions.firestore
+  .document('mensagens/{docId}')
+  .onWrite(async (change, context) => {
+    // Ignore deletes
+    if (!change.after.exists) return null;
+
+    const before = change.before.exists ? change.before.data() : null;
+    const after = change.after.data() || {};
+
+    // If no meaningful change, skip
+    if (before && JSON.stringify(before) === JSON.stringify(after)) return null;
+
+    // Build payload
+    const payload = buildPayloadFromMessage(after);
+
+    // Optional targeting: if the doc has userId, send only to that user; else, broadcast
+    const userId = after.userId || null;
+    const subs = await getSubsForUser(userId);
+
+    if (!subs.length) {
+      console.log('[mensagens] no subscriptions found', { userId });
+      return null;
+    }
+
+    try {
+      const out = await sendWebPushToSubs(subs, payload);
+      console.log('[mensagens push]', context.params.docId, out);
+    } catch (e) {
+      console.error('[mensagens push] error', e);
+    }
+    return null;
+  });
