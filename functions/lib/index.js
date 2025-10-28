@@ -1,152 +1,95 @@
 // functions/lib/index.js
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-const webpush = require('web-push');
+import * as functions from 'firebase-functions';
+import admin from 'firebase-admin';
+import webpush from 'web-push';
 
-try {
-  admin.initializeApp();
-} catch (_) {
-  /* no-op (evita erro em re-loads) */
-}
+admin.initializeApp();
 
-/**
- * Carrega VAPID de env (recomendado) ou de functions.config().messaging (fallback)
- */
-function loadVapid() {
-  const env = {
-    subject: process.env.VAPID_SUBJECT,
-    publicKey: process.env.VAPID_PUBLIC_KEY,
-    privateKey: process.env.VAPID_PRIVATE_KEY,
-  };
+const cfg = functions.config().messaging || {};
+webpush.setVapidDetails(
+  cfg.vapid_subject,
+  cfg.vapid_public_key,
+  cfg.vapid_private_key
+);
 
-  if (env.subject && env.publicKey && env.privateKey) return env;
-
-  // fallback para functions:config, se foi configurado
-  const cfg = (functions.config() && functions.config().messaging) || {};
-  return {
-    subject: env.subject || cfg.vapid_subject || 'mailto:you@example.com',
-    publicKey: env.publicKey || cfg.vapid_public_key || '',
-    privateKey: env.privateKey || cfg.vapid_private_key || '',
-  };
-}
-
-const { subject, publicKey, privateKey } = loadVapid();
-webpush.setVapidDetails(subject, publicKey, privateKey);
-
-/** Valida se a subscription tem os campos mínimos */
-function isValidSub(s) {
-  return (
-    s &&
-    typeof s.endpoint === 'string' &&
-    s.keys &&
-    typeof s.keys.auth === 'string' &&
-    typeof s.keys.p256dh === 'string'
-  );
-}
-
-/** Busca subscriptions (todas enabled=true). Se userId for passado, filtra em memória. */
-async function getSubscriptions(userId = null) {
-  const snap = await admin.firestore().collection('push_subscriptions')
-    .where('enabled', '==', true)
-    .get();
-
-  let subs = snap.docs.map(d => d.data()).filter(isValidSub);
-
-  if (userId) {
-    subs = subs.filter(s => s.userId === userId);
-  }
-  return subs.map(({ endpoint, keys }) => ({ endpoint, keys }));
-}
-
-/** Envia web push para um conjunto de subscriptions */
+// Util: envia Web Push para uma lista de subscriptions (endpoint/keys)
 async function sendWebPushToSubs(subs, payload) {
   const results = await Promise.allSettled(
     subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
   );
-  const sent   = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.filter(r => r.status === 'rejected').length;
-
   return {
     ok: true,
-    sent,
-    failed,
-    results: results.map(r =>
-      r.status === 'fulfilled' ? 'ok' : (r.reason?.message || 'error')
-    ),
+    sent: results.filter(r => r.status === 'fulfilled').length,
+    failed: results.filter(r => r.status === 'rejected').length,
+    results: results.map(r => (r.status === 'fulfilled' ? 'ok' : (r.reason?.message || 'error')))
   };
 }
 
-/**
- * HTTP: POST /notify
- * body: { title, body, url, userId? }
- * - Se userId for informado, tenta enviar só para as subscriptions desse usuário;
- *   caso contrário, envia para todos habilitados.
- */
-exports.notify = functions
-  .region('us-central1')
+// HTTP pública para testes manuais
+export const notify = functions
+  .runWith({ invoker: 'public' }) // garante acesso público
   .https.onRequest(async (req, res) => {
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, error: 'method not allowed' });
     }
 
     try {
-      const { title = 'Notificação', body = 'Olá!', url = '/', userId = null } =
-        (req.body || {});
+      const { title = 'Notificação', body = 'Olá!', url = '/' } = req.body || {};
 
-      const subs = await getSubscriptions(userId);
+      // Busca subscriptions ativas
+      const snap = await admin.firestore()
+        .collection('push_subscriptions')
+        .where('enabled', '==', true)
+        .get();
+
+      const subs = snap.docs.map((d) => {
+        const { endpoint, keys } = d.data();
+        return { endpoint, keys };
+      });
+
       if (!subs.length) {
-        return res.json({
-          ok: true,
-          sent: 0,
-          failed: 0,
-          results: [],
-          note: 'no subscriptions',
-        });
+        return res.json({ ok: true, sent: 0, failed: 0, results: [] });
       }
 
+      // Payload que o SW mostra
       const payload = { title, body, url, tag: 'default' };
+
+      // Dispara
       const out = await sendWebPushToSubs(subs, payload);
       return res.json(out);
     } catch (err) {
       console.error('[notify]', err);
-      return res
-        .status(500)
-        .json({ ok: false, error: String(err?.message || err) });
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   });
 
-/**
- * Firestore trigger: envia push quando **um novo documento é criado** em `mensagens/{msgId}`
- * Campos esperados no doc (flexível):
- * - conteudo (string) → exibido no body
- * - ticketId (string) → usado para montar a URL /chamado/{ticketId}
- * - userId (string | opcional) → se existir, tenta enviar somente para esse usuário
- * - title (opcional) → título customizado
- */
-exports.onMensagemCreated = functions
-  .region('us-central1')
-  .firestore.document('mensagens/{msgId}')
-  .onCreate(async (snap, context) => {
+// Gatilho automático: quando criar documento em "mensagens"
+export const onMensagemCreated = functions.firestore
+  .document('mensagens/{msgId}')
+  .onCreate(async (snap) => {
     try {
-      const data = snap.data() || {};
-      const title = data.title || 'Nova atualização';
-      const body  = data.conteudo || 'Você tem uma nova mensagem.';
-      const url   = data.ticketId ? `/chamado/${data.ticketId}` : '/dashboard';
-      const userId = data.userId || null;
+      const msg = snap.data() || {};
+      const title = msg.remetenteNome ? `Mensagem de ${msg.remetenteNome}` : 'Nova mensagem';
+      const body = msg.conteudo || 'Atualização';
+      const url = '/dashboard';
 
-      const subs = await getSubscriptions(userId);
-      if (!subs.length) {
-        console.log('[onMensagemCreated] no subscriptions; skip');
-        return null;
-      }
+      const subsSnap = await admin.firestore()
+        .collection('push_subscriptions')
+        .where('enabled', '==', true)
+        .get();
 
-      const payload = { title, body, url, tag: 'mensagem' };
-      const out = await sendWebPushToSubs(subs, payload);
+      const subs = subsSnap.docs.map((d) => {
+        const { endpoint, keys } = d.data();
+        return { endpoint, keys };
+      });
 
-      console.log('[onMensagemCreated] result:', out);
+      if (!subs.length) return null;
+
+      const payload = { title, body, url, tag: 'mensagens' };
+      await sendWebPushToSubs(subs, payload);
       return null;
     } catch (err) {
-      console.error('[onMensagemCreated] error:', err);
+      console.error('[onMensagemCreated]', err);
       return null;
     }
   });
