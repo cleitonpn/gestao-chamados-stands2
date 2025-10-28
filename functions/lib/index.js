@@ -1,81 +1,78 @@
 // functions/lib/index.js
-import * as functions from 'firebase-functions';
-import admin from 'firebase-admin';
-import webpush from 'web-push';
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const webpush = require("web-push");
 
 admin.initializeApp();
 
-const cfg = functions.config().messaging || {};
+// ----- Carrega VAPID das functions:config
+// firebase functions:config:set messaging.vapid_subject="mailto:voce@dominio.com" messaging.vapid_public_key="..." messaging.vapid_private_key="..."
+const cfg = functions.config();
+const VAPID = cfg?.messaging || {};
 webpush.setVapidDetails(
-  cfg.vapid_subject,
-  cfg.vapid_public_key,
-  cfg.vapid_private_key
+  VAPID.vapid_subject || "mailto:admin@example.com",
+  VAPID.vapid_public_key || "",
+  VAPID.vapid_private_key || ""
 );
 
-// Util: envia Web Push para uma lista de subscriptions (endpoint/keys)
+// Util: envia WebPush para uma lista de subscriptions
 async function sendWebPushToSubs(subs, payload) {
   const results = await Promise.allSettled(
     subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
   );
   return {
     ok: true,
-    sent: results.filter(r => r.status === 'fulfilled').length,
-    failed: results.filter(r => r.status === 'rejected').length,
-    results: results.map(r => (r.status === 'fulfilled' ? 'ok' : (r.reason?.message || 'error')))
+    sent: results.filter((r) => r.status === "fulfilled").length,
+    failed: results.filter((r) => r.status === "rejected").length,
+    results: results.map((r) =>
+      r.status === "fulfilled" ? "ok" : (r.reason && r.reason.message) || "error"
+    ),
   };
 }
 
-// HTTP pública para testes manuais
-export const notify = functions
-  .runWith({ invoker: 'public' }) // garante acesso público
-  .https.onRequest(async (req, res) => {
-    if (req.method !== 'POST') {
-      return res.status(405).json({ ok: false, error: 'method not allowed' });
-    }
+// HTTP: /notify  (POST JSON: {title, body, url})
+exports.notify = functions.region("us-central1").https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "method not allowed" });
+  }
+  try {
+    const { title = "Notificação", body = "Olá!", url = "/" } = req.body || {};
 
+    const snap = await admin.firestore()
+      .collection("push_subscriptions")
+      .where("enabled", "==", true)
+      .get();
+
+    const subs = snap.docs.map((d) => {
+      const { endpoint, keys } = d.data();
+      return { endpoint, keys };
+    });
+
+    if (!subs.length) return res.json({ ok: true, sent: 0, failed: 0, results: [] });
+
+    const payload = { title, body, url, tag: "default" };
+    const out = await sendWebPushToSubs(subs, payload);
+    return res.json(out);
+  } catch (err) {
+    console.error("[notify]", err);
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// TRIGGER: dispara push quando criar documento em /mensagens
+exports.onMensagemCreated = functions
+  .region("us-central1")
+  .firestore.document("mensagens/{msgId}")
+  .onCreate(async (snap, ctx) => {
     try {
-      const { title = 'Notificação', body = 'Olá!', url = '/' } = req.body || {};
-
-      // Busca subscriptions ativas
-      const snap = await admin.firestore()
-        .collection('push_subscriptions')
-        .where('enabled', '==', true)
-        .get();
-
-      const subs = snap.docs.map((d) => {
-        const { endpoint, keys } = d.data();
-        return { endpoint, keys };
-      });
-
-      if (!subs.length) {
-        return res.json({ ok: true, sent: 0, failed: 0, results: [] });
-      }
-
-      // Payload que o SW mostra
-      const payload = { title, body, url, tag: 'default' };
-
-      // Dispara
-      const out = await sendWebPushToSubs(subs, payload);
-      return res.json(out);
-    } catch (err) {
-      console.error('[notify]', err);
-      return res.status(500).json({ ok: false, error: String(err?.message || err) });
-    }
-  });
-
-// Gatilho automático: quando criar documento em "mensagens"
-export const onMensagemCreated = functions.firestore
-  .document('mensagens/{msgId}')
-  .onCreate(async (snap) => {
-    try {
-      const msg = snap.data() || {};
-      const title = msg.remetenteNome ? `Mensagem de ${msg.remetenteNome}` : 'Nova mensagem';
-      const body = msg.conteudo || 'Atualização';
-      const url = '/dashboard';
+      const data = snap.data() || {};
+      const title = (data.titulo || "Nova mensagem");
+      const body = (data.conteudo || "Você tem uma nova mensagem");
+      const url = data.url || "/dashboard";
 
       const subsSnap = await admin.firestore()
-        .collection('push_subscriptions')
-        .where('enabled', '==', true)
+        .collection("push_subscriptions")
+        .where("enabled", "==", true)
         .get();
 
       const subs = subsSnap.docs.map((d) => {
@@ -85,11 +82,12 @@ export const onMensagemCreated = functions.firestore
 
       if (!subs.length) return null;
 
-      const payload = { title, body, url, tag: 'mensagens' };
-      await sendWebPushToSubs(subs, payload);
+      const payload = { title, body, url, tag: "mensagens" };
+      const out = await sendWebPushToSubs(subs, payload);
+      console.log("[onMensagemCreated] push:", out);
       return null;
     } catch (err) {
-      console.error('[onMensagemCreated]', err);
+      console.error("[onMensagemCreated] error:", err);
       return null;
     }
   });
