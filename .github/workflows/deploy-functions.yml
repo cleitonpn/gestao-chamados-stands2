@@ -1,3 +1,4 @@
+# .github/workflows/deploy-functions.yml (versão sem FCM key)
 name: Deploy Firebase Functions
 
 on:
@@ -10,7 +11,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,24 +30,21 @@ jobs:
           cd functions
           npm ci
 
-      # >>> CONFIGS DAS FUNCTIONS (idempotente; roda em todo deploy)
-      - name: Set functions:config (messaging)
+      - name: Set functions:config (apenas VAPID)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_ID:     ${{ secrets.FIREBASE_PROJECT_ID }} # ex.: gestao-chamados-stands
-          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+          PROJECT_ID:     ${{ secrets.FIREBASE_PROJECT_ID }}
           VAPID_PUBLIC:   ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE:  ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT:  ${{ secrets.VAPID_SUBJECT }}
         run: |
           firebase functions:config:set \
-            messaging.fcm_server_key="$FCM_SERVER_KEY" \
             messaging.vapid_public_key="$VAPID_PUBLIC" \
             messaging.vapid_private_key="$VAPID_PRIVATE" \
             messaging.vapid_subject="$VAPID_SUBJECT" \
             --project "$PROJECT_ID" --token "$FIREBASE_TOKEN"
 
-      - name: Deploy only Functions
+      - name: Deploy Functions
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           PROJECT_ID:     ${{ secrets.FIREBASE_PROJECT_ID }}
