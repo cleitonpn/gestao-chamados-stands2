@@ -1,17 +1,46 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// ✅ FUNÇÕES EXPORTADAS, INCLUINDO A createFinancialTicket
-exports.createFinancialTicket = exports.onTicketUpdated = exports.uploadImage = void 0;
+
+// ✅ FUNÇÕES EXPORTADAS, INCLUINDO A createFinancialTicket E A NOVA pushOnNotification
+// Eu adicionei 'pushOnNotification' a esta linha
+exports.pushOnNotification = exports.createFinancialTicket = exports.onTicketUpdated = exports.uploadImage = void 0;
+
+// Importações do arquivo original (v2)
 const admin = require("firebase-admin");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 
-// Inicializar Firebase Admin
+// Importações do novo código (v1 e webpush)
+const functions = require("firebase-functions");
+const webpush = require("web-push");
+
+// Inicializar Firebase Admin (APENAS UMA VEZ)
 admin.initializeApp();
-// URL da aplicação
+
+// =================================================================
+// ||        CONFIGURAÇÕES E CONSTANTES DE AMBOS ARQUIVOS       ||
+// =================================================================
+
+// Constantes do arquivo original
 const APP_URL = 'https://nbzeukei.manus.space';
-// URL do serviço SendGrid
 const SENDGRID_SERVICE_URL = 'https://p9hwiqcl8p89.manus.space';
+
+// Constantes e config do novo arquivo (Web Push)
+const REGION = "southamerica-east1"; // ajuste se sua base estiver em outra região
+const cfg = functions.config();
+
+// Configuração do WebPush com checagem de segurança
+if (cfg.webpush && cfg.webpush.public_key && cfg.webpush.private_key && cfg.webpush.subject) {
+    webpush.setVapidDetails(cfg.webpush.subject, cfg.webpush.public_key, cfg.webpush.private_key);
+} else {
+    console.warn("[webpush] runtime config ausente. Configure via functions:config:set");
+    // As notificações push não funcionarão até que a config seja definida.
+}
+
+
+// =================================================================
+// ||        FUNÇÕES AUXILIARES DO ARQUIVO ORIGINAL             ||
+// =================================================================
 
 // Função auxiliar para buscar dados do projeto
 async function getProjectData(projectId) {
@@ -421,3 +450,94 @@ exports.uploadImage = onCall(async (request) => {
         throw new HttpsError("internal", "Erro interno do servidor");
     }
 });
+
+// =================================================================
+// ||        ✅ NOVA FUNÇÃO DE WEB PUSH (v1)                     ||
+// =================================================================
+
+/**
+ * Dispara Web Push quando cria um doc em `notifications/{id}`
+ * Espera no doc: { userId, titulo, mensagem, link, tipo, lida:false, criadoEm: serverTimestamp() }
+ */
+exports.pushOnNotification = functions
+    .region(REGION) // Usando a constante REGION definida no topo
+    .firestore.document("notifications/{id}")
+    .onCreate(async (snap, ctx) => {
+        const data = snap.data() || {};
+        const {
+            userId,
+            titulo = "Atualização",
+            mensagem = "Você tem uma nova notificação.",
+            link = "/",
+            tipo = "generic",
+        } = data;
+
+        if (!userId) {
+            console.warn("[pushOnNotification] notification sem userId:", ctx.params.id);
+            return null;
+        }
+
+        // busca inscrições do usuário
+        const subsSnap = await admin.firestore()
+            .collection("push_subscriptions")
+            .where("userId", "==", userId)
+            .get();
+
+        if (subsSnap.empty) {
+            await snap.ref.set({
+                deliveredCount: 0,
+                deliveredAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.info("[pushOnNotification] sem inscrições para", userId);
+            return null;
+        }
+
+        const payload = JSON.stringify({
+            title: titulo,
+            body: mensagem,
+            icon: "/icons/icon-192x192.png",
+            badge: "/icons/badge-72x72.png",
+            data: { url: link, nId: ctx.params.id, tipo }
+        });
+
+        let delivered = 0, failed = 0;
+
+        const tasks = subsSnap.docs.map(async (d) => {
+            const sub = d.data();
+            if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+                failed++;
+                await d.ref.delete().catch(() => null);
+                return;
+            }
+
+            const pushSubscription = {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }
+            };
+
+            try {
+                await webpush.sendNotification(pushSubscription, payload, { TTL: 60 });
+                delivered++;
+            } catch (err) {
+                const status = err?.statusCode || err?.status;
+                if (status === 404 || status === 410) {
+                    // Inscrição expirada ou inválida, remove do banco
+                    await d.ref.delete().catch(() => null);
+                } else {
+                    console.error("[pushOnNotification] falha:", status, err?.message);
+                }
+                failed++;
+            }
+        });
+
+        await Promise.allSettled(tasks);
+
+        await snap.ref.set({
+            deliveredCount: delivered,
+            failedCount: failed,
+            deliveredAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        console.info(`[pushOnNotification] OK: delivered=${delivered} failed=${failed} userId=${userId}`);
+        return null;
+    });
