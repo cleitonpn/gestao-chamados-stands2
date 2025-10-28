@@ -2,13 +2,9 @@
 // Cliente de push: assina, salva no Firestore e dispara push real/broadcast.
 
 import { db as dbFromImport } from './firebaseClient';
-import {
-  doc,
-  setDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
-// ---------- DB: usa import, com fallback para global ----------
+// ---------- DB (com fallback global) ----------
 const db = dbFromImport || globalThis.__FIREBASE_DB;
 if (!db) {
   throw new Error(
@@ -18,26 +14,24 @@ if (!db) {
 }
 
 // ---------- Helpers ----------
-const isHttps = () => location.protocol === 'https:' || location.hostname === 'localhost';
+const isHttps = () =>
+  location.protocol === 'https:' || location.hostname === 'localhost';
 
 const urlBase64ToUint8Array = (base64String) => {
-  // Polyfill comum para VAPID key
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = atob(base64);
   const output = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
   return output;
 };
 
-// Lê VAPID de env (Vite expõe apenas VITE_*) — aceita dois nomes
 const getVapidPublicKey = () =>
   import.meta.env.VITE_VAPID_PUBLIC_KEY || import.meta.env.VAPID_PUBLIC_KEY || '';
 
+// ---------- APIs ----------
 export async function ensurePermission() {
-  if (!('Notification' in window)) {
-    throw new Error('Navegador não suporta Notification API.');
-  }
+  if (!('Notification' in window)) throw new Error('Navegador não suporta Notification API.');
   const current = Notification.permission;
   if (current === 'granted') return 'granted';
   if (current === 'denied') throw new Error('Permissão negada pelo usuário.');
@@ -47,25 +41,17 @@ export async function ensurePermission() {
 }
 
 export async function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) {
-    throw new Error('Service Worker não suportado no navegador.');
-  }
-  if (!isHttps()) {
-    throw new Error('Service Worker exige HTTPS (ou localhost).');
-  }
+  if (!('serviceWorker' in navigator)) throw new Error('Service Worker não suportado.');
+  if (!isHttps()) throw new Error('Service Worker exige HTTPS (ou localhost).');
 
-  // tenta caminhos comuns
   const candidates = ['/sw.js', '/firebase-messaging-sw.js', '/service-worker.js'];
-  let reg = null;
-  let lastErr = null;
+  let reg = null, lastErr = null;
 
   for (const url of candidates) {
     try {
       reg = await navigator.serviceWorker.register(url);
       if (reg) break;
-    } catch (e) {
-      lastErr = e;
-    }
+    } catch (e) { lastErr = e; }
   }
   if (!reg) throw new Error(`Falha ao registrar SW. Último erro: ${lastErr?.message || lastErr}`);
   await navigator.serviceWorker.ready;
@@ -133,7 +119,7 @@ export function clearBadge() {
   }
 }
 
-// Função extra que seu botão está importando
+// 👍 Export presente para o botão usar sem erro de build
 export async function getDebugInfo() {
   const key = getVapidPublicKey();
   const swReg = (await navigator.serviceWorker?.getRegistration()) || null;
