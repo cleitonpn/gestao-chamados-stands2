@@ -1,4 +1,3 @@
-
 // src/components/EnableNotificationsButton.jsx
 import React, { useRef, useState } from 'react';
 import {
@@ -38,10 +37,21 @@ export default function EnableNotificationsButton() {
     }
   }
 
+  // ==================================================================
+  // FUNÇÃO ATUALIZADA
+  // Agora obtém a 'subscription' (com o token) antes de chamar sendRealPush
+  // ==================================================================
   async function doTestReal() {
     setBusy(true);
     try {
-      const out = await sendRealPush({ title: 'Teste (real)', body: 'Ping do sistema de push', url: location.origin });
+      // 1. Precisamos obter a subscription atual para saber o token
+      const reg = await registerServiceWorker();
+      const sub = await getOrCreateSubscription(reg);
+      if (!sub) throw new Error('Não foi possível obter a subscription para o teste.');
+
+      // 2. Chamamos a função 'sendRealPush' atualizada, passando a subscription
+      const out = await sendRealPush(sub, { title: 'Teste (real)', body: 'Ping do sistema de push', url: location.origin });
+      
       alert('Push real enviado: ' + JSON.stringify(out?.result || out).slice(0, 160));
     } catch (e) {
       alert('Falha no push real: ' + (e?.message || e));
