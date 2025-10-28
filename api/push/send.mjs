@@ -1,79 +1,60 @@
-// api/push/send.mjs
-import webpush from 'web-push';
+// Envia push REAL para UMA subscription Web Push (VAPID).
+// Espera { subscription, title, body, data } no corpo.
 
-// opcional: pode remover; por padrão já é Node
-export const config = { runtime: 'nodejs' };
+import webpush from "web-push";
 
-function envOrNull(name) { return process.env[name] || null; }
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 
-async function readJsonBody(req) {
-  // Vercel costuma preencher req.body se Content-Type=application/json,
-  // mas garantimos aqui mesmo assim.
-  if (req.body) return req.body;
-  let data = '';
-  for await (const chunk of req) data += chunk;
-  try { return JSON.parse(data || '{}'); } catch { return {}; }
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails("mailto:admin@sistemastands.com.br", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    if (req.body && typeof req.body === "object") return resolve(req.body);
+    let data = "";
+    req.on("data", (c) => (data += c));
+    req.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ ok:false, error:'Method not allowed', method:req.method });
-    return;
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ ok: false, error: "method_not_allowed" });
   }
 
   try {
-    const body = await readJsonBody(req);
-    const { subscription, payload } = body || {};
-
-    // 🔎 Lê ENVs *dentro* do handler e checa faltas
-    const VAPID_SUBJECT = envOrNull('VAPID_SUBJECT');
-    const VAPID_PUBLIC_KEY = envOrNull('VAPID_PUBLIC_KEY');
-    const VAPID_PRIVATE_KEY = envOrNull('VAPID_PRIVATE_KEY');
-
-    const missing = [];
-    if (!VAPID_SUBJECT) missing.push('VAPID_SUBJECT');
-    if (!VAPID_PUBLIC_KEY) missing.push('VAPID_PUBLIC_KEY');
-    if (!VAPID_PRIVATE_KEY) missing.push('VAPID_PRIVATE_KEY');
-
-    if (missing.length) {
-      res.status(500).json({
-        ok: false,
-        error: 'Env faltando',
-        missing,
-        envPresent: {
-          VAPID_SUBJECT: !!VAPID_SUBJECT,
-          VAPID_PUBLIC_KEY: !!VAPID_PUBLIC_KEY,
-          VAPID_PRIVATE_KEY: !!VAPID_PRIVATE_KEY,
-        }
-      });
-      return;
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+      return res.status(500).json({ ok: false, error: "VAPID keys ausentes no servidor" });
     }
 
-    // Configura VAPID só agora (com as ENVs válidas)
-    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    const body = await readJson(req);
+    const { subscription, title, body: bodyText, data = {} } = body || {};
 
-    if (!subscription) {
-      res.status(400).json({ ok:false, error:'subscription ausente' });
-      return;
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ ok: false, error: "subscription ausente" });
     }
 
-    const data = JSON.stringify(
-      payload || { title: 'Ping', body: 'Hello from server', url: '/' }
-    );
-
-    const result = await webpush.sendNotification(subscription, data, {
-      TTL: 60,
-      urgency: 'high',
+    const payload = JSON.stringify({
+      title: title || "Push",
+      body: bodyText || "",
+      data,
+      icon: "/icons/icon-192x192.png",
+      badge: "/icons/badge-72x72.png",
     });
 
-    res.status(200).json({ ok:true, result });
+    const result = await webpush.sendNotification(subscription, payload);
+    return res.status(200).json({ ok: true, result });
   } catch (err) {
-    res.status(err?.statusCode || 500).json({
-      ok: false,
-      name: err?.name || null,
-      statusCode: err?.statusCode || 500,
-      error: err?.body || err?.message || String(err),
-      stack: err?.stack || null, // tire depois que estabilizar
-    });
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 }
