@@ -24,7 +24,7 @@ async function broadcast(msg) {
 // ——————————————————————————————————————————
 // Push → exibir notificação + pedir badge às páginas
 // Payload esperado (JSON):
-// { title, body, url, tag, badgeCount }
+// { title, body, url, tag, badgeCount, icon, badge, meta }
 // ——————————————————————————————————————————
 self.addEventListener('push', (event) => {
   event.waitUntil((async () => {
@@ -34,22 +34,26 @@ self.addEventListener('push', (event) => {
     } catch (_) {}
 
     const {
-      title = 'Atualização',
-      body = 'Você tem novidades.',
+      title = 'Notificação',
+      body = '',
       url = '/',
-      tag = 'updates',
-      badgeCount
+      tag = 'default',
+      badgeCount,
+      icon,
+      badge,
+      meta = null
     } = data;
 
     const opts = {
       body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/icon-192x192.png',
+      // se o payload não mandar, usa os padrões:
+      icon:  icon  || '/icons/icon-192x192.png',
+      badge: badge || '/icons/badge-72x72.png',
       vibrate: [100, 50, 100],
       tag,
       renotify: false,
       requireInteraction: false,
-      data: { url }
+      data: { url, meta }
     };
 
     // Exibir a notificação nativa do sistema
@@ -114,56 +118,10 @@ self.addEventListener('message', (event) => {
     const body = msg.body || 'Notificação criada pelo Service Worker.';
     const url = msg.url || '/';
     event.waitUntil(self.registration.showNotification(title, {
-      body, icon: '/icons/icon-192x192.png', badge: '/icons/icon-192x192.png', data: { url }
+      body,
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/badge-72x72.png',
+      data: { url }
     }));
   }
 });
-
-/* ==== PUSH NOTIFICATIONS – BLOCO ISOLADO (PODE COLAR NO FINAL DO sw.js) ==== */
-(() => {
-  // evita registrar duas vezes caso este arquivo seja reprocessado
-  if (self.__GCS_PUSH_SETUP__) return;
-  self.__GCS_PUSH_SETUP__ = true;
-
-  // (opcional) acelera a atualização do SW sem afetar o restante
-  try {
-    self.addEventListener('install', () => self.skipWaiting());
-    self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
-  } catch (_) {}
-
-  self.addEventListener('push', (event) => {
-    let data = {};
-    try { data = event.data?.json?.() ?? {}; } catch (e) {}
-
-    const title = data.title || 'Notificação';
-    const options = {
-      body: data.body || '',
-      icon:  data.icon  || '/icons/icon-192x192.png',   // já te passei esses ícones
-      badge: data.badge || '/icons/badge-72x72.png',
-      tag: data.tag || 'default',
-      // mantém um URL pra abrir ao clicar
-      data: {
-        url: data.url || '/',
-        // você pode passar qualquer outra info que queira recuperar no click:
-        meta: data.meta || null
-      }
-    };
-
-    event.waitUntil(self.registration.showNotification(title, options));
-  });
-
-  self.addEventListener('notificationclick', (event) => {
-    event.notification.close();
-    const url = event.notification.data?.url || '/';
-
-    // abre ou foca uma aba existente com a mesma URL
-    event.waitUntil((async () => {
-      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const same = allClients.find(c => c.url.includes(url.replace(location.origin, '')));
-      if (same && 'focus' in same) return same.focus();
-      if (self.clients.openWindow) return self.clients.openWindow(url);
-    })());
-  });
-})();
-/* ==== FIM DO BLOCO DE PUSH ==== */
-
