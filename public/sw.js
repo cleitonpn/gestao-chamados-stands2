@@ -118,3 +118,52 @@ self.addEventListener('message', (event) => {
     }));
   }
 });
+
+/* ==== PUSH NOTIFICATIONS – BLOCO ISOLADO (PODE COLAR NO FINAL DO sw.js) ==== */
+(() => {
+  // evita registrar duas vezes caso este arquivo seja reprocessado
+  if (self.__GCS_PUSH_SETUP__) return;
+  self.__GCS_PUSH_SETUP__ = true;
+
+  // (opcional) acelera a atualização do SW sem afetar o restante
+  try {
+    self.addEventListener('install', () => self.skipWaiting());
+    self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+  } catch (_) {}
+
+  self.addEventListener('push', (event) => {
+    let data = {};
+    try { data = event.data?.json?.() ?? {}; } catch (e) {}
+
+    const title = data.title || 'Notificação';
+    const options = {
+      body: data.body || '',
+      icon:  data.icon  || '/icons/icon-192x192.png',   // já te passei esses ícones
+      badge: data.badge || '/icons/badge-72x72.png',
+      tag: data.tag || 'default',
+      // mantém um URL pra abrir ao clicar
+      data: {
+        url: data.url || '/',
+        // você pode passar qualquer outra info que queira recuperar no click:
+        meta: data.meta || null
+      }
+    };
+
+    event.waitUntil(self.registration.showNotification(title, options));
+  });
+
+  self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const url = event.notification.data?.url || '/';
+
+    // abre ou foca uma aba existente com a mesma URL
+    event.waitUntil((async () => {
+      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const same = allClients.find(c => c.url.includes(url.replace(location.origin, '')));
+      if (same && 'focus' in same) return same.focus();
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    })());
+  });
+})();
+/* ==== FIM DO BLOCO DE PUSH ==== */
+
