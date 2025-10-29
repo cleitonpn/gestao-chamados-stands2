@@ -181,3 +181,13 @@ self.addEventListener('message', (event) => {
     }));
   }
 });
+
+// Bypass cache/estratégia do SW para o endpoint de notify
+self.addEventListener('fetch', (event) => {
+  const url = event.request.url;
+  if (url.includes('cloudfunctions.net/notify')) {
+    // Entrega direto da rede para evitar erros no preflight e no POST
+    event.respondWith(fetch(event.request));
+  }
+});
+
