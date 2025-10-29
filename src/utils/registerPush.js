@@ -73,3 +73,4 @@ export async function registerPushAndSave() {
 
   return sub;
 }
+export default registerPush;
