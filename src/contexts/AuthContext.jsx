@@ -9,10 +9,6 @@ import {
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
-// ⬇️ Ajuste este caminho se seu arquivo estiver em outro lugar.
-// Ex.: '../lib/push/registerPush' ou '../utils/registerpush'
-import registerPush from '../utils/registerPush';
-
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
@@ -27,10 +23,6 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
 
-  // estado opcional: status do push
-  const [pushReady, setPushReady] = useState(false);
-  const [pushError, setPushError] = useState(null);
-
   const profileUnsubRef = useRef(null);
 
   useEffect(() => {
@@ -42,8 +34,6 @@ export const AuthProvider = ({ children }) => {
       }
 
       setUser(u || null);
-      setPushReady(false);
-      setPushError(null);
 
       if (u?.uid) {
         // Escuta em tempo real o doc do usuário
@@ -69,23 +59,6 @@ export const AuthProvider = ({ children }) => {
           if (once.exists()) setUserProfile({ id: u.uid, ...once.data() });
           else setUserProfile({ id: u.uid });
         } catch {}
-
-        // 🔔 tenta registrar push para este usuário (não bloqueia a UI)
-        // - se o usuário negar, apenas registra erro e segue a vida
-        try {
-          if (typeof registerPush === 'function') {
-            registerPush(u.uid)
-              .then(() => setPushReady(true))
-              .catch((err) => {
-                console.warn('[push] falhou ao registrar:', err);
-                setPushError(String(err?.message || err));
-              });
-          }
-        } catch (err) {
-          console.warn('[push] erro inesperado ao disparar registro:', err);
-          setPushError(String(err?.message || err));
-        }
-
       } else {
         setUserProfile(null);
         setLoading(false);
@@ -102,23 +75,12 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  // expõe um método para forçar o registro de push sob demanda
-  const ensurePushSubscription = async () => {
-    if (!user?.uid) throw new Error('Usuário não autenticado');
-    if (typeof registerPush !== 'function') throw new Error('Função registerPush não encontrada (ajuste o import)');
-    setPushError(null);
-    await registerPush(user.uid);
-    setPushReady(true);
-  };
-
   const login = async (email, password) => {
     return await signInWithEmailAndPassword(auth, email, password);
   };
 
   const logout = async () => {
     await signOut(auth);
-    setPushReady(false);
-    setPushError(null);
   };
 
   const register = async (email, password, userData) => {
@@ -149,11 +111,6 @@ export const AuthProvider = ({ children }) => {
     refreshUser,
     loading,
     authInitialized,
-
-    // 🔔 push
-    pushReady,
-    pushError,
-    ensurePushSubscription,
   };
 
   return (
