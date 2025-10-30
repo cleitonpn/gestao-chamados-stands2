@@ -1,125 +1,109 @@
-// functions/index.js
-import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import * as logger from "firebase-functions/logger";
-import { getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import { getMessaging } from "firebase-admin/messaging";
+import { defineSecret } from "firebase-functions/params";
+import * as admin from "firebase-admin";
+import webpush from "web-push";
 
-if (!getApps().length) initializeApp();
-const db = getFirestore();
+if (admin.apps.length === 0) admin.initializeApp();
 
-const MESSAGES_COLLECTION = "mensagens";
-const TICKETS_COLLECTION  = "tickets";
-const USERS_COLLECTION    = "users";
-const NOTIFICATIONS_COLL  = "notifications";
+// Secrets definidos no Firebase (passo 1 do workflow)
+const WEBPUSH_SUBJECT = defineSecret("WEBPUSH_SUBJECT");
+const WEBPUSH_PUBLIC_KEY = defineSecret("WEBPUSH_PUBLIC_KEY");
+const WEBPUSH_PRIVATE_KEY = defineSecret("WEBPUSH_PRIVATE_KEY");
 
-async function getUserTokens(uid) {
-  if (!uid) return [];
-  try {
-    const userRef = db.collection(USERS_COLLECTION).doc(uid);
-    const snap = await userRef.get();
-    const uniq = new Set();
-
-    if (snap.exists) {
-      const data = snap.data() || {};
-      if (Array.isArray(data.fcmTokens))  data.fcmTokens.forEach(t => t && uniq.add(t));
-      if (Array.isArray(data.pushTokens)) data.pushTokens.forEach(t => t && uniq.add(t));
-    }
-    const tokensCol = await userRef.collection("tokens").get();
-    tokensCol.forEach(d => { const t = d.get("token"); if (t) uniq.add(t); });
-    const devicesCol = await userRef.collection("devices").get();
-    devicesCol.forEach(d => { const t = d.get("fcmToken") || d.get("token"); if (t) uniq.add(t); });
-
-    return [...uniq];
-  } catch (e) {
-    logger.error("getUserTokens error", e);
-    return [];
-  }
-}
-
-async function pushAndPersist({ recipientId, title, body, data }) {
-  await db.collection(NOTIFICATIONS_COLL).add({
-    recipientId,
+// Utilitário para montar a notificação
+function buildPayload(msg) {
+  const title = "Nova mensagem no chamado";
+  const body =
+    typeof msg?.conteudo === "string"
+      ? msg.conteudo.slice(0, 220)
+      : "Você recebeu uma atualização.";
+  return JSON.stringify({
     title,
     body,
-    data: data || {},
-    read: false,
-    createdAt: new Date(),
+    data: {
+      ticketId: msg?.ticketId || null,
+      type: msg?.type || "message",
+    },
   });
-
-  const tokens = await getUserTokens(recipientId);
-  if (!tokens.length) return;
-
-  try {
-    await getMessaging().sendEachForMulticast({
-      tokens,
-      notification: { title, body },
-      data: Object.fromEntries(Object.entries(data || {}).map(([k, v]) => [k, String(v)])),
-      android: { priority: "high" },
-      apns:   { payload: { aps: { sound: "default" } } },
-      webpush:{ headers: { Urgency: "high" } },
-    });
-  } catch (e) {
-    logger.error("FCM send error", e);
-  }
 }
 
-export const notify = onRequest({ cors: true }, async (req, res) => {
-  try {
-    const { recipientId, title, body, data } =
-      req.method === "POST" ? req.body : req.query;
+/**
+ * Dispara push quando um documento for criado em /mensagens
+ * Espera que a mensagem tenha: userId (destinatário), conteudo, ticketId
+ * Envia para todos os endpoints em /push_subscriptions com userId == destinatário
+ */
+export const onMensagemCreated = onDocumentCreated(
+  {
+    region: "us-central1",
+    document: "mensagens/{msgId}",
+    secrets: [WEBPUSH_SUBJECT, WEBPUSH_PUBLIC_KEY, WEBPUSH_PRIVATE_KEY],
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const msg = event.data?.data();
+    if (!msg) return;
 
-    if (!recipientId || !title || !body) {
-      res.status(400).json({ ok: false, error: "recipientId, title e body são obrigatórios" });
+    const userId = msg.userId;
+    if (!userId) {
+      console.log("Mensagem sem userId (destinatário), não vou enviar push.");
       return;
     }
-    await pushAndPersist({
-      recipientId: String(recipientId),
-      title: String(title),
-      body: String(body),
-      data: data || {},
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    logger.error(e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
 
-export const onMensagemCreated = onDocumentCreated(
-  `${MESSAGES_COLLECTION}/{mensagemId}`,
-  async (event) => {
-    const snap = event.data;
-    if (!snap) return;
+    // Busca inscrições do destinatário
+    const snap = await admin
+      .firestore()
+      .collection("push_subscriptions")
+      .where("userId", "==", userId)
+      .get();
 
-    const msg = snap.data();
-    const ticketId = msg.ticketId || "";
-    const actorId  = msg.userId || "";
-
-    let ticketOwnerId = null;
-    if (ticketId) {
-      const t = await db.collection(TICKETS_COLLECTION).doc(ticketId).get();
-      if (t.exists) {
-        const td = t.data() || {};
-        ticketOwnerId = td.userId || td.createdBy || td.openedById || null;
-      }
+    if (snap.empty) {
+      console.log("Sem inscrições ativas para:", userId);
+      return;
     }
 
-    const texto  = (msg.conteudo && String(msg.conteudo).replace(/\*\*/g, "")) || "Nova mensagem";
-    const titulo = msg.type === "status_update" ? "Atualização no chamado" : "Nova mensagem";
-    const body   = ticketId ? `${texto} (Chamado: ${ticketId})` : texto;
-
-    const ids = new Set([actorId, ticketOwnerId].filter(Boolean));
-    await Promise.all(
-      [...ids].map((uid) =>
-        pushAndPersist({
-          recipientId: uid,
-          title: titulo,
-          body,
-          data: { ticketId, mensagemId: snap.id, type: msg.type || "mensagem" },
-        })
-      )
+    // Configura VAPID
+    webpush.setVapidDetails(
+      WEBPUSH_SUBJECT.value(),
+      WEBPUSH_PUBLIC_KEY.value(),
+      WEBPUSH_PRIVATE_KEY.value()
     );
+
+    const payload = buildPayload(msg);
+
+    // Envia para todos os endpoints do usuário
+    const results = await Promise.allSettled(
+      snap.docs.map(async (doc) => {
+        const data = doc.data();
+
+        // Aceita dois formatos:
+        // {subscription: {...}}  OU  {endpoint, keys:{p256dh,auth}}
+        const sub =
+          data.subscription ||
+          ({
+            endpoint: data.endpoint,
+            keys: data.keys,
+          } as any);
+
+        if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+          console.warn("Inscrição inválida, removendo:", doc.id);
+          await doc.ref.delete();
+          return;
+        }
+
+        try {
+          await webpush.sendNotification(sub, payload);
+        } catch (err) {
+          console.error("Falha no web-push", err?.statusCode, err?.body || "");
+          // 404/410 = endpoint expirado → apaga para limpar
+          if (err?.statusCode === 404 || err?.statusCode === 410) {
+            await doc.ref.delete();
+          }
+          throw err;
+        }
+      })
+    );
+
+    console.log("Resultados envio:", results.map(r => r.status));
   }
 );
