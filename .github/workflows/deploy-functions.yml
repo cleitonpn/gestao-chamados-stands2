@@ -3,7 +3,6 @@ name: deploy
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
@@ -11,10 +10,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    env:
-      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-      GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp-key.json
 
     steps:
       - name: Checkout
@@ -26,17 +21,22 @@ jobs:
           node-version: 20
 
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools@latest
+        run: npm i -g firebase-tools@13
 
-      - name: Write GCP service account key
+      - name: Write Service Account file
         run: |
-          echo '${{ secrets.GCP_SA_KEY }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > "${HOME}/sa.json"
+          echo "Wrote SA to ${HOME}/sa.json"
+        shell: bash
 
-      - name: Install functions deps
-        working-directory: functions
-        run: npm ci
-
-      # Deploy T O D A S as functions (inclui a nova onMensagemCreated)
-      - name: Deploy Functions (all)
+      - name: Deploy ONLY selected functions (notify + onMensagemCreated)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.home }}/sa.json
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          firebase deploy --only functions --project "$FIREBASE_PROJECT_ID"
+          firebase use "$FIREBASE_PROJECT_ID" --non-interactive
+          # Deploy apenas as funções Node 20
+          firebase deploy \
+            --only "functions:notify,functions:onMensagemCreated" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive --force
