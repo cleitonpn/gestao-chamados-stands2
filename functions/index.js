@@ -1,207 +1,210 @@
 // functions/index.js  (CommonJS)
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const webpush = require('web-push');
 
-admin.initializeApp();
-
-// ------------------------------------------------------------
-// VAPID via Functions Config (defina com:
-//   firebase functions:config:set \
-//     messaging.vapid_subject="mailto:seu-email@dominio.com" \
-//     messaging.vapid_public_key="SUACHAVEPUBLICA" \
-//     messaging.vapid_private_key="SUACHAVEPRIVADA"
-// )
-// ------------------------------------------------------------
-const cfg = functions.config().messaging || {};
-if (!cfg.vapid_subject || !cfg.vapid_public_key || !cfg.vapid_private_key) {
-  console.warn('[notify] VAPID ausente nas config de functions. Configure antes de usar.');
-}
-try {
-  webpush.setVapidDetails(
-    cfg.vapid_subject || 'mailto:example@example.com',
-    cfg.vapid_public_key || '',
-    cfg.vapid_private_key || ''
-  );
-} catch (e) {
-  console.warn('[notify] setVapidDetails falhou (provavelmente chaves vazias).', e.message);
+if (!admin.apps.length) {
+  admin.initializeApp();
 }
 
-// ------------------------------------------------------------
-// Helper: envia Web Push para um array de PushSubscriptions
-// subs: [{ endpoint, keys: { p256dh, auth } }, ...]
-// payload: { title, body, url, tag, badgeCount, meta, icon, badge }
-// ------------------------------------------------------------
-async function sendWebPushToSubs(subs, payload) {
-  const results = await Promise.allSettled(
-    subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
+const db = admin.firestore();
+const messaging = admin.messaging();
+
+const REGION = 'us-central1';
+const ICON  = '/icons/icon-192x192.png';
+const BADGE = '/icons/badge-72x72.png';
+
+// ---------------------------------------------------------
+// Util: extrai o token FCM do endpoint do Web Push do FCM
+// ex: https://fcm.googleapis.com/fcm/send/<TOKEN>
+// ---------------------------------------------------------
+function tokenFromEndpoint(endpoint) {
+  if (typeof endpoint !== 'string') return '';
+  const parts = endpoint.split('/send/');
+  return parts[1] || '';
+}
+
+// ---------------------------------------------------------
+// Util: busca inscrições (push_subscriptions) de 1 usuário
+// retorna pares { token, ref } para permitir limpeza
+// ---------------------------------------------------------
+async function getUserTokensWithRefs(userId) {
+  const out = [];
+  if (!userId) return out;
+
+  const snap = await db
+    .collection('push_subscriptions')
+    .where('userId', '==', userId)
+    .where('enabled', '==', true)
+    .get();
+
+  snap.forEach(doc => {
+    const endpoint = doc.get('endpoint');
+    const token = tokenFromEndpoint(endpoint);
+    if (token) out.push({ token, ref: doc.ref });
+  });
+
+  return out;
+}
+
+// ---------------------------------------------------------
+// Util: envia em lotes e faz limpeza de tokens inválidos
+// ---------------------------------------------------------
+async function sendToTokens(pairs, payload) {
+  if (!pairs.length) return { sent: 0, failed: 0, results: [] };
+
+  const tokens = pairs.map(p => p.token);
+
+  const message = {
+    tokens,
+    data: {
+      url: payload.url || '/',
+      tag: payload.tag || 'default',
+    },
+    webpush: {
+      notification: {
+        title: payload.title || 'Notificação',
+        body: payload.body || '',
+        icon: payload.icon || ICON,
+        badge: payload.badge || BADGE,
+        tag: payload.tag || 'default',
+        renotify: !!payload.renotify,
+      },
+      fcmOptions: { link: payload.url || '/' },
+    },
+  };
+
+  const resp = await messaging.sendEachForMulticast(message);
+
+  // limpa tokens inválidos
+  const NEED_DISABLE = new Set([
+    'messaging/invalid-registration-token',
+    'messaging/registration-token-not-registered',
+  ]);
+
+  await Promise.all(
+    resp.responses.map(async (r, i) => {
+      if (r.error && NEED_DISABLE.has(r.error.code) && pairs[i]?.ref) {
+        try {
+          await pairs[i].ref.update({ enabled: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        } catch (_) {}
+      }
+    })
   );
+
   return {
-    ok: true,
-    sent: results.filter(r => r.status === 'fulfilled').length,
-    failed: results.filter(r => r.status === 'rejected').length,
-    results: results.map(r => (r.status === 'fulfilled' ? 'ok' : (r.reason?.message || 'error')))
+    sent: resp.successCount,
+    failed: resp.failureCount,
+    results: resp.responses.map(r => (r.error ? r.error.message : 'ok')),
   };
 }
 
-// ------------------------------------------------------------
-// HTTP manual: POST /notify
-// body: { title, body, url }
-// Busca todas as subs enabled=true (broadcast)
-// ------------------------------------------------------------
-exports.notify = functions
-  .region('us-central1')
-  .https.onRequest(async (req, res) => {
-    if (req.method !== 'POST') {
-      return res.status(405).json({ ok: false, error: 'method not allowed' });
+// ---------------------------------------------------------
+// HTTP manual (broadcast): POST /notify
+// body: { title, body, url, tag }
+// ---------------------------------------------------------
+exports.notify = functions.region(REGION).https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'method not allowed' });
+  }
+
+  try {
+    const { title = 'Notificação', body = 'Mensagem', url = '/', tag = 'default' } = req.body || {};
+
+    // busca TODAS as inscrições ativas
+    const snap = await db.collection('push_subscriptions').where('enabled', '==', true).get();
+    const pairs = [];
+    snap.forEach(doc => {
+      const t = tokenFromEndpoint(doc.get('endpoint'));
+      if (t) pairs.push({ token: t, ref: doc.ref });
+    });
+
+    if (!pairs.length) {
+      return res.json({ ok: true, sent: 0, failed: 0, results: [] });
     }
 
-    try {
-      const {
-        title = 'Notificação',
-        body = 'Olá!',
-        url = '/',
-        tag = 'default',
-        icon,
-        badge,
-        badgeCount,
-        meta = null
-      } = req.body || {};
+    const out = await sendToTokens(pairs, { title, body, url, tag });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    console.error('[notify]', e);
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
-      const db = admin.firestore();
-      const snap = await db.collection('push_subscriptions')
-        .where('enabled', '==', true)
-        .get();
-
-      const subs = snap.docs.map(d => {
-        const { endpoint, keys } = d.data() || {};
-        return endpoint && keys ? { endpoint, keys } : null;
-      }).filter(Boolean);
-
-      if (!subs.length) {
-        return res.json({ ok: true, sent: 0, failed: 0, results: [], note: 'sem subs ativas' });
-      }
-
-      const payload = {
-        title, body, url, tag,
-        icon:  icon  || '/icons/icon-192x192.png',
-        badge: badge || '/icons/badge-72x72.png',
-        badgeCount,
-        meta
-      };
-
-      const out = await sendWebPushToSubs(subs, payload);
-      return res.json(out);
-
-    } catch (err) {
-      console.error('[notify]', err);
-      return res.status(500).json({ ok: false, error: String(err?.message || err) });
-    }
-  });
-
-// ------------------------------------------------------------
-// Firestore Trigger: espelha coleção "mensagens"
-// Quando criar um doc em mensagens, envia push só para o DESTINATÁRIO (userId).
-// Campos esperados no doc de mensagens (ajuste aos seus nomes reais):
-//   userId (destinatário), conteudo, remetenteNome, type, ticketId, url
-// Cria/atualiza: pushed, pushStatus{sent,failed,error,at} no próprio doc.
-// ------------------------------------------------------------
+// ---------------------------------------------------------
+// TRIGGER: quando criar um doc em `mensagens`
+// Envia push para:
+//  - `userId` (destinatário atual da sua coleção);
+//  - `destinatarioId` (se existir);
+//  - todos em `destinatarios` (array), se existir;
+//  - **remetente** quando existir `remetenteId` OU `senderId` OU `createdBy`.
+// ---------------------------------------------------------
 exports.onMensagemCreated = functions
-  .region('us-central1')
-  .firestore
-  .document('mensagens/{mensagemId}')
+  .region(REGION)
+  .firestore.document('mensagens/{mensagemId}')
   .onCreate(async (snap, ctx) => {
     try {
-      const msg = snap.data() || {};
-      const {
-        userId,                 // DESTINATÁRIO (obrigatório para endereçar)
-        conteudo = '',
-        remetenteNome = 'Sistema',
-        type = 'mensagem',
-        ticketId = null,
-        url: urlDoDoc
-      } = msg;
+      const data = snap.data() || {};
 
-      if (!userId) {
-        console.warn('[onMensagemCreated] mensagem sem userId', ctx.params.mensagemId);
-        return snap.ref.update({
-          pushed: false,
-          pushStatus: {
-            error: 'mensagem sem userId',
-            at: admin.firestore.FieldValue.serverTimestamp()
-          }
-        });
+      // monta payload
+      const payload = {
+        title: data.titulo || 'Mensagem',
+        body: data.conteudo || '',
+        url: data.url || '/',
+        tag: data.type || 'mensagem',
+      };
+
+      // coleta UIDs únicos
+      const uidSet = new Set();
+
+      // destinatário "oficial" do seu schema atual
+      if (typeof data.userId === 'string' && data.userId) uidSet.add(data.userId);
+
+      // compatibilidade com outros campos
+      if (typeof data.destinatarioId === 'string' && data.destinatarioId) uidSet.add(data.destinatarioId);
+      if (Array.isArray(data.destinatarios)) {
+        for (const u of data.destinatarios) {
+          if (typeof u === 'string' && u) uidSet.add(u);
+        }
       }
 
-      // Título/corpo (ajuste livre)
-      const title = (type === 'status_update')
-        ? 'Atualização de status'
-        : `Nova mensagem de ${remetenteNome}`;
-      const body = String(conteudo || '').slice(0, 180);
-      const url  = urlDoDoc || (ticketId ? `/tickets/${ticketId}` : '/');
+      // remetente (enviar para ambos)
+      const maybeSender =
+        data.remetenteId || data.senderId || data.createdBy || null;
+      if (typeof maybeSender === 'string' && maybeSender) uidSet.add(maybeSender);
 
-      // Subscriptions ativas do destinatário
-      const db = admin.firestore();
-      const q = await db.collection('push_subscriptions')
-        .where('userId', '==', userId)
-        .where('enabled', '==', true)
-        .get();
-
-      const subs = q.docs.map(d => {
-        const { endpoint, keys } = d.data() || {};
-        return endpoint && keys ? { endpoint, keys } : null;
-      }).filter(Boolean);
-
-      if (!subs.length) {
-        console.log(`[onMensagemCreated] sem subs ativas para userId=${userId}`);
-        await snap.ref.update({
-          pushed: false,
-          pushStatus: {
-            sent: 0,
-            failed: 0,
-            error: 'sem subs ativas',
-            at: admin.firestore.FieldValue.serverTimestamp()
-          }
-        });
+      // nada para enviar?
+      if (!uidSet.size) {
+        console.log('[onMensagemCreated] nenhum userId/destinatário encontrado.');
         return null;
       }
 
-      const payload = {
-        title,
-        body,
-        url,
-        tag: `msg-${userId}`,
-        icon:  '/icons/icon-192x192.png',
-        badge: '/icons/badge-72x72.png',
-        badgeCount: 1,
-        meta: { type, ticketId, mensagemId: ctx.params.mensagemId }
-      };
+      // busca tokens de todos os usuários
+      const tokenPairs = [];
+      for (const uid of uidSet) {
+        const pairs = await getUserTokensWithRefs(uid);
+        tokenPairs.push(...pairs);
+      }
 
-      const out = await sendWebPushToSubs(subs, payload);
-
-      await snap.ref.update({
-        pushed: true,
-        pushStatus: {
-          sent: out.sent,
-          failed: out.failed,
-          at: admin.firestore.FieldValue.serverTimestamp()
+      // deduplica tokens
+      const seen = new Set();
+      const dedupPairs = [];
+      for (const p of tokenPairs) {
+        if (!seen.has(p.token)) {
+          seen.add(p.token);
+          dedupPairs.push(p);
         }
-      });
+      }
 
-      console.log(`[onMensagemCreated] push -> userId=${userId}`, out);
+      if (!dedupPairs.length) {
+        console.log('[onMensagemCreated] sem tokens ativos.');
+        return null;
+      }
+
+      const out = await sendToTokens(dedupPairs, payload);
+      console.log('[onMensagemCreated] resultado:', out);
       return null;
-
-    } catch (err) {
-      console.error('[onMensagemCreated] erro', err);
-      try {
-        await snap.ref.update({
-          pushed: false,
-          pushStatus: {
-            error: String(err?.message || err),
-            at: admin.firestore.FieldValue.serverTimestamp()
-          }
-        });
-      } catch (_) {}
+    } catch (e) {
+      console.error('[onMensagemCreated] erro:', e);
       return null;
     }
   });
