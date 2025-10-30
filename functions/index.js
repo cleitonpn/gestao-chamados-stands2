@@ -1,51 +1,76 @@
 // functions/index.js
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-const webpush = require('web-push');
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const webpush = require("web-push");
 
-if (!admin.apps.length) admin.initializeApp();
+admin.initializeApp();
+const db = admin.firestore();
 
-// ---- VAPID via functions:config() (opcional; se não houver, tudo bem p/ FCM puro) ----
-const cfg = (functions.config() && functions.config().messaging) || {};
+// --- VAPID (opcional para Web Push direto; mantemos para compat) ---
+const cfg = functions.config().messaging || {};
+if (!cfg.vapid_subject || !cfg.vapid_public_key || !cfg.vapid_private_key) {
+  console.warn("[notify] VAPID ausente nas config de functions. Configure se for usar web-push.");
+}
 try {
-  if (cfg.vapid_subject && cfg.vapid_public_key && cfg.vapid_private_key) {
-    webpush.setVapidDetails(cfg.vapid_subject, cfg.vapid_public_key, cfg.vapid_private_key);
-  }
+  webpush.setVapidDetails(
+    cfg.vapid_subject || "mailto:example@example.com",
+    cfg.vapid_public_key || "",
+    cfg.vapid_private_key || ""
+  );
 } catch (e) {
-    console.warn('[init webpush]', e.message);
+  console.warn("[notify] setVapidDetails falhou.", e.message);
 }
 
-// Util: extrai token FCM do endpoint WebPush (parte após /send/)
-function endpointToFcmToken(endpoint) {
-  if (!endpoint || typeof endpoint !== 'string') return null;
-  const parts = endpoint.split('/send/');
-  return parts[1] || null;
+// Util: pega tokens FCM (ou endpoints) para um userId
+async function getUserTokens(userId) {
+  const snap = await db
+    .collection("push_subscriptions")
+    .where("enabled", "==", true)
+    .where("userId", "==", userId || null)
+    .get();
+
+  const tokens = [];
+  const webPushSubs = [];
+
+  snap.forEach((doc) => {
+    const endpoint = doc.get("endpoint");
+    const keys = doc.get("keys");
+    // Tokens FCM (quando endpoint é do FCM):
+    if (endpoint && typeof endpoint === "string") {
+      const pieces = endpoint.split("/send/");
+      const token = pieces[1] || "";
+      if (token) tokens.push(token);
+    }
+    if (endpoint && keys && keys.auth && keys.p256dh) {
+      webPushSubs.push({ endpoint, keys });
+    }
+  });
+
+  return { tokens, webPushSubs };
 }
 
-// ----------------------------------------------------------------------------
-// HTTP: POST /notify  (broadcast simples para todos enabled=true)
-// body: { title, body, url }
-// ----------------------------------------------------------------------------
-exports.notify = functions.region('us-central1').https.onRequest(async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'method not allowed' });
+// HTTP: broadcast manual
+exports.notify = functions.region("us-central1").https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "method not allowed" });
   }
 
   try {
-    const { title = 'Notificação', body = 'Mensagem', url = '/' } = req.body || {};
-    const db = admin.firestore();
+    const { title = "Notificação", body = "Mensagem", url = "/" } = req.body || {};
 
-    const snap = await db.collection('push_subscriptions').where('enabled', '==', true).get();
-
+    const snap = await db.collection("push_subscriptions").where("enabled", "==", true).get();
     const tokens = [];
-    snap.forEach((doc) => {
-      const endpoint = doc.get('endpoint');
-      const token = endpointToFcmToken(endpoint);
-      if (token) tokens.push(token);
+    snap.forEach((d) => {
+      const endpoint = d.get("endpoint");
+      if (endpoint && typeof endpoint === "string") {
+        const pieces = endpoint.split("/send/");
+        const token = pieces[1] || "";
+        if (token) tokens.push(token);
+      }
     });
 
-    if (!tokens.length) {
-      return res.json({ ok: false, error: 'sem tokens válidos' });
+    if (tokens.length === 0) {
+      return res.json({ ok: true, sent: 0, failed: 0, results: [] });
     }
 
     const message = {
@@ -55,9 +80,9 @@ exports.notify = functions.region('us-central1').https.onRequest(async (req, res
         notification: {
           title,
           body,
-          icon: '/icons/icon-192.png',
-          badge: '/icons/badge.png',
-          tag: 'default',
+          icon: "/icons/icon-192.png",
+          badge: "/icons/badge.png",
+          tag: "default",
           renotify: true,
         },
         fcmOptions: { link: url },
@@ -69,78 +94,89 @@ exports.notify = functions.region('us-central1').https.onRequest(async (req, res
       ok: true,
       sent: resp.successCount,
       failed: resp.failureCount,
-      results: resp.responses.map(r => (r.error ? r.error.message : 'ok')),
+      results: resp.responses.map((r) => (r.error ? r.error.message : "ok")),
     });
   } catch (e) {
-    console.error('[notify]', e);
+    console.error("[notify] erro:", e);
     return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
 
-// ----------------------------------------------------------------------------
-// Firestore: espelha mensagens -> push
-// Coleção: mensagens
-// Campos esperados no doc: userId (remetente), destinatarioId (destino), conteudo, ticketId
-// Envia push p/ ambos: userId e destinatarioId (se existirem subs ativas).
-// ----------------------------------------------------------------------------
+// Firestore: espelhar mensagens → push para remetente E destinatário
 exports.onMensagemCreated = functions
-  .region('us-central1')
-  .firestore.document('mensagens/{msgId}')
-  .onCreate(async (snap, context) => {
+  .region("us-central1")
+  .firestore.document("mensagens/{msgId}")
+  .onCreate(async (snap) => {
     const data = snap.data() || {};
-    const { userId, destinatarioId, conteudo, ticketId } = data;
 
-    // Monte lista de usuários alvo (remetente + destinatário, sem duplicar/undefined)
-    const targets = Array.from(new Set([userId, destinatarioId].filter(Boolean)));
-    if (!targets.length) {
-      console.log('[onMensagemCreated] sem userId/destinatarioId, nada a fazer.');
-      return null;
+    const {
+      userId,             // **destinatário** (seu modelo atual)
+      destinatarioId,     // se existir, usamos também
+      remetenteId,        // quem gerou a ação
+      remetenteNome,
+      ticketId,
+      type = "mensagem",
+      conteudo = "",
+    } = data;
+
+    // Definir título/corpo
+    const titulo = remetenteNome
+      ? `📬 Nova atualização de ${remetenteNome}`
+      : "📬 Nova atualização";
+    const corpo = conteudo?.toString().slice(0, 180) || "Você tem uma nova mensagem.";
+    const url = ticketId ? `/tickets/${ticketId}` : "/";
+
+    // Montar a lista única de usuários a notificar (destinatário + remetente)
+    const ids = new Set();
+    if (userId) ids.add(userId);
+    if (destinatarioId) ids.add(destinatarioId);
+    if (remetenteId) ids.add(remetenteId);
+
+    const notifyResults = [];
+
+    for (const id of ids) {
+      const { tokens, webPushSubs } = await getUserTokens(id);
+
+      // 1) FCM (para endpoints do FCM)
+      if (tokens.length) {
+        const message = {
+          tokens,
+          data: { url, ticketId: ticketId || "", type },
+          webpush: {
+            notification: {
+              title: titulo,
+              body: corpo,
+              icon: "/icons/icon-192.png",
+              badge: "/icons/badge.png",
+              tag: "msg-" + (ticketId || "default"),
+              renotify: true,
+            },
+            fcmOptions: { link: url },
+          },
+        };
+        const resp = await admin.messaging().sendEachForMulticast(message);
+        notifyResults.push({ userId: id, fcmSent: resp.successCount, fcmFailed: resp.failureCount });
+      }
+
+      // 2) (Opcional) Web Push puro para quem não tiver FCM (mantemos, mas silencioso)
+      if (webPushSubs.length) {
+        const payload = {
+          title: titulo,
+          body: corpo,
+          url,
+          tag: "msg-" + (ticketId || "default"),
+        };
+        const results = await Promise.allSettled(
+          webPushSubs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload)))
+        );
+        notifyResults.push({
+          userId: id,
+          webPushOk: results.filter((r) => r.status === "fulfilled").length,
+          webPushFail: results.filter((r) => r.status === "rejected").length,
+        });
+      }
     }
 
-    const db = admin.firestore();
-    const allSubs = [];
-
-    // Busca inscrições ativas por userId
-    for (const uid of targets) {
-      const q = await db.collection('push_subscriptions')
-        .where('enabled', '==', true)
-        .where('userId', '==', uid)
-        .get();
-
-      q.forEach(doc => {
-        const endpoint = doc.get('endpoint');
-        const token = endpointToFcmToken(endpoint);
-        if (token) allSubs.push(token);
-      });
-    }
-
-    if (!allSubs.length) {
-      console.log('[onMensagemCreated] nenhum token ativo para os alvos');
-      return null;
-    }
-
-    const title = 'Nova mensagem';
-    const body  = conteudo ? String(conteudo).slice(0, 120) : 'Você recebeu uma nova mensagem.';
-    const url   = ticketId ? `/tickets/${ticketId}` : '/';
-
-    const msg = {
-      tokens: allSubs,
-      data: { url },
-      webpush: {
-        notification: {
-          title,
-          body,
-          icon: '/icons/icon-192.png',
-          badge: '/icons/badge.png',
-          tag: ticketId || 'mensagem',
-          renotify: false,
-        },
-        fcmOptions: { link: url },
-      },
-    };
-
-    const resp = await admin.messaging().sendEachForMulticast(msg);
-    console.log('[onMensagemCreated] sent:', resp.successCount, 'failed:', resp.failureCount);
+    console.log("[onMensagemCreated] notifyResults", notifyResults);
     return null;
   });
-
