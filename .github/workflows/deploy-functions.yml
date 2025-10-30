@@ -1,15 +1,20 @@
-name: Deploy Firebase Functions
+name: Deploy Cloud Functions
 
 on:
   push:
+    branches: [main]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
-  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
 
     steps:
       - name: Checkout
@@ -20,26 +25,20 @@ jobs:
         with:
           node-version: 20
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      - name: Write Service Account file
-      # grava o JSON da SA para um arquivo local
+      - name: Install Functions deps
         run: |
-          echo '${{ secrets.GCP_SA_KEY }}' > $GITHUB_WORKSPACE/sa.json
-
-      - name: Deploy ONLY selected functions (notify + onMensagemCreated)
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/sa.json
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-        run: |
-          # Sem "firebase use" (evita login interativo).
-          # Deploy direto apontando o projeto e só as funções desejadas.
           cd functions
-          # Se você usa pnpm para as deps de functions, instale aqui.
-          npm ci || npm i
-          cd ..
-          firebase deploy \
-            --project "$FIREBASE_PROJECT_ID" \
-            --only "functions:notify,functions:onMensagemCreated" \
-            --non-interactive --force
+          npm ci || npm install
+
+      - name: Deploy ONLY functions (notify + onMensagemCreated)
+        run: |
+          firebase deploy --only "functions:onMensagemCreated,functions:notify" \
+            --project "$FIREBASE_PROJECT_ID" --force --non-interactive
