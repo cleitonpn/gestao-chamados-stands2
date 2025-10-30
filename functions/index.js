@@ -9,13 +9,11 @@ import { getMessaging } from "firebase-admin/messaging";
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 
-// Ajuste os nomes das coleções aqui, se forem diferentes no seu projeto
-const MESSAGES_COLLECTION = "mensagens";   // <— sua coleção de mensagens
-const TICKETS_COLLECTION  = "tickets";     // <— coleção de tickets
-const USERS_COLLECTION    = "users";       // <— onde ficam os tokens
+const MESSAGES_COLLECTION = "mensagens";
+const TICKETS_COLLECTION  = "tickets";
+const USERS_COLLECTION    = "users";
 const NOTIFICATIONS_COLL  = "notifications";
 
-// Tenta achar tokens em userDoc.fcmTokens/pushTokens OU subcoleções tokens/devices
 async function getUserTokens(uid) {
   if (!uid) return [];
   try {
@@ -41,7 +39,6 @@ async function getUserTokens(uid) {
 }
 
 async function pushAndPersist({ recipientId, title, body, data }) {
-  // salva notificação (web/in-app)
   await db.collection(NOTIFICATIONS_COLL).add({
     recipientId,
     title,
@@ -51,7 +48,6 @@ async function pushAndPersist({ recipientId, title, body, data }) {
     createdAt: new Date(),
   });
 
-  // envia FCM (mobile/webpush) se tiver tokens
   const tokens = await getUserTokens(recipientId);
   if (!tokens.length) return;
 
@@ -69,7 +65,6 @@ async function pushAndPersist({ recipientId, title, body, data }) {
   }
 }
 
-// Mantive seu endpoint HTTP de compatibilidade
 export const notify = onRequest({ cors: true }, async (req, res) => {
   try {
     const { recipientId, title, body, data } =
@@ -92,7 +87,6 @@ export const notify = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-// 🔔 Dispara quando criar uma nova mensagem
 export const onMensagemCreated = onDocumentCreated(
   `${MESSAGES_COLLECTION}/{mensagemId}`,
   async (event) => {
@@ -101,9 +95,8 @@ export const onMensagemCreated = onDocumentCreated(
 
     const msg = snap.data();
     const ticketId = msg.ticketId || "";
-    const actorId  = msg.userId || ""; // quem realizou a ação (remetente)
+    const actorId  = msg.userId || "";
 
-    // tenta achar o "dono" do ticket
     let ticketOwnerId = null;
     if (ticketId) {
       const t = await db.collection(TICKETS_COLLECTION).doc(ticketId).get();
@@ -113,12 +106,10 @@ export const onMensagemCreated = onDocumentCreated(
       }
     }
 
-    // monta texto
-    const texto = (msg.conteudo && String(msg.conteudo).replace(/\*\*/g, "")) || "Nova mensagem";
+    const texto  = (msg.conteudo && String(msg.conteudo).replace(/\*\*/g, "")) || "Nova mensagem";
     const titulo = msg.type === "status_update" ? "Atualização no chamado" : "Nova mensagem";
     const body   = ticketId ? `${texto} (Chamado: ${ticketId})` : texto;
 
-    // notifica ambos (sem duplicar se forem iguais)
     const ids = new Set([actorId, ticketOwnerId].filter(Boolean));
     await Promise.all(
       [...ids].map((uid) =>
