@@ -1,10 +1,12 @@
-name: Deploy Firebase Functions
+name: deploy
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
     paths:
       - "functions/**"
+      - "firebase.json"
       - ".github/workflows/deploy-functions.yml"
 
 jobs:
@@ -15,24 +17,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
 
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools
+        run: npm i -g firebase-tools@13
 
-      # Dica: não precisa rodar npm install dentro de functions; o Firebase CLI empacota e instala no deploy.
-      # Se quiser, você pode rodar "npm ci" dentro de functions antes do deploy.
-
-      - name: Deploy Functions (all)
-        working-directory: functions
-        env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      - name: Write Service Account file
         run: |
-          npx firebase-tools deploy \
-            --only functions \
-            --project "$FIREBASE_PROJECT_ID" \
-            --token "$FIREBASE_TOKEN"
+          echo "$GCP_SA_KEY" > "${HOME}/sa.json"
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy ONLY selected functions (notify + onMensagemCreated)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/sa.json
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          firebase use "$FIREBASE_PROJECT_ID"
+          # Garante que o deploy não pegue uma codebase antiga em Node 18:
+          cat firebase.json
+          # Suba só as funções já migradas para Node 20:
+          firebase deploy --only "functions:notify,functions:onMensagemCreated" --force
