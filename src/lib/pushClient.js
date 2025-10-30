@@ -1,80 +1,74 @@
 // src/lib/pushClient.js
 
-// Helpers -------------------------------------------------------
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const output = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
-  return output;
-}
-function ab2b64(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+// ... seus outros imports/utilidades (se houver) permanecem aqui
+
+function encodeKey(key) {
+  if (!key) return null;
+  const bytes = new Uint8Array(key);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  // btoa é suficiente para debug (não precisa urlsafe/base64url aqui)
+  return btoa(binary);
 }
 
-// API para salvar no Firestore/HTTP --------------------------------
-// Se você já grava direto no Firestore pelo client, pode adaptar aqui.
-async function saveSubscriptionOnServer(payload) {
-  // Exemplo simples via HTTPS API do seu backend:
-  // return fetch("/api/savePushSubscription", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  // Se você prefere escrever direto no Firestore aqui, faça-o.
-  return fetch("/api/savePushSubscription", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
+/**
+ * Retorna informações de diagnóstico do push no navegador.
+ * Útil para conferir se há SW, permissão, subscription, endpoint e chaves.
+ */
+export async function getDebugInfo() {
+  const supported = 'Notification' in window && 'serviceWorker' in navigator;
 
-// Principal -------------------------------------------------------
-export async function ensurePushSubscription(firebaseApp, currentUserId) {
-  try {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
-    if (!currentUserId) return;
+  // Permissão do Notification API (ou "unsupported" se não houver)
+  const permission = supported ? Notification.permission : 'unsupported';
 
-    // peça permissão SOMENTE após um gesto de usuário (ex: clique no sino ou abrir a dashboard)
-    if (Notification.permission === "default") {
-      const res = await Notification.requestPermission();
-      if (res !== "granted") return;
-    }
-    if (Notification.permission !== "granted") return;
-
-    // registra SW (se já estiver registrado, retorna o mesmo)
-    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-
-    // chave pública VAPID (Base64 url-safe). Use Vite env ou injete via window.__VAPID__
-    const PUBLIC_VAPID =
-      import.meta?.env?.VITE_WEBPUSH_PUBLIC_KEY ||
-      window.__VAPID_PUBLIC_KEY__;
-
-    if (!PUBLIC_VAPID) {
-      console.warn("VAPID PUBLIC KEY ausente (VITE_WEBPUSH_PUBLIC_KEY)");
-      return;
-    }
-
-    // cria (ou obtém) a subscription web-push nativa
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID),
-      });
-    }
-
-    // monta payload no formato esperado pela function
-    const payload = {
-      userId: currentUserId,
-      endpoint: sub.endpoint,
-      keys: {
-        p256dh: ab2b64(sub.getKey("p256dh")),
-        auth: ab2b64(sub.getKey("auth")),
-      },
-      enabled: true,
-      userAgent: navigator.userAgent,
-    };
-
-    await saveSubscriptionOnServer(payload);
-  } catch (err) {
-    console.error("ensurePushSubscription error:", err);
+  // Tenta pegar o registro do SW principal do app (ajuste o caminho se diferente)
+  let registration = null;
+  if ('serviceWorker' in navigator) {
+    registration =
+      (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) ||
+      (await navigator.serviceWorker.ready).catch(() => null);
   }
+
+  const swActive = Boolean(registration?.active);
+
+  // Subscription (endpoint e chaves)
+  let subscription = null;
+  let endpoint = null;
+  let keys = null;
+
+  if (registration?.pushManager) {
+    try {
+      subscription = await registration.pushManager.getSubscription();
+      endpoint = subscription?.endpoint ?? null;
+      if (subscription) {
+        keys = {
+          p256dh: encodeKey(subscription.getKey('p256dh')),
+          auth: encodeKey(subscription.getKey('auth')),
+        };
+      }
+    } catch (_) {
+      // ignora erros de acesso ao pushManager
+    }
+  }
+
+  return {
+    supported,
+    permission,
+    swRegistered: Boolean(registration),
+    swActive,
+    hasSubscription: Boolean(subscription),
+    endpoint,
+    keys,
+    // Campos extras que às vezes ajudam:
+    userAgent: navigator.userAgent,
+  };
 }
+
+// ===== exports já existentes (mantém exatamente como você tinha) =====
+// Exemplo: (não remova os que seu app já usa)
+export { requestNotificationPermission } from './whatever-you-had';
+export { subscribeUser } from './whatever-you-had';
+export { sendTestPush } from './whatever-you-had';
+export { sendBroadcast } from './whatever-you-had';
+export { clearBadge } from './whatever-you-had';
+// ... e qualquer outro export que você já possua
