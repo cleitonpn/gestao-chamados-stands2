@@ -1,8 +1,9 @@
-name: Deploy Firebase Functions
+name: Deploy Firebase Functions (v2 + Secrets)
 
 on:
   workflow_dispatch:
   push:
+    branches: [ main ]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
@@ -10,38 +11,42 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      - name: Inject .env for Functions
-        working-directory: functions
-        run: |
-          cat > .env <<EOF
-          WEBPUSH_SUBJECT=${{ secrets.WEBPUSH_SUBJECT }}
-          WEBPUSH_PUBLIC_KEY=${{ secrets.WEBPUSH_PUBLIC_KEY }}
-          WEBPUSH_PRIVATE_KEY=${{ secrets.WEBPUSH_PRIVATE_KEY }}
-          EOF
-
+      # Opcional: instalar deps da pasta functions (evita warnings no deploy)
       - name: Install Functions deps
-        working-directory: functions
-        run: npm ci || npm i
+        run: |
+          cd functions
+          npm install --no-audit --no-fund
+          cd ..
 
-      - name: Deploy ONLY onMensagemCreated
+      # injeta/chaveia os Secrets do repositório -> Secret Manager do Firebase
+      - name: Set Firebase Secrets (VAPID)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          # Se você usa service account JSON, troque por:
-          # GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          WEBPUSH_PRIVATE_KEY: ${{ secrets.WEBPUSH_PRIVATE_KEY }}
+          WEBPUSH_PUBLIC_KEY:  ${{ secrets.WEBPUSH_PUBLIC_KEY }}
+          WEBPUSH_SUBJECT:     ${{ secrets.WEBPUSH_SUBJECT }}
         run: |
-          firebase use ${{ secrets.FIREBASE_PROJECT_ID }} --token "$FIREBASE_TOKEN"
-          firebase deploy --only "functions:onMensagemCreated" --force --token "$FIREBASE_TOKEN"
+          firebase functions:secrets:set WEBPUSH_PRIVATE_KEY --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_PRIVATE_KEY" --force
+          firebase functions:secrets:set WEBPUSH_PUBLIC_KEY  --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_PUBLIC_KEY"  --force
+          firebase functions:secrets:set WEBPUSH_SUBJECT     --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_SUBJECT"     --force
+
+      - name: Deploy ONLY onMensagemCreated (v2)
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          firebase deploy --only "functions:onMensagemCreated" --project "$FIREBASE_PROJECT_ID" --non-interactive --force
