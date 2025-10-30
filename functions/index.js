@@ -2,206 +2,155 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
-
+admin.initializeApp();
 const db = admin.firestore();
-const messaging = admin.messaging();
 
 const REGION = 'us-central1';
-const ICON  = '/icons/icon-192x192.png';
-const BADGE = '/icons/badge-72x72.png';
 
-// ---------------------------------------------------------
-// Util: extrai o token FCM do endpoint do Web Push do FCM
-// ex: https://fcm.googleapis.com/fcm/send/<TOKEN>
-// ---------------------------------------------------------
-function tokenFromEndpoint(endpoint) {
-  if (typeof endpoint !== 'string') return '';
-  const parts = endpoint.split('/send/');
-  return parts[1] || '';
+// -----------------------
+// Helpers
+// -----------------------
+async function getFcmTokensByUserIds(userIds = []) {
+  if (!userIds.length) return [];
+
+  // Firestore 'in' aceita no máx 10 itens; então fatiamos se passar.
+  const chunks = [];
+  for (let i = 0; i < userIds.length; i += 10) {
+    chunks.push(userIds.slice(i, i + 10));
+  }
+
+  const tokens = [];
+  for (const group of chunks) {
+    const snap = await db.collection('push_subscriptions')
+      .where('enabled', '==', true)
+      .where('userId', 'in', group)
+      .get();
+
+    snap.forEach(doc => {
+      const endpoint = doc.get('endpoint') || '';
+      // tokens FCM ficam após '/send/' no endpoint do FCM
+      const pieces = endpoint.split('/send/');
+      const token = pieces[1] || '';
+      if (token) tokens.push(token);
+    });
+  }
+  // remove duplicados
+  return [...new Set(tokens)];
 }
 
-// ---------------------------------------------------------
-// Util: busca inscrições (push_subscriptions) de 1 usuário
-// retorna pares { token, ref } para permitir limpeza
-// ---------------------------------------------------------
-async function getUserTokensWithRefs(userId) {
-  const out = [];
-  if (!userId) return out;
-
-  const snap = await db
-    .collection('push_subscriptions')
-    .where('userId', '==', userId)
-    .where('enabled', '==', true)
-    .get();
-
-  snap.forEach(doc => {
-    const endpoint = doc.get('endpoint');
-    const token = tokenFromEndpoint(endpoint);
-    if (token) out.push({ token, ref: doc.ref });
-  });
-
-  return out;
-}
-
-// ---------------------------------------------------------
-// Util: envia em lotes e faz limpeza de tokens inválidos
-// ---------------------------------------------------------
-async function sendToTokens(pairs, payload) {
-  if (!pairs.length) return { sent: 0, failed: 0, results: [] };
-
-  const tokens = pairs.map(p => p.token);
-
-  const message = {
+async function sendFcm(tokens, payload) {
+  if (!tokens.length) return { successCount: 0, failureCount: 0, responses: [] };
+  const resp = await admin.messaging().sendEachForMulticast({
     tokens,
-    data: {
-      url: payload.url || '/',
-      tag: payload.tag || 'default',
-    },
+    data: { url: payload.url || '/' }, // útil no click
     webpush: {
       notification: {
         title: payload.title || 'Notificação',
         body: payload.body || '',
-        icon: payload.icon || ICON,
-        badge: payload.badge || BADGE,
+        icon: payload.icon || '/icons/icon-192.png',
+        badge: payload.badge || '/icons/badge.png',
         tag: payload.tag || 'default',
         renotify: !!payload.renotify,
       },
       fcmOptions: { link: payload.url || '/' },
     },
-  };
-
-  const resp = await messaging.sendEachForMulticast(message);
-
-  // limpa tokens inválidos
-  const NEED_DISABLE = new Set([
-    'messaging/invalid-registration-token',
-    'messaging/registration-token-not-registered',
-  ]);
-
-  await Promise.all(
-    resp.responses.map(async (r, i) => {
-      if (r.error && NEED_DISABLE.has(r.error.code) && pairs[i]?.ref) {
-        try {
-          await pairs[i].ref.update({ enabled: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-        } catch (_) {}
-      }
-    })
-  );
-
-  return {
-    sent: resp.successCount,
-    failed: resp.failureCount,
-    results: resp.responses.map(r => (r.error ? r.error.message : 'ok')),
-  };
+  });
+  return resp;
 }
 
-// ---------------------------------------------------------
-// HTTP manual (broadcast): POST /notify
-// body: { title, body, url, tag }
-// ---------------------------------------------------------
+// -----------------------
+// HTTP: Broadcast manual
+// -----------------------
 exports.notify = functions.region(REGION).https.onRequest(async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'method not allowed' });
   }
-
   try {
-    const { title = 'Notificação', body = 'Mensagem', url = '/', tag = 'default' } = req.body || {};
-
-    // busca TODAS as inscrições ativas
+    const { title = 'Notificação', body = 'Mensagem', url = '/' } = req.body || {};
+    // pega TODOS os tokens enabled
     const snap = await db.collection('push_subscriptions').where('enabled', '==', true).get();
-    const pairs = [];
+    const tokens = [];
     snap.forEach(doc => {
-      const t = tokenFromEndpoint(doc.get('endpoint'));
-      if (t) pairs.push({ token: t, ref: doc.ref });
+      const endpoint = doc.get('endpoint') || '';
+      const pieces = endpoint.split('/send/');
+      const token = pieces[1] || '';
+      if (token) tokens.push(token);
     });
 
-    if (!pairs.length) {
-      return res.json({ ok: true, sent: 0, failed: 0, results: [] });
-    }
-
-    const out = await sendToTokens(pairs, { title, body, url, tag });
-    return res.json({ ok: true, ...out });
+    const resp = await sendFcm([...new Set(tokens)], { title, body, url, tag: 'broadcast' });
+    return res.json({
+      ok: true,
+      sent: resp.successCount,
+      failed: resp.failureCount,
+      results: resp.responses.map(r => (r.error ? r.error.message : 'ok')),
+    });
   } catch (e) {
-    console.error('[notify]', e);
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    console.error('[notify] error:', e);
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
 
-// ---------------------------------------------------------
-// TRIGGER: quando criar um doc em `mensagens`
-// Envia push para:
-//  - `userId` (destinatário atual da sua coleção);
-//  - `destinatarioId` (se existir);
-//  - todos em `destinatarios` (array), se existir;
-//  - **remetente** quando existir `remetenteId` OU `senderId` OU `createdBy`.
-// ---------------------------------------------------------
+// -----------------------
+// Firestore → mensagens
+// Envia push para REMETENTE e DESTINATÁRIO
+// -----------------------
 exports.onMensagemCreated = functions
   .region(REGION)
-  .firestore.document('mensagens/{mensagemId}')
+  .firestore
+  .document('mensagens/{mensagemId}')
   .onCreate(async (snap, ctx) => {
     try {
-      const data = snap.data() || {};
+      const msg = snap.data() || {};
+      const {
+        conteudo = '',
+        ticketId = '',
+        remetenteNome = 'Usuário',
+        userId: remetenteId = null,        // quem escreveu
+        destinatarioId: destinatarioIdRaw, // se existir no doc
+      } = msg;
 
-      // monta payload
-      const payload = {
-        title: data.titulo || 'Mensagem',
-        body: data.conteudo || '',
-        url: data.url || '/',
-        tag: data.type || 'mensagem',
-      };
-
-      // coleta UIDs únicos
-      const uidSet = new Set();
-
-      // destinatário "oficial" do seu schema atual
-      if (typeof data.userId === 'string' && data.userId) uidSet.add(data.userId);
-
-      // compatibilidade com outros campos
-      if (typeof data.destinatarioId === 'string' && data.destinatarioId) uidSet.add(data.destinatarioId);
-      if (Array.isArray(data.destinatarios)) {
-        for (const u of data.destinatarios) {
-          if (typeof u === 'string' && u) uidSet.add(u);
+      // Descobrir destinatário se não veio no doc:
+      // fallback: criador do chamado
+      let destinatarioId = destinatarioIdRaw || null;
+      if (!destinatarioId && ticketId) {
+        const ticketRef = db.collection('chamados').doc(ticketId);
+        const ticketSnap = await ticketRef.get();
+        if (ticketSnap.exists) {
+          const t = ticketSnap.data() || {};
+          // seu modelo usa 'criadoPor' no ticket (criador do chamado). :contentReference[oaicite:1]{index=1}
+          if (t.criadoPor) destinatarioId = t.criadoPor;
         }
       }
 
-      // remetente (enviar para ambos)
-      const maybeSender =
-        data.remetenteId || data.senderId || data.createdBy || null;
-      if (typeof maybeSender === 'string' && maybeSender) uidSet.add(maybeSender);
+      // Monta a lista de usuários que DEVEM receber:
+      // - remetente (espelhar pra ele ver a própria msg chegar)
+      // - destinatário (se conhecido)
+      const alvoIds = new Set();
+      if (remetenteId) alvoIds.add(remetenteId);
+      if (destinatarioId) alvoIds.add(destinatarioId);
 
-      // nada para enviar?
-      if (!uidSet.size) {
-        console.log('[onMensagemCreated] nenhum userId/destinatário encontrado.');
+      if (!alvoIds.size) {
+        console.log('[onMensagemCreated] ninguém para notificar (sem userIds).');
         return null;
       }
 
-      // busca tokens de todos os usuários
-      const tokenPairs = [];
-      for (const uid of uidSet) {
-        const pairs = await getUserTokensWithRefs(uid);
-        tokenPairs.push(...pairs);
-      }
-
-      // deduplica tokens
-      const seen = new Set();
-      const dedupPairs = [];
-      for (const p of tokenPairs) {
-        if (!seen.has(p.token)) {
-          seen.add(p.token);
-          dedupPairs.push(p);
-        }
-      }
-
-      if (!dedupPairs.length) {
-        console.log('[onMensagemCreated] sem tokens ativos.');
+      const tokens = await getFcmTokensByUserIds([...alvoIds]);
+      if (!tokens.length) {
+        console.log('[onMensagemCreated] sem tokens FCM para', [...alvoIds]);
         return null;
       }
 
-      const out = await sendToTokens(dedupPairs, payload);
-      console.log('[onMensagemCreated] resultado:', out);
+      const url = ticketId ? `/chamado/${ticketId}` : '/';
+      const body = conteudo.length > 120 ? conteudo.slice(0, 117) + '…' : conteudo;
+
+      const resp = await sendFcm(tokens, {
+        title: `Nova mensagem de ${remetenteNome}`,
+        body,
+        url,
+        tag: ticketId || 'mensagem',
+      });
+
+      console.log('[onMensagemCreated] push => sent:', resp.successCount, 'failed:', resp.failureCount);
       return null;
     } catch (e) {
       console.error('[onMensagemCreated] erro:', e);
