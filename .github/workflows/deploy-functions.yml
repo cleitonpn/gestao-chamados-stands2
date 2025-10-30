@@ -1,44 +1,42 @@
-name: Deploy Cloud Functions
-
+name: Deploy Firebase Functions
 on:
   push:
     branches: [main]
     paths:
-      - "functions/**"
-      - ".github/workflows/deploy-functions.yml"
+      - 'functions/**'
+      - '.github/workflows/deploy-functions.yml'
+      - 'firebase.json'
+      - '.firebaserc'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      - name: Install Functions deps
+      - name: Write Service Account file
         run: |
-          cd functions
-          npm ci || npm install
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > $GITHUB_WORKSPACE/sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$GITHUB_WORKSPACE/sa.json" >> $GITHUB_ENV
 
-      - name: Deploy ONLY functions (notify + onMensagemCreated)
+      - name: Install Functions deps
+        working-directory: functions
         run: |
-          firebase deploy --only "functions:onMensagemCreated,functions:notify" \
-            --project "$FIREBASE_PROJECT_ID" --force --non-interactive
+          if [ -f package-lock.json ]; then npm ci; else npm i; fi
+
+      - name: Deploy ONLY selected functions (notify + onMensagemCreated)
+        run: |
+          firebase deploy \
+            --only "functions:notify,functions:onMensagemCreated" \
+            --project "${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --non-interactive
