@@ -12,8 +12,8 @@ function encodeKey(key) {
 async function getSWRegistration() {
   if (!('serviceWorker' in navigator)) return null;
   const reg =
-    (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) // SW do FCM (ajuste se o seu path for outro)
-    || (await navigator.serviceWorker.ready).catch(() => null);
+    (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) ||
+    (await navigator.serviceWorker.ready).catch(() => null);
   return reg || null;
 }
 
@@ -28,7 +28,7 @@ const urlBase64ToUint8Array = (base64String) => {
 
 // ---------------- API p/ UI ----------------
 
-/** Mantém compat com o botão: garante permissão de notificação */
+/** Garante permissão de notificação */
 export async function ensurePermission() {
   if (!('Notification' in window)) return { granted: false, reason: 'unsupported' };
   if (Notification.permission === 'granted') return { granted: true };
@@ -36,7 +36,7 @@ export async function ensurePermission() {
   return { granted: res === 'granted' };
 }
 
-/** Mantém compat com o botão: registra o SW (default: firebase-messaging-sw.js) */
+/** Registra o Service Worker (padrão: FCM sw) */
 export async function registerServiceWorker(swPath = '/firebase-messaging-sw.js') {
   if (!('serviceWorker' in navigator)) return { ok: false, reason: 'unsupported' };
   try {
@@ -47,10 +47,7 @@ export async function registerServiceWorker(swPath = '/firebase-messaging-sw.js'
   }
 }
 
-/**
- * Mantém compat com o botão:
- * cria (ou retorna) a subscription no PushManager. Passe sua VAPID pública se quiser de fato assinar.
- */
+/** Cria (ou retorna) a subscription do PushManager */
 export async function getOrCreateSubscription(vapidPublicKey) {
   const perm = await ensurePermission();
   if (!perm.granted) return { ok: false, reason: 'permission_denied' };
@@ -63,7 +60,7 @@ export async function getOrCreateSubscription(vapidPublicKey) {
     if (existing) return { ok: true, subscription: existing, existed: true };
 
     if (!vapidPublicKey) {
-      // no-op seguro: permite a UI funcionar sem travar o build
+      // sem VAPID a assinatura real não acontece — mantemos no-op seguro
       return { ok: true, subscription: null, existed: false, reason: 'noop_without_vapid' };
     }
 
@@ -77,7 +74,43 @@ export async function getOrCreateSubscription(vapidPublicKey) {
   }
 }
 
-/** Debug: status do push no navegador */
+/**
+ * SALVAR subscription (stub seguro)
+ * Troque pelo seu write real (Firestore SDK no cliente OU endpoint/Function HTTP).
+ */
+export async function saveSubscriptionInFirestore({ userId, subscription, extra = {} } = {}) {
+  // no-op para não quebrar o build; retorne os dados para debug na UI
+  return {
+    ok: true,
+    simulated: true,
+    userId: userId ?? null,
+    endpoint: subscription?.endpoint ?? null,
+    keys: subscription
+      ? {
+          p256dh: encodeKey(subscription.getKey('p256dh')),
+          auth: encodeKey(subscription.getKey('auth')),
+        }
+      : null,
+    extra,
+  };
+}
+
+/**
+ * ENVIAR push real (stub seguro)
+ * Conecte ao seu endpoint de envio (ex: Function HTTP /notify) quando quiser enviar de verdade.
+ */
+export async function sendRealPush({ title, body, data, toUserId } = {}) {
+  // Exemplo futuro:
+  // await fetch('/api/notify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, body, data, toUserId }) })
+  return { ok: true, simulated: true, title, body, data, toUserId };
+}
+
+/** Broadcast (stub) */
+export async function sendBroadcast({ title, body, data } = {}) {
+  return { ok: true, simulated: true, title, body, data };
+}
+
+/** Debug do estado de push no navegador */
 export async function getDebugInfo() {
   const supported = 'Notification' in window && 'serviceWorker' in navigator;
   const permission = supported ? Notification.permission : 'unsupported';
@@ -114,19 +147,10 @@ export async function getDebugInfo() {
   };
 }
 
-/** Limpa badge (quando suportado) */
+/** Limpa o app badge (quando suportado) */
 export function clearBadge() {
   if ('clearAppBadge' in navigator) {
     // @ts-ignore
     navigator.clearAppBadge().catch(() => {});
   }
-}
-
-/** Stubs seguros — conecte ao seu endpoint/Function quando quiser de fato enviar */
-export async function sendTestPush({ title = 'Teste', body = 'Push de teste' } = {}) {
-  return { ok: true, simulated: true, title, body };
-}
-
-export async function sendBroadcast({ title, body, data } = {}) {
-  return { ok: true, simulated: true, title, body, data };
 }
