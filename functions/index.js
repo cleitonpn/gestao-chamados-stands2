@@ -1,177 +1,163 @@
-// functions/index.js
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
+// functions/index.js (CommonJS)
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
 
-admin.initializeApp();
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 
-/**
- * Util: extrai token FCM do endpoint WebPush (FCM) salvo na subscription.
- * Ex.: https://fcm.googleapis.com/fcm/send/<TOKEN_AQUI>
- */
-function extractFcmToken(endpoint) {
-  if (!endpoint || typeof endpoint !== 'string') return null;
-  const parts = endpoint.split('/send/');
+const REGION = "us-central1";
+
+// Util: extrai tokens FCM do endpoint webpush do FCM
+function extractFcmTokenFromEndpoint(endpoint) {
+  if (typeof endpoint !== "string") return null;
+  const parts = endpoint.split("/send/");
   return parts[1] || null;
 }
 
-/**
- * HTTP -> /notify
- * Broadcast opcionalmente filtrando por userIds (array) se enviado no body.
- * Aceita CORS simples.
- *
- * Body JSON:
- * { title, body, url, tag, userIds?: string[] }
- */
-exports.notify = functions
-  .region('us-central1')
-  .https.onRequest(async (req, res) => {
-    // CORS básico
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-      return res.status(204).send('');
-    }
-    if (req.method !== 'POST') {
-      return res.status(405).json({ ok: false, error: 'method not allowed' });
-    }
-
-    try {
-      const {
-        title = 'Notificação',
-        body = 'Mensagem',
-        url = '/',
-        tag = 'default',
-        userIds = [], // opcional: restringe por userId das subscriptions
-      } = req.body || {};
-
-      const db = admin.firestore();
-      let query = db.collection('push_subscriptions').where('enabled', '==', true);
-
-      const targets = Array.isArray(userIds)
-        ? userIds.filter(Boolean).map(String)
-        : [];
-
-      // Se veio filtro por usuários e couber no "in" (<=10), usa-o
-      if (targets.length > 0 && targets.length <= 10) {
-        query = query.where('userId', 'in', targets);
-      }
-
-      const snap = await query.get();
-
-      const tokens = [];
-      snap.forEach((doc) => {
-        const endpoint = doc.get('endpoint');
-        const token = extractFcmToken(endpoint);
-        if (token) tokens.push(token);
-      });
-
-      if (!tokens.length) {
-        return res.status(200).json({ ok: false, error: 'sem tokens válidos' });
-      }
-
-      const messaging = admin.messaging();
-      const message = {
-        tokens,
-        data: { url: String(url) },
-        webpush: {
-          notification: {
-            title: String(title),
-            body: String(body),
-            icon: '/icons/icon-192.png',
-            badge: '/icons/badge.png',
-            tag: String(tag || 'default'),
-            renotify: false,
-          },
-          fcmOptions: { link: String(url) },
-        },
-      };
-
-      const resp = await messaging.sendEachForMulticast(message);
-      return res.status(200).json({
-        ok: true,
-        sent: resp.successCount,
-        failed: resp.failureCount,
-        results: resp.responses.map((r) => (r.error ? r.error.message : 'ok')),
-      });
-    } catch (e) {
-      console.error('[notify] erro:', e);
-      return res.status(500).json({ ok: false, error: String(e?.message || e) });
-    }
-  });
+// Util: envia push via FCM (multicast)
+async function sendFcmMulticast(tokens, { title, body, url }) {
+  if (!tokens.length) {
+    return { successCount: 0, failureCount: 0, responses: [] };
+  }
+  const messaging = admin.messaging();
+  const message = {
+    tokens,
+    data: { url: url || "/" }, // disponível no SW
+    webpush: {
+      notification: {
+        title: title || "Notificação",
+        body: body || "",
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/badge-72x72.png",
+        tag: "default",
+        renotify: false,
+      },
+      fcmOptions: { link: url || "/" }, // abre a URL ao clicar
+    },
+  };
+  return messaging.sendEachForMulticast(message);
+}
 
 /**
- * Trigger Firestore -> ao criar documento em "mensagens"
- * Envia push para: userId (padrão) + remetenteId + destinatarioId (se existirem).
+ * HTTP: POST /notify
+ * Corpo: { title, body, url, userIds?: string[] }  // se omitir userIds => broadcast
+ * Com CORS liberado para chamadas do browser.
  */
-exports.onMensagemCreated = functions
-  .region('us-central1')
-  .firestore.document('mensagens/{mensagemId}')
-  .onCreate(async (snap, _context) => {
-    const msg = snap.data() || {};
+exports.notify = functions.region(REGION).https.onRequest(async (req, res) => {
+  // CORS simples
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  if (req.method === "OPTIONS") return res.status(204).send();
 
-    // Colete possíveis alvos (remove falsy e duplica com Set)
-    const destinos = Array.from(
-      new Set(
-        [msg.userId, msg.remetenteId, msg.destinatarioId]
-          .filter(Boolean)
-          .map(String)
-      )
-    );
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "method not allowed" });
+  }
 
-    if (!destinos.length) {
-      console.log('[onMensagemCreated] sem destinos (userId/remetenteId/destinatarioId)');
-      return null;
-    }
-
+  try {
+    const { title = "Notificação", body = "Mensagem", url = "/", userIds } =
+      req.body || {};
     const db = admin.firestore();
 
-    // Query usando "in" (máx. 10 ids)
-    let subsSnap = await db
-      .collection('push_subscriptions')
-      .where('enabled', '==', true)
-      .where('userId', 'in', destinos.slice(0, 10))
-      .get();
+    let query = db.collection("push_subscriptions").where("enabled", "==", true);
 
-    // Extraia tokens FCM
+    // Se veio lista de usuários, filtra por eles (máx 10 por 'in')
+    if (Array.isArray(userIds) && userIds.length) {
+      const ids = [...new Set(userIds)].slice(0, 10);
+      query = query.where("userId", "in", ids);
+    }
+
+    const snap = await query.get();
     const tokens = [];
-    subsSnap.forEach((doc) => {
-      const endpoint = doc.get('endpoint');
-      const token = extractFcmToken(endpoint);
+    snap.forEach((doc) => {
+      const endpoint = doc.get("endpoint");
+      const token = extractFcmTokenFromEndpoint(endpoint);
       if (token) tokens.push(token);
     });
 
-    if (!tokens.length) {
-      console.log('[onMensagemCreated] nenhum token válido para', destinos);
+    const resp = await sendFcmMulticast(tokens, { title, body, url });
+    return res.status(200).json({
+      ok: true,
+      sent: resp.successCount,
+      failed: resp.failureCount,
+      results: resp.responses.map((r) => (r.error ? r.error.message : "ok")),
+    });
+  } catch (e) {
+    console.error("[notify] error:", e);
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+/**
+ * Firestore: espelho de mensagens -> push
+ * Dispara quando um doc é criado em /mensagens/{id}
+ * Envia para: destinatarioId, remetenteId e userId (se existirem).
+ */
+exports.onMensagemCreated = functions
+  .region(REGION)
+  .firestore.document("mensagens/{msgId}")
+  .onCreate(async (snap) => {
+    const msg = snap.data() || {};
+
+    // Determina título e URL
+    const title =
+      msg.type === "status_update"
+        ? "Atualização de status"
+        : msg.type === "novo_comentario"
+        ? "Novo comentário"
+        : "Mensagem";
+    const body =
+      typeof msg.conteudo === "string"
+        ? msg.conteudo.slice(0, 180)
+        : "Você recebeu uma atualização.";
+    const url =
+      (msg.ticketId && `/tickets/${msg.ticketId}`) ||
+      (msg.projectId && `/projects/${msg.projectId}`) ||
+      "/";
+
+    // Monta alvo: destinatário + remetente + userId
+    const recipients = new Set();
+    if (msg.destinatarioId) recipients.add(String(msg.destinatarioId));
+    if (msg.remetenteId) recipients.add(String(msg.remetenteId));
+    if (msg.userId) recipients.add(String(msg.userId));
+
+    const ids = [...recipients].filter(Boolean);
+    if (ids.length === 0) {
+      console.log("[onMensagemCreated] nenhum id de destino no doc.");
       return null;
     }
 
-    const title = String(msg.title || 'Nova mensagem');
-    const body = String(msg.conteudo || 'Você recebeu uma atualização.');
-    const url = String(msg.url || '/');
+    // Busca inscrições ativas desses usuários
+    const db = admin.firestore();
+    const chunks = []; // 'in' aceita até 10
+    for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
 
-    const payload = {
-      tokens,
-      data: { url },
-      webpush: {
-        notification: {
-          title,
-          body,
-          icon: '/icons/icon-192.png',
-          badge: '/icons/badge.png',
-          tag: 'mensagens',
-          renotify: false,
-        },
-        fcmOptions: { link: url },
-      },
-    };
+    let tokens = [];
+    for (const group of chunks) {
+      const q = await db
+        .collection("push_subscriptions")
+        .where("enabled", "==", true)
+        .where("userId", "in", group)
+        .get();
+      q.forEach((d) => {
+        const token = extractFcmTokenFromEndpoint(d.get("endpoint"));
+        if (token) tokens.push(token);
+      });
+    }
 
-    const resp = await admin.messaging().sendEachForMulticast(payload);
-    console.log('[onMensagemCreated] push:', {
-      destinos,
-      sent: resp.successCount,
-      failed: resp.failureCount,
-    });
+    tokens = [...new Set(tokens)];
+    if (!tokens.length) {
+      console.log("[onMensagemCreated] sem tokens para enviar.");
+      return null;
+    }
+
+    const resp = await sendFcmMulticast(tokens, { title, body, url });
+    console.log(
+      "[onMensagemCreated] sent:",
+      resp.successCount,
+      "failed:",
+      resp.failureCount
+    );
     return null;
   });
