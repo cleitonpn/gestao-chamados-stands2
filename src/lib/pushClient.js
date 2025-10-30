@@ -1,27 +1,83 @@
 // src/lib/pushClient.js
 
-// ---------- util ----------
-
+// ---------------- utils ----------------
 function encodeKey(key) {
   if (!key) return null;
   const bytes = new Uint8Array(key);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary); // debug-friendly
+  let bin = '';
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
 }
 
 async function getSWRegistration() {
   if (!('serviceWorker' in navigator)) return null;
-  // tente pegar o SW do FCM se for o seu caminho; ajuste se necessário
   const reg =
-    (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) ||
-    (await navigator.serviceWorker.ready).catch(() => null);
+    (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) // SW do FCM (ajuste se o seu path for outro)
+    || (await navigator.serviceWorker.ready).catch(() => null);
   return reg || null;
 }
 
-// ---------- API p/ UI (mantém as assinaturas esperadas pelos componentes) ----------
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+};
 
-/** Exibe o status do push no navegador (debug) */
+// ---------------- API p/ UI ----------------
+
+/** Mantém compat com o botão: garante permissão de notificação */
+export async function ensurePermission() {
+  if (!('Notification' in window)) return { granted: false, reason: 'unsupported' };
+  if (Notification.permission === 'granted') return { granted: true };
+  const res = await Notification.requestPermission();
+  return { granted: res === 'granted' };
+}
+
+/** Mantém compat com o botão: registra o SW (default: firebase-messaging-sw.js) */
+export async function registerServiceWorker(swPath = '/firebase-messaging-sw.js') {
+  if (!('serviceWorker' in navigator)) return { ok: false, reason: 'unsupported' };
+  try {
+    const reg = await navigator.serviceWorker.register(swPath);
+    return { ok: true, registration: reg };
+  } catch (err) {
+    return { ok: false, reason: 'register_error', error: String(err) };
+  }
+}
+
+/**
+ * Mantém compat com o botão:
+ * cria (ou retorna) a subscription no PushManager. Passe sua VAPID pública se quiser de fato assinar.
+ */
+export async function getOrCreateSubscription(vapidPublicKey) {
+  const perm = await ensurePermission();
+  if (!perm.granted) return { ok: false, reason: 'permission_denied' };
+
+  const reg = await getSWRegistration();
+  if (!reg) return { ok: false, reason: 'no_service_worker' };
+
+  try {
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) return { ok: true, subscription: existing, existed: true };
+
+    if (!vapidPublicKey) {
+      // no-op seguro: permite a UI funcionar sem travar o build
+      return { ok: true, subscription: null, existed: false, reason: 'noop_without_vapid' };
+    }
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+    return { ok: true, subscription: sub, existed: false };
+  } catch (err) {
+    return { ok: false, reason: 'subscribe_error', error: String(err) };
+  }
+}
+
+/** Debug: status do push no navegador */
 export async function getDebugInfo() {
   const supported = 'Notification' in window && 'serviceWorker' in navigator;
   const permission = supported ? Notification.permission : 'unsupported';
@@ -43,9 +99,7 @@ export async function getDebugInfo() {
           auth: encodeKey(subscription.getKey('auth')),
         };
       }
-    } catch {
-      // no-op
-    }
+    } catch {}
   }
 
   return {
@@ -60,54 +114,7 @@ export async function getDebugInfo() {
   };
 }
 
-/** Pede permissão de notificação (apenas para manter compatibilidade com a UI) */
-export async function requestNotificationPermission() {
-  if (!('Notification' in window)) return { granted: false, reason: 'unsupported' };
-  if (Notification.permission === 'granted') return { granted: true };
-  const res = await Notification.requestPermission();
-  return { granted: res === 'granted' };
-}
-
-/** (Stub) Tenta assinar o usuário no Push via PushManager. Ajuste a VAPID se quiser usar de fato. */
-export async function subscribeUser({ vapidPublicKey } = {}) {
-  const info = await getDebugInfo();
-  if (!info.supported) return { ok: false, reason: 'unsupported' };
-
-  if (Notification.permission !== 'granted') {
-    const p = await requestNotificationPermission();
-    if (!p.granted) return { ok: false, reason: 'permission_denied' };
-  }
-
-  const registration = await getSWRegistration();
-  if (!registration) return { ok: false, reason: 'no_service_worker' };
-
-  // Em projetos reais, passe uma VAPID pública válida (ex.: import.meta.env.VITE_VAPID_PUBLIC)
-  if (!vapidPublicKey) {
-    // Mantém no-op para não quebrar nada
-    return { ok: true, reason: 'noop_without_vapid' };
-  }
-
-  const urlBase64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-    return outputArray;
-  };
-
-  try {
-    const sub = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    });
-    return { ok: true, subscription: sub };
-  } catch (err) {
-    return { ok: false, reason: 'subscribe_error', error: String(err) };
-  }
-}
-
-/** Limpa a badgezinha do app (quando suportado) */
+/** Limpa badge (quando suportado) */
 export function clearBadge() {
   if ('clearAppBadge' in navigator) {
     // @ts-ignore
@@ -115,13 +122,11 @@ export function clearBadge() {
   }
 }
 
-/** (Stub) Dispara um push de teste. Conecte com seu endpoint quando quiser. */
+/** Stubs seguros — conecte ao seu endpoint/Function quando quiser de fato enviar */
 export async function sendTestPush({ title = 'Teste', body = 'Push de teste' } = {}) {
-  // Aqui apenas no-op para não quebrar a UI. Ligue com seu back depois.
   return { ok: true, simulated: true, title, body };
 }
 
-/** (Stub) Broadcast para todos. Conecte com Cloud Function/endpoint quando quiser. */
 export async function sendBroadcast({ title, body, data } = {}) {
   return { ok: true, simulated: true, title, body, data };
 }
