@@ -1,12 +1,17 @@
-name: Deploy Firebase Functions
+name: Deploy Firebase Functions (single)
+
 on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: "Nome da função para deploy"
+        default: "onMensagemCreated"
+        required: true
   push:
-    branches: [main]
     paths:
-      - 'functions/**'
-      - '.github/workflows/deploy-functions.yml'
-      - 'firebase.json'
-      - '.firebaserc'
+      - "functions/**"
+      - "firebase.json"
+      - ".firebaserc"
 
 jobs:
   deploy:
@@ -16,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,19 +29,14 @@ jobs:
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      - name: Write Service Account file
+      - name: Write Service Account to file
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > $GITHUB_WORKSPACE/sa.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$GITHUB_WORKSPACE/sa.json" >> $GITHUB_ENV
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > $HOME/gcp-sa.json
 
-      - name: Install Functions deps
-        working-directory: functions
+      - name: Deploy ONLY one function (Gen1)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: $HOME/gcp-sa.json
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          if [ -f package-lock.json ]; then npm ci; else npm i; fi
-
-      - name: Deploy ONLY selected functions (notify + onMensagemCreated)
-        run: |
-          firebase deploy \
-            --only "functions:notify,functions:onMensagemCreated" \
-            --project "${{ secrets.FIREBASE_PROJECT_ID }}" \
-            --non-interactive
+          firebase use "$FIREBASE_PROJECT_ID" --project "$FIREBASE_PROJECT_ID"
+          firebase deploy --only "functions:${{ github.event.inputs.function_name || 'onMensagemCreated' }}" --force
