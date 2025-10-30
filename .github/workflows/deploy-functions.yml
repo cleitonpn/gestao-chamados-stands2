@@ -1,8 +1,8 @@
 name: deploy
 
 on:
-  workflow_dispatch:
   push:
+    branches: [ main ]
     paths:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
@@ -11,11 +11,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 20 (CLI)
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -25,18 +28,14 @@ jobs:
 
       - name: Write Service Account file
         run: |
-          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > "${HOME}/sa.json"
-          echo "Wrote SA to ${HOME}/sa.json"
-        shell: bash
+          echo "${{ secrets.GCP_SA_KEY }}" > $GITHUB_WORKSPACE/sa.json
+          echo "Wrote SA to $GITHUB_WORKSPACE/sa.json"
 
       - name: Deploy ONLY selected functions (notify + onMensagemCreated)
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.home }}/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/sa.json
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          firebase use "$FIREBASE_PROJECT_ID" --non-interactive
-          # Deploy apenas as funções Node 20
-          firebase deploy \
+          firebase --project "$FIREBASE_PROJECT_ID" deploy \
             --only "functions:notify,functions:onMensagemCreated" \
-            --project "$FIREBASE_PROJECT_ID" \
-            --non-interactive --force
+            --force
