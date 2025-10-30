@@ -1,109 +1,98 @@
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { defineSecret } from "firebase-functions/params";
-import * as admin from "firebase-admin";
-import webpush from "web-push";
+// functions/index.js
+// Cloud Function que envia WebPush quando um doc é criado em `mensagens/{id}`.
+// Versão CommonJS para funcionar sem "type":"module".
+// Requisitos no functions/package.json:
+//   "dependencies": {
+//     "firebase-admin": "^12.5.0",
+//     "firebase-functions": "^4.6.0",
+//     "web-push": "^3.6.7"
+//   },
+//   "engines": { "node": "20" }
 
-if (admin.apps.length === 0) admin.initializeApp();
+const admin = require('firebase-admin');
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const logger = require('firebase-functions/logger');
+const webpush = require('web-push');
 
-// Secrets definidos no Firebase (passo 1 do workflow)
-const WEBPUSH_SUBJECT = defineSecret("WEBPUSH_SUBJECT");
-const WEBPUSH_PUBLIC_KEY = defineSecret("WEBPUSH_PUBLIC_KEY");
-const WEBPUSH_PRIVATE_KEY = defineSecret("WEBPUSH_PRIVATE_KEY");
+try {
+  admin.initializeApp();
+} catch (_) {
+  // noop (evita erro em ambientes que inicializam duas vezes)
+}
 
-// Utilitário para montar a notificação
-function buildPayload(msg) {
-  const title = "Nova mensagem no chamado";
-  const body =
-    typeof msg?.conteudo === "string"
-      ? msg.conteudo.slice(0, 220)
-      : "Você recebeu uma atualização.";
+// As chaves VAPID devem vir de variáveis de ambiente/Secrets do GitHub Actions
+const VAPID_SUBJECT = process.env.WEBPUSH_SUBJECT;
+const VAPID_PUBLIC_KEY = process.env.WEBPUSH_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.WEBPUSH_PRIVATE_KEY;
+
+if (!VAPID_SUBJECT || !VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  logger.warn('WEBPUSH_* env vars ausentes — os pushes irão falhar.');
+}
+
+webpush.setVapidDetails(VAPID_SUBJECT || 'mailto:admin@example.com', VAPID_PUBLIC_KEY || '', VAPID_PRIVATE_KEY || '');
+
+/**
+ * Monta o payload do push (title/body + deep-link)
+ */
+function buildPayloadFromMessage(msg) {
+  const link = msg.link || (msg.ticketId ? `/chamado/${msg.ticketId}` : '/');
   return JSON.stringify({
-    title,
-    body,
-    data: {
-      ticketId: msg?.ticketId || null,
-      type: msg?.type || "message",
-    },
+    title: msg.title || 'Nova mensagem',
+    body: msg.body || msg.conteudo || '',
+    data: { link },
   });
 }
 
 /**
- * Dispara push quando um documento for criado em /mensagens
- * Espera que a mensagem tenha: userId (destinatário), conteudo, ticketId
- * Envia para todos os endpoints em /push_subscriptions com userId == destinatário
+ * onMensagemCreated — dispara push quando um novo documento é criado em `mensagens/`.
  */
-export const onMensagemCreated = onDocumentCreated(
-  {
-    region: "us-central1",
-    document: "mensagens/{msgId}",
-    secrets: [WEBPUSH_SUBJECT, WEBPUSH_PUBLIC_KEY, WEBPUSH_PRIVATE_KEY],
-    timeoutSeconds: 60,
-    memory: "256MiB",
-  },
-  async (event) => {
-    const msg = event.data?.data();
-    if (!msg) return;
+exports.onMensagemCreated = onDocumentCreated('mensagens/{id}', async (event) => {
+  const snap = event.data;
+  if (!snap) return;
 
-    const userId = msg.userId;
-    if (!userId) {
-      console.log("Mensagem sem userId (destinatário), não vou enviar push.");
-      return;
-    }
+  const msg = snap.data();
+  const { userId, title, body } = msg || {};
 
-    // Busca inscrições do destinatário
-    const snap = await admin
-      .firestore()
-      .collection("push_subscriptions")
-      .where("userId", "==", userId)
-      .get();
-
-    if (snap.empty) {
-      console.log("Sem inscrições ativas para:", userId);
-      return;
-    }
-
-    // Configura VAPID
-    webpush.setVapidDetails(
-      WEBPUSH_SUBJECT.value(),
-      WEBPUSH_PUBLIC_KEY.value(),
-      WEBPUSH_PRIVATE_KEY.value()
-    );
-
-    const payload = buildPayload(msg);
-
-    // Envia para todos os endpoints do usuário
-    const results = await Promise.allSettled(
-      snap.docs.map(async (doc) => {
-        const data = doc.data();
-
-        // Aceita dois formatos:
-        // {subscription: {...}}  OU  {endpoint, keys:{p256dh,auth}}
-        const sub =
-          data.subscription ||
-          ({
-            endpoint: data.endpoint,
-            keys: data.keys,
-          } as any);
-
-        if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
-          console.warn("Inscrição inválida, removendo:", doc.id);
-          await doc.ref.delete();
-          return;
-        }
-
-        try {
-          await webpush.sendNotification(sub, payload);
-        } catch (err) {
-          console.error("Falha no web-push", err?.statusCode, err?.body || "");
-          // 404/410 = endpoint expirado → apaga para limpar
-          if (err?.statusCode === 404 || err?.statusCode === 410) {
-            await doc.ref.delete();
-          }
-          throw err;
-        }
-      })
-    );
-
-    console.log("Resultados envio:", results.map(r => r.status));
+  // Campos mínimos para notificar
+  if (!userId || !(title || body || msg?.conteudo)) {
+    logger.warn('Doc em mensagens sem campos mínimos', { id: event.params.id, msg });
+    return;
   }
-);
+
+  // Busca inscrições de push do destinatário
+  const subsSnap = await admin
+    .firestore()
+    .collection('push_subscriptions')
+    .where('userId', '==', userId)
+    .where('enabled', '==', true)
+    .get();
+
+  if (subsSnap.empty) {
+    logger.info('Nenhuma inscrição ativa para o usuário', { userId });
+    return;
+  }
+
+  const payload = buildPayloadFromMessage(msg);
+
+  const tasks = subsSnap.docs.map(async (d) => {
+    const sub = d.data();
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: {
+            auth: sub.keys?.auth,
+            p256dh: sub.keys?.p256dh,
+          },
+        },
+        payload,
+        { TTL: 60 }
+      );
+      logger.info('Push enviado', { userId, subId: d.id });
+    } catch (err) {
+      logger.error('Falha ao enviar push', { userId, subId: d.id, err: err?.message });
+    }
+  });
+
+  await Promise.allSettled(tasks);
+});
