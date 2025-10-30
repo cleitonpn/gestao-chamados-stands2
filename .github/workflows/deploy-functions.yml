@@ -12,54 +12,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Post Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
 
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools@13
+        run: npm i -g firebase-tools
 
-      # grava a credencial do GCP (service account JSON) vinda do secret GCP_SA_KEY
-      - name: Write GCP credentials file
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        run: |
-          echo "$GCP_SA_KEY" > $HOME/gcp-key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/gcp-key.json" >> $GITHUB_ENV
+      # Dica: não precisa rodar npm install dentro de functions; o Firebase CLI empacota e instala no deploy.
+      # Se quiser, você pode rodar "npm ci" dentro de functions antes do deploy.
 
-      # configura as chaves VAPID no functions:config
-      - name: Set functions:config (VAPID)
-        env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          VAPID_SUBJECT:      ${{ secrets.VAPID_SUBJECT }}
-          VAPID_PUBLIC:       ${{ secrets.VAPID_PUBLIC }}
-          VAPID_PRIVATE:      ${{ secrets.VAPID_PRIVATE }}
-        run: |
-          firebase functions:config:set \
-            messaging.vapid_subject="$VAPID_SUBJECT" \
-            messaging.vapid_public_key="$VAPID_PUBLIC" \
-            messaging.vapid_private_key="$VAPID_PRIVATE" \
-            --project "$FIREBASE_PROJECT_ID"
-
-      # instala deps ***apenas*** dentro de functions/
-      - name: Install functions deps
+      - name: Deploy Functions (all)
         working-directory: functions
-        run: npm ci || npm i
-
-      # (opcional) mostra versões
-      - name: Show versions
-        run: |
-          node -v
-          npm -v
-          firebase --version
-
-      # DEPLOY ***somente*** da função notify (não deleta nada)
-      - name: Deploy Functions (only notify)
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          firebase deploy --only "functions:notify" --project "$FIREBASE_PROJECT_ID"
+          npx firebase-tools deploy \
+            --only functions \
+            --project "$FIREBASE_PROJECT_ID" \
+            --token "$FIREBASE_TOKEN"
