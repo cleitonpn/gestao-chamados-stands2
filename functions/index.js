@@ -1,89 +1,90 @@
-// functions/index.js  (CommonJS)
+// functions/index.js
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 
-if (admin.apps.length === 0) {
-  admin.initializeApp();
+admin.initializeApp();
+
+/**
+ * Util: extrai token FCM do endpoint WebPush (FCM) salvo na subscription.
+ * Ex.: https://fcm.googleapis.com/fcm/send/<TOKEN_AQUI>
+ */
+function extractFcmToken(endpoint) {
+  if (!endpoint || typeof endpoint !== 'string') return null;
+  const parts = endpoint.split('/send/');
+  return parts[1] || null;
 }
 
-// ------------------------------
-// helper: extrai token FCM do endpoint salvo
-// ------------------------------
-function tokenFromEndpoint(endpoint = '') {
-  // endpoints vem como ".../fcm/send/<TOKEN>"
-  const parts = String(endpoint).split('/send/');
-  return parts[1] || '';
-}
-
-// ------------------------------
-// helper: busca tokens FCM pelos userIds
-// ------------------------------
-async function getFcmTokensByUserIds(userIds = []) {
-  const db = admin.firestore();
-  const tokens = [];
-
-  if (!Array.isArray(userIds) || userIds.length === 0) return tokens;
-
-  // Firestore 'in' aceita até 10 itens (aqui são 1 ou 2)
-  const snap = await db
-    .collection('push_subscriptions')
-    .where('enabled', '==', true)
-    .where('userId', 'in', userIds)
-    .get();
-
-  snap.forEach((doc) => {
-    const endpoint = doc.get('endpoint');
-    const t = tokenFromEndpoint(endpoint);
-    if (t) tokens.push(t);
-  });
-
-  return tokens;
-}
-
-// =======================================================
-// HTTP: /notify  (broadcast manual / testes)
-// =======================================================
+/**
+ * HTTP -> /notify
+ * Broadcast opcionalmente filtrando por userIds (array) se enviado no body.
+ * Aceita CORS simples.
+ *
+ * Body JSON:
+ * { title, body, url, tag, userIds?: string[] }
+ */
 exports.notify = functions
   .region('us-central1')
   .https.onRequest(async (req, res) => {
+    // CORS básico
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).send('');
+    }
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, error: 'method not allowed' });
     }
 
     try {
-      const { title = 'Notificação', body = 'Mensagem', url = '/' } = req.body || {};
-      const db = admin.firestore();
+      const {
+        title = 'Notificação',
+        body = 'Mensagem',
+        url = '/',
+        tag = 'default',
+        userIds = [], // opcional: restringe por userId das subscriptions
+      } = req.body || {};
 
-      const snap = await db
-        .collection('push_subscriptions')
-        .where('enabled', '==', true)
-        .get();
+      const db = admin.firestore();
+      let query = db.collection('push_subscriptions').where('enabled', '==', true);
+
+      const targets = Array.isArray(userIds)
+        ? userIds.filter(Boolean).map(String)
+        : [];
+
+      // Se veio filtro por usuários e couber no "in" (<=10), usa-o
+      if (targets.length > 0 && targets.length <= 10) {
+        query = query.where('userId', 'in', targets);
+      }
+
+      const snap = await query.get();
 
       const tokens = [];
-      snap.forEach((d) => {
-        const endpoint = d.get('endpoint');
-        const t = tokenFromEndpoint(endpoint);
-        if (t) tokens.push(t);
+      snap.forEach((doc) => {
+        const endpoint = doc.get('endpoint');
+        const token = extractFcmToken(endpoint);
+        if (token) tokens.push(token);
       });
 
-      if (tokens.length === 0) {
+      if (!tokens.length) {
         return res.status(200).json({ ok: false, error: 'sem tokens válidos' });
       }
 
       const messaging = admin.messaging();
       const message = {
         tokens,
-        data: { url },
+        data: { url: String(url) },
         webpush: {
           notification: {
-            title,
-            body,
+            title: String(title),
+            body: String(body),
             icon: '/icons/icon-192.png',
             badge: '/icons/badge.png',
-            tag: 'default',
-            renotify: true,
+            tag: String(tag || 'default'),
+            renotify: false,
           },
-          fcmOptions: { link: url },
+          fcmOptions: { link: String(url) },
         },
       };
 
@@ -96,53 +97,61 @@ exports.notify = functions
       });
     } catch (e) {
       console.error('[notify] erro:', e);
-      return res.status(500).json({ ok: false, error: String(e.message || e) });
+      return res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
 
-// =======================================================
-// Firestore: espelha push quando cria doc em "mensagens"
-// Envia para REMETENTE (userId) e DESTINATÁRIO (destinatarioId, se houver)
-// =======================================================
+/**
+ * Trigger Firestore -> ao criar documento em "mensagens"
+ * Envia push para: userId (padrão) + remetenteId + destinatarioId (se existirem).
+ */
 exports.onMensagemCreated = functions
   .region('us-central1')
   .firestore.document('mensagens/{mensagemId}')
-  .onCreate(async (snap, context) => {
-    const data = snap.data() || {};
+  .onCreate(async (snap, _context) => {
+    const msg = snap.data() || {};
 
-    // Campos esperados
-    const {
-      conteudo = '',
-      ticketId = '',
-      remetenteNome = 'Mensagem',
-      userId,               // remetente
-      destinatarioId,       // destinatário (se o frontend preencher)
-    } = data;
-
-    // Define destino: remetente + destinatário (sem duplicar / sem nulos)
-    const destinatarios = Array.from(
-      new Set([userId, destinatarioId].filter(Boolean))
+    // Colete possíveis alvos (remove falsy e duplica com Set)
+    const destinos = Array.from(
+      new Set(
+        [msg.userId, msg.remetenteId, msg.destinatarioId]
+          .filter(Boolean)
+          .map(String)
+      )
     );
 
-    if (destinatarios.length === 0) {
-      console.warn('[onMensagemCreated] Sem userId/destinatarioId no documento, ignorando.');
+    if (!destinos.length) {
+      console.log('[onMensagemCreated] sem destinos (userId/remetenteId/destinatarioId)');
       return null;
     }
 
-    // Monta título/corpo/url
-    const title = `📨 ${remetenteNome}`;
-    const body = String(conteudo).slice(0, 180); // evita corpo gigantes
-    const url = ticketId ? `/tickets/${ticketId}` : '/';
+    const db = admin.firestore();
 
-    // Busca tokens de push dos destinatários
-    const tokens = await getFcmTokensByUserIds(destinatarios);
-    if (tokens.length === 0) {
-      console.warn('[onMensagemCreated] Sem tokens para', destinatarios);
+    // Query usando "in" (máx. 10 ids)
+    let subsSnap = await db
+      .collection('push_subscriptions')
+      .where('enabled', '==', true)
+      .where('userId', 'in', destinos.slice(0, 10))
+      .get();
+
+    // Extraia tokens FCM
+    const tokens = [];
+    subsSnap.forEach((doc) => {
+      const endpoint = doc.get('endpoint');
+      const token = extractFcmToken(endpoint);
+      if (token) tokens.push(token);
+    });
+
+    if (!tokens.length) {
+      console.log('[onMensagemCreated] nenhum token válido para', destinos);
       return null;
     }
 
-    const messaging = admin.messaging();
-    const message = {
+    const title = String(msg.title || 'Nova mensagem');
+    const body = String(msg.conteudo || 'Você recebeu uma atualização.');
+    const url = String(msg.url || '/');
+
+    const payload = {
       tokens,
       data: { url },
       webpush: {
@@ -151,16 +160,16 @@ exports.onMensagemCreated = functions
           body,
           icon: '/icons/icon-192.png',
           badge: '/icons/badge.png',
-          tag: `mensagem_${ticketId || 'default'}`,
+          tag: 'mensagens',
           renotify: false,
         },
         fcmOptions: { link: url },
       },
     };
 
-    const resp = await messaging.sendEachForMulticast(message);
-    console.log('[onMensagemCreated] push =>', {
-      destinatarios,
+    const resp = await admin.messaging().sendEachForMulticast(payload);
+    console.log('[onMensagemCreated] push:', {
+      destinos,
       sent: resp.successCount,
       failed: resp.failureCount,
     });
