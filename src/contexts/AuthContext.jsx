@@ -11,7 +11,7 @@ import { auth, db } from '../config/firebase';
 
 // ⬇️ Ajuste este caminho se seu arquivo estiver em outro lugar.
 // Ex.: '../lib/push/registerPush' ou '../utils/registerpush'
-import registerPush from '../registerpush';
+import registerPush from '../utils/registerPush';
 
 const AuthContext = createContext(null);
 
