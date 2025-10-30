@@ -1,37 +1,34 @@
 // src/lib/pushClient.js
 
-// ... seus outros imports/utilidades (se houver) permanecem aqui
+// ---------- util ----------
 
 function encodeKey(key) {
   if (!key) return null;
   const bytes = new Uint8Array(key);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  // btoa é suficiente para debug (não precisa urlsafe/base64url aqui)
-  return btoa(binary);
+  return btoa(binary); // debug-friendly
 }
 
-/**
- * Retorna informações de diagnóstico do push no navegador.
- * Útil para conferir se há SW, permissão, subscription, endpoint e chaves.
- */
+async function getSWRegistration() {
+  if (!('serviceWorker' in navigator)) return null;
+  // tente pegar o SW do FCM se for o seu caminho; ajuste se necessário
+  const reg =
+    (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) ||
+    (await navigator.serviceWorker.ready).catch(() => null);
+  return reg || null;
+}
+
+// ---------- API p/ UI (mantém as assinaturas esperadas pelos componentes) ----------
+
+/** Exibe o status do push no navegador (debug) */
 export async function getDebugInfo() {
   const supported = 'Notification' in window && 'serviceWorker' in navigator;
-
-  // Permissão do Notification API (ou "unsupported" se não houver)
   const permission = supported ? Notification.permission : 'unsupported';
 
-  // Tenta pegar o registro do SW principal do app (ajuste o caminho se diferente)
-  let registration = null;
-  if ('serviceWorker' in navigator) {
-    registration =
-      (await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')) ||
-      (await navigator.serviceWorker.ready).catch(() => null);
-  }
-
+  const registration = await getSWRegistration();
   const swActive = Boolean(registration?.active);
 
-  // Subscription (endpoint e chaves)
   let subscription = null;
   let endpoint = null;
   let keys = null;
@@ -46,8 +43,8 @@ export async function getDebugInfo() {
           auth: encodeKey(subscription.getKey('auth')),
         };
       }
-    } catch (_) {
-      // ignora erros de acesso ao pushManager
+    } catch {
+      // no-op
     }
   }
 
@@ -59,16 +56,72 @@ export async function getDebugInfo() {
     hasSubscription: Boolean(subscription),
     endpoint,
     keys,
-    // Campos extras que às vezes ajudam:
     userAgent: navigator.userAgent,
   };
 }
 
-// ===== exports já existentes (mantém exatamente como você tinha) =====
-// Exemplo: (não remova os que seu app já usa)
-export { requestNotificationPermission } from './whatever-you-had';
-export { subscribeUser } from './whatever-you-had';
-export { sendTestPush } from './whatever-you-had';
-export { sendBroadcast } from './whatever-you-had';
-export { clearBadge } from './whatever-you-had';
-// ... e qualquer outro export que você já possua
+/** Pede permissão de notificação (apenas para manter compatibilidade com a UI) */
+export async function requestNotificationPermission() {
+  if (!('Notification' in window)) return { granted: false, reason: 'unsupported' };
+  if (Notification.permission === 'granted') return { granted: true };
+  const res = await Notification.requestPermission();
+  return { granted: res === 'granted' };
+}
+
+/** (Stub) Tenta assinar o usuário no Push via PushManager. Ajuste a VAPID se quiser usar de fato. */
+export async function subscribeUser({ vapidPublicKey } = {}) {
+  const info = await getDebugInfo();
+  if (!info.supported) return { ok: false, reason: 'unsupported' };
+
+  if (Notification.permission !== 'granted') {
+    const p = await requestNotificationPermission();
+    if (!p.granted) return { ok: false, reason: 'permission_denied' };
+  }
+
+  const registration = await getSWRegistration();
+  if (!registration) return { ok: false, reason: 'no_service_worker' };
+
+  // Em projetos reais, passe uma VAPID pública válida (ex.: import.meta.env.VITE_VAPID_PUBLIC)
+  if (!vapidPublicKey) {
+    // Mantém no-op para não quebrar nada
+    return { ok: true, reason: 'noop_without_vapid' };
+  }
+
+  const urlBase64ToUint8Array = (base64String) => {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  };
+
+  try {
+    const sub = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+    return { ok: true, subscription: sub };
+  } catch (err) {
+    return { ok: false, reason: 'subscribe_error', error: String(err) };
+  }
+}
+
+/** Limpa a badgezinha do app (quando suportado) */
+export function clearBadge() {
+  if ('clearAppBadge' in navigator) {
+    // @ts-ignore
+    navigator.clearAppBadge().catch(() => {});
+  }
+}
+
+/** (Stub) Dispara um push de teste. Conecte com seu endpoint quando quiser. */
+export async function sendTestPush({ title = 'Teste', body = 'Push de teste' } = {}) {
+  // Aqui apenas no-op para não quebrar a UI. Ligue com seu back depois.
+  return { ok: true, simulated: true, title, body };
+}
+
+/** (Stub) Broadcast para todos. Conecte com Cloud Function/endpoint quando quiser. */
+export async function sendBroadcast({ title, body, data } = {}) {
+  return { ok: true, simulated: true, title, body, data };
+}
