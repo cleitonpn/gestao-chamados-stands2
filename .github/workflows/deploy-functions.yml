@@ -1,25 +1,20 @@
-name: Deploy Firebase Functions (single)
+name: Deploy Firebase Functions
 
 on:
   workflow_dispatch:
-    inputs:
-      function_name:
-        description: "Nome da função para deploy"
-        default: "onMensagemCreated"
-        required: true
   push:
     paths:
       - "functions/**"
-      - "firebase.json"
-      - ".firebaserc"
+      - ".github/workflows/deploy-functions.yml"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -29,14 +24,24 @@ jobs:
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      - name: Write Service Account to file
+      - name: Inject .env for Functions
+        working-directory: functions
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > $HOME/gcp-sa.json
+          cat > .env <<EOF
+          WEBPUSH_SUBJECT=${{ secrets.WEBPUSH_SUBJECT }}
+          WEBPUSH_PUBLIC_KEY=${{ secrets.WEBPUSH_PUBLIC_KEY }}
+          WEBPUSH_PRIVATE_KEY=${{ secrets.WEBPUSH_PRIVATE_KEY }}
+          EOF
 
-      - name: Deploy ONLY one function (Gen1)
+      - name: Install Functions deps
+        working-directory: functions
+        run: npm ci || npm i
+
+      - name: Deploy ONLY onMensagemCreated
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: $HOME/gcp-sa.json
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          # Se você usa service account JSON, troque por:
+          # GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: |
-          firebase use "$FIREBASE_PROJECT_ID" --project "$FIREBASE_PROJECT_ID"
-          firebase deploy --only "functions:${{ github.event.inputs.function_name || 'onMensagemCreated' }}" --force
+          firebase use ${{ secrets.FIREBASE_PROJECT_ID }} --token "$FIREBASE_TOKEN"
+          firebase deploy --only "functions:onMensagemCreated" --force --token "$FIREBASE_TOKEN"
