@@ -1,16 +1,11 @@
 {
-  "name": "gc-functions",
+  "name": "functions",
   "private": true,
+  "type": "module",
   "main": "index.js",
-  "type": "commonjs",
   "engines": { "node": "20" },
-  "scripts": {
-    "build": "echo \"no build step\"",
-    "deploy": "firebase deploy --only functions"
-  },
   "dependencies": {
     "firebase-admin": "^12.5.0",
-    "firebase-functions": "^5.1.1",
-    "web-push": "^3.6.7"
+    "firebase-functions": "^5.1.0"
   }
 }
