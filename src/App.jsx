@@ -1,15 +1,12 @@
 // src/App.jsx
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-// ⬇️ IMPORTAMOS O 'useAuth' DO SEU CONTEXTO
 import { AuthProvider, useAuth } from './contexts/AuthContext'; 
 import { NewNotificationProvider } from './contexts/NewNotificationContext';
 
-// ⬇️ IMPORTAMOS AS FUNÇÕES DO ARQUIVO QUE CORRIGIMOS
 import { getOrCreateSubscription, saveSubscriptionInFirestore } from './lib/pushClient'; 
 
 import ProtectedRoute from './components/ProtectedRoute';
-// ... (todos os seus imports de páginas) ...
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import NewTicketPage from './pages/NewTicketPage';
@@ -34,33 +31,23 @@ import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
 import RomaneiosPage from "./pages/RomaneiosPage";
-
-// ⬇️ IMPORT ADICIONADO CONFORME SOLICITADO
 import RomaneioDriverPage from "./pages/RomaneioDriverPage";
 
 import './App.css';
 
-// ⬇️ PEGANDO A VAPID KEY DO SEU ARQUIVO .env
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
 
-// =================================================================
-// ⬇️ ESTA É A NOVA LÓGICA DE INSCRIÇÃO
-// =================================================================
 /**
  * Hook customizado que gerencia a inscrição de push notification.
- * Ele usa o 'useAuth' para garantir que só tentará inscrever
- * o usuário *depois* que ele estiver logado e tivermos um 'uid'.
  */
 const usePushNotificationSubscription = () => {
-  const { user } = useAuth(); // Pega o usuário do seu AuthContext
+  const { user } = useAuth(); 
 
   useEffect(() => {
-    // 1. Só roda se tivermos um usuário logado (user e user.uid)
     if (!user || !user.uid) {
       return; 
     }
 
-    // 2. Verifica se a VAPID key foi carregada do .env
     if (!VAPID_PUBLIC_KEY) {
       console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente no .env. Não é possível assinar.');
       return;
@@ -68,13 +55,9 @@ const usePushNotificationSubscription = () => {
 
     const setupPushNotifications = async (userId) => {
       try {
-        // 3. Pede permissão e pega/cria a "subscription"
-        //    (Esta função vem do seu 'pushClient.js')
         const subResult = await getOrCreateSubscription(VAPID_PUBLIC_KEY);
 
         if (subResult.ok && subResult.subscription) {
-          // 4. Se deu certo, salva no Firestore associado ao user.uid
-          //    (Esta função também vem do 'pushClient.js')
           await saveSubscriptionInFirestore({
             userId: userId,
             subscription: subResult.subscription,
@@ -88,23 +71,17 @@ const usePushNotificationSubscription = () => {
       }
     };
 
-    // Chama a lógica de inscrição passando o UID do usuário logado
     setupPushNotifications(user.uid);
 
-  }, [user]); // ⬅️ Roda toda vez que o 'user' mudar (ex: no login/logout)
+  }, [user]);
 };
-// =================================================================
-// ⬆️ FIM DA NOVA LÓGICA
-// =================================================================
 
 
 function App() {
-  // ⬇️ REMOVEMOS O useEffect ANTIGO
-  //    E AGORA CHAMAMOS O NOSSO HOOK
   usePushNotificationSubscription();
 
   return (
-    <AuthProvider> {/* ⬅️ Este Provider... */}
+    <AuthProvider>
       <NewNotificationProvider>
         <Router>
           <div className="App">
@@ -112,7 +89,7 @@ function App() {
               {/* Rota pública - Login */}
               <Route path="/login" element={<LoginPage />} />
 
-              {/* ... (todas as suas outras rotas não mudam) ... */}
+              {/* ... (suas outras rotas) ... */}
               <Route
                 path="/dashboard"
                 element={
@@ -289,10 +266,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              {/* Link público para motorista (Rota original) */}
-              <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} /> {/* */}
-              
-              {/* ⬇️ ROTA ADICIONADA CONFORME SOLICITADO */}
+              <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} />
               <Route path="/driver/romaneio/:token" element={<RomaneioDriverPage />} />
 
               <Route
@@ -311,7 +285,7 @@ function App() {
           </div>
         </Router>
       </NewNotificationProvider>
-    </AuthProvider> {/* ⬅️ ...fornece o 'user' para o hook. */}
+    </AuthProvider>
   );
 }
 
