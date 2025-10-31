@@ -220,26 +220,30 @@ export default function RomaneiosPage() {
   useEffect(() => {
     (async () => {
       try {
-        let list = [];
-        const areas = ["logistica", "logística", "Logistica", "Logística"];
-        try {
-          const qy = query(collection(db, "chamados"), where("area", "in", areas));
-          const snap = await getDocs(qy);
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        } catch {}
-        if (list.length === 0) {
+        const lists = [];
+
+        // 4 consultas simples para evitar problemas com IN e acentuação
+        const q1 = query(collection(db, "chamados"), where("area", "==", "logistica"));
+        const q2 = query(collection(db, "chamados"), where("area", "==", "logística"));
+        const q3 = query(collection(db, "chamados"), where("areaDestino", "==", "logistica"));
+        const q4 = query(collection(db, "chamados"), where("areaDestino", "==", "logística"));
+
+        for (const qy of [q1, q2, q3, q4]) {
           try {
-            const qy = query(collection(db, "chamados"), where("areaDestino", "in", areas));
             const snap = await getDocs(qy);
-            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            lists.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() })));
           } catch {}
         }
-        setTicketsLogistica(list);
+
+        // dedupe por id
+        const map = new Map();
+        for (const it of lists) map.set(it.id, it);
+        setTicketsLogistica([...map.values()]);
       } catch (e) {
         console.error("Falha ao carregar chamados", e);
       }
     })();
-  }, [form.eventoId]);
+  }, [form.eventoId, form.eventoNome]);
 
   const eventosOptions = useMemo(
     () => (eventos || []).map(ev => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" })),
@@ -248,20 +252,29 @@ export default function RomaneiosPage() {
 
   const ticketsOptions = useMemo(() => {
     let list = [...(ticketsLogistica || [])];
-    if (form.eventoId) {
-      list = list.filter(
-        (t) =>
-          (t.eventoId || t.eventId) === form.eventoId ||
-          (Array.isArray(t.projetoIds) && t.projetoIds.some(Boolean))
-      );
+
+    // quando houver evento escolhido, filtrar por:
+    // - ID do evento OU
+    // - NOME do evento (campo "evento"/"eventoNome") OU
+    // - ter projetos vinculados
+    if (form.eventoId || form.eventoNome) {
+      const alvoNome = normalize(form.eventoNome || "");
+      list = list.filter((t) => {
+        const tNome =
+          normalize(t.evento || t.eventoNome || t.event || "");
+        const tId = t.eventoId || t.eventId;
+        const temProjeto = Array.isArray(t.projetoIds) && t.projetoIds.some(Boolean);
+        return tId === form.eventoId || (alvoNome && tNome === alvoNome) || temProjeto;
+      });
     }
+
     return list.map(t => ({
       value: t.id,
       label: `${t.titulo || t.title || "Chamado"} — ${
-        t.projetoNome || t.projectName || t.projeto || t.project || ""
+        t.projetoNome || t.projectName || t.projeto || t.project || t.evento || ""
       }`.trim(),
     }));
-  }, [ticketsLogistica, form.eventoId]);
+  }, [ticketsLogistica, form.eventoId, form.eventoNome]);
 
   const toggleTipoItem = (val) => {
     setForm((prev) => {
@@ -561,9 +574,9 @@ export default function RomaneiosPage() {
                   <SelectValue placeholder="Selecione um evento" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(eventosOptions || []).map((ev) => (
-                    <SelectItem key={ev.value} value={ev.value}>
-                      {ev.label}
+                  {(eventos || []).map((ev) => (
+                    <SelectItem key={ev.id} value={ev.id}>
+                      {ev.nome || ev.titulo || ev.name || "Evento"}
                     </SelectItem>
                   ))}
                 </SelectContent>
