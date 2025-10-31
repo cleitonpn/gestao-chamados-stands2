@@ -64,6 +64,7 @@ const tiposItem = [
 
 export default function RomaneiosPage() {
   const { userProfile } = useAuth();
+  console.debug("[Romaneios] init");
   const navigate = useNavigate();
 
   const funcao = normalize(userProfile?.funcao);
@@ -108,7 +109,9 @@ export default function RomaneiosPage() {
   useEffect(() => {
     (async () => {
       try {
+        console.debug("[Romaneios] Carregando eventos ativos...");
         const evs = await eventService.getActiveEvents();
+        console.debug("[Romaneios] Eventos carregados:", (evs||[]).length);
         setEventos(evs || []);
       } catch (e) {
         console.error("Falha ao carregar eventos", e);
