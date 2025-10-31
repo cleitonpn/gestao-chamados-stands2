@@ -1,393 +1,183 @@
 // src/services/romaneioService.js
-// Serviço de Romaneios (Logística) – Firebase v9 modular
-
-import { db } from "../config/firebase";
 import {
   addDoc,
   collection,
   doc,
   getDoc,
-  getDocs,
   onSnapshot,
   orderBy,
   query,
-  where,
-  updateDoc,
   serverTimestamp,
-  limit,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
+import { db } from "../config/firebase";
 
-/* ============================
-   Nomes das coleções (ajuste se necessário)
-============================ */
-const COL_ROMANEIOS = "romaneios";
-const COL_LINKS = "romaneio_links";   // token público -> romaneioId
-const COL_PROJETOS = "projetos";       // projetos vinculados a eventos
-const COL_CHAMADOS = "chamados";       // chamados (para vincular)
+// util simples
+const nowTs = () => serverTimestamp();
 
-/* ============================
-   Helpers
-============================ */
-function sanitizeArray(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr.map((x) => (typeof x === "string" ? x.trim() : x)).filter(Boolean);
-}
-function randomToken() {
-  return (
-    Math.random().toString(36).slice(2) +
-    Math.random().toString(36).slice(2) +
-    Math.random().toString(36).slice(2)
-  );
-}
+// gera token curto e legível
+const genToken = () =>
+  Math.random().toString(36).slice(2, 10) +
+  Math.random().toString(36).slice(2, 10);
 
-/* ============================
-   API
-============================ */
+/**
+ * Service de Romaneios (Logística)
+ * - named export e default export (para evitar problemas de bundling)
+ */
 export const romaneioService = {
   /**
-   * Cria um romaneio.
-   * @param {{
-   *  eventId: string,
-   *  eventName?: string,
-   *  allProjects?: boolean,
-   *  projectIds?: string[],
-   *  motivo: 'montagem'|'apoio'|'extra'|'desmontagem'|'operacional',
-   *  setoresResp?: string[],
-   *  veiculoTipo?: string,
-   *  placa?: string,
-   *  fornecedor?: 'interno'|'terceirizado',
-   *  dataSaidaDate: string,            // 'YYYY-MM-DD' (somente data)
-   *  tiposItens?: string[],
-   *  itensEstruturados?: string[],
-   *  linkedTicket?: { id: string, titulo?: string } | null
-   * }} payload
+   * Cria um novo romaneio
+   * payload esperado:
+   * {
+   *   eventoId, eventoNome,
+   *   projetoIds: string[] | "ALL",
+   *   motivo, setoresResp: string[],
+   *   tipoVeiculo, fornecedor, placa,
+   *   dataSaidaDate: "YYYY-MM-DD",
+   *   tiposDeItens: string[], itens: string[],
+   *   vincularChamadoId: string|null,
+   *   status: "ativo"
+   * }
    */
   async create(payload) {
-    const now = serverTimestamp();
-
-    const data = {
-      // identificação
-      eventId: payload.eventId || null,
-      eventName: payload.eventName || null,
-
-      // projetos
-      allProjects: !!payload.allProjects,
-      projectIds: sanitizeArray(payload.projectIds),
-
-      // operação
-      motivo: payload.motivo || null,
-      setoresResp: sanitizeArray(payload.setoresResp),
-      veiculoTipo: payload.veiculoTipo || null,
-      placa: payload.placa || "",
-      fornecedor: payload.fornecedor || "interno",
-
-      // datas/horas
-      dataSaidaDate: payload.dataSaidaDate || null, // somente data
-      departedAt: null, // carimbo de saída (serverTimestamp)
-      deliveredAt: null, // carimbo de entrega (serverTimestamp)
-
-      // itens
-      tiposItens: sanitizeArray(payload.tiposItens),
-      itensEstruturados: sanitizeArray(payload.itensEstruturados),
-
-      // vínculo de chamado opcional
-      linkedTicket: payload.linkedTicket || null,
-
-      // status
-      status: "ativo", // 'ativo' | 'entregue' | 'arquivado'
-      ativo: true,
-
-      // housekeeping
-      createdAt: now,
-      updatedAt: now,
-
-      // link público (preenchido via ensureDriverToken)
-      driverLinkToken: null,
-      driverLinkCreatedAt: null,
-    };
-
-    const ref = await addDoc(collection(db, COL_ROMANEIOS), data);
-    return ref.id;
+    const col = collection(db, "romaneios");
+    await addDoc(col, {
+      ...payload,
+      createdAt: nowTs(),
+      lastModified: nowTs(),
+      departedAt: null, // ainda não saiu
+      deliveredAt: null,
+      status: payload?.status || "ativo",
+    });
   },
 
   /**
-   * Atualiza campos específicos do romaneio
+   * Observa todos os romaneios (ordenados pela criação desc)
    */
-  async update(id, patch) {
-    if (!id) throw new Error("romaneioService.update: id ausente.");
-    const ref = doc(db, COL_ROMANEIOS, id);
-    const data = { ...patch, updatedAt: serverTimestamp() };
-    await updateDoc(ref, data);
+  listenAll(cb) {
+    const q = query(collection(db, "romaneios"), orderBy("createdAt", "desc"));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      cb(list);
+    });
   },
 
   /**
-   * Marca como entregue (via app interno autenticado)
+   * Carimba a saída (em trânsito)
    */
-  async marcarEntregue(id) {
-    const ref = doc(db, COL_ROMANEIOS, id);
+  async registrarSaida(romaneioId) {
+    const ref = doc(db, "romaneios", romaneioId);
     await updateDoc(ref, {
+      departedAt: nowTs(),
+      status: "em_transito",
+      lastModified: nowTs(),
+    });
+  },
+
+  /**
+   * Marca como entregue
+   */
+  async marcarEntregue(romaneioId) {
+    const ref = doc(db, "romaneios", romaneioId);
+    await updateDoc(ref, {
+      deliveredAt: nowTs(),
       status: "entregue",
-      deliveredAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      lastModified: nowTs(),
     });
   },
 
   /**
-   * Registrar saída (carimbo de hora)
-   */
-  async registrarSaida(id) {
-    const ref = doc(db, COL_ROMANEIOS, id);
-    await updateDoc(ref, {
-      departedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  },
-
-  /**
-   * Gera (ou garante) token público e cria o mapa romaneio_links/{token} → { romaneioId }
-   * Retorna o token.
+   * Garante um token público para o motorista acessar o romaneio
+   * - tabela auxiliar: romaneio_links/{token} => { romaneioId }
+   * - também salva no documento do romaneio para reuso
    */
   async ensureDriverToken(romaneioId) {
-    if (!romaneioId) throw new Error("ensureDriverToken: romaneioId ausente.");
+    const ref = doc(db, "romaneios", romaneioId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Romaneio não encontrado");
 
-    const rRef = doc(db, COL_ROMANEIOS, romaneioId);
-    const rSnap = await getDoc(rRef);
-    if (!rSnap.exists()) throw new Error("Romaneio não encontrado.");
+    const data = snap.data();
+    if (data?.driverLinkToken) return data.driverLinkToken;
 
-    const rData = rSnap.data();
-    if (rData?.driverLinkToken) {
-      // garante o mapa (idempotente)
-      await setDoc(
-        doc(db, COL_LINKS, rData.driverLinkToken),
-        { romaneioId, createdAt: serverTimestamp() },
-        { merge: true }
-      );
-      return rData.driverLinkToken;
-    }
-
-    const token = randomToken();
-
-    await updateDoc(rRef, {
-      driverLinkToken: token,
-      driverLinkCreatedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+    const token = genToken();
+    const linkRef = doc(db, "romaneio_links", token);
+    await setDoc(linkRef, {
+      romaneioId,
+      createdAt: nowTs(),
     });
 
-    await setDoc(
-      doc(db, COL_LINKS, token),
-      { romaneioId, createdAt: serverTimestamp() },
-      { merge: true }
-    );
+    await updateDoc(ref, {
+      driverLinkToken: token,
+      lastModified: nowTs(),
+    });
 
     return token;
   },
 
   /**
-   * Lê romaneio por token (tela pública do motorista).
+   * Exporta CSV simples com os principais campos
    */
-  async getByDriverToken(token) {
-    if (!token) return null;
+  async exportExcel() {
+    // usa on-demand leitura única da coleção
+    return new Promise((resolve, reject) => {
+      const unsubscribe = this.listenAll(async (list) => {
+        try {
+          unsubscribe?.();
+        } catch (_) {}
 
-    // 1) lê o mapa público
-    const linkSnap = await getDoc(doc(db, COL_LINKS, token));
-    if (!linkSnap.exists()) return null;
-    const { romaneioId } = linkSnap.data() || {};
-    if (!romaneioId) return null;
+        const header = [
+          "id",
+          "evento",
+          "dataSaida",
+          "status",
+          "departedAt",
+          "deliveredAt",
+          "veiculo",
+          "placa",
+          "fornecedor",
+          "motivo",
+          "qtdProjetos",
+          "qtdItens",
+        ];
+        const rows = list.map((r) => [
+          r.id,
+          r.eventoNome || r.eventoId || "",
+          r.dataSaidaDate || "",
+          r.status || "",
+          r.departedAt?.seconds ? new Date(r.departedAt.seconds * 1000).toISOString() : "",
+          r.deliveredAt?.seconds ? new Date(r.deliveredAt.seconds * 1000).toISOString() : "",
+          r.tipoVeiculo || "",
+          r.placa || "",
+          r.fornecedor || "",
+          r.motivo || "",
+          Array.isArray(r.projetoIds) ? r.projetoIds.length : r.projetoIds === "ALL" ? "ALL" : "0",
+          Array.isArray(r.itens) ? r.itens.length : "0",
+        ]);
 
-    // 2) lê o romaneio
-    const romSnap = await getDoc(doc(db, COL_ROMANEIOS, romaneioId));
-    return romSnap.exists() ? { id: romSnap.id, ...romSnap.data() } : null;
-  },
+        const csv = [header, ...rows]
+          .map((arr) =>
+            arr
+              .map((v) => {
+                const s = String(v ?? "");
+                return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+              })
+              .join(";")
+          )
+          .join("\n");
 
-  /**
-   * Confirma entrega por token (público).
-   */
-  async marcarEntregueByToken(token) {
-    if (!token) throw new Error("Token ausente.");
-
-    const linkSnap = await getDoc(doc(db, COL_LINKS, token));
-    if (!linkSnap.exists()) return false;
-    const { romaneioId } = linkSnap.data() || {};
-    if (!romaneioId) return false;
-
-    const rRef = doc(db, COL_ROMANEIOS, romaneioId);
-    await updateDoc(rRef, {
-      status: "entregue",
-      deliveredAt: serverTimestamp(),
-      driverLinkToken: token,
-    });
-    return true;
-  },
-
-  /**
-   * Lista romaneios (snapshot em tempo real) com filtros básicos.
-   * @param {{onlyActive?: boolean, eventId?: string}} filters
-   * @param {(docs: Array<{id:string} & any>) => void} callback
-   * @returns unsubscribe
-   */
-  listen(filters, callback) {
-    const conds = [];
-    if (filters?.onlyActive) {
-      conds.push(where("status", "==", "ativo"));
-    }
-    if (filters?.eventId) {
-      conds.push(where("eventId", "==", filters.eventId));
-    }
-
-    let q = query(collection(db, COL_ROMANEIOS), orderBy("createdAt", "desc"));
-    if (conds.length) {
-      q = query(collection(db, COL_ROMANEIOS), ...conds, orderBy("createdAt", "desc"));
-    }
-
-    return onSnapshot(q, (snap) => {
-      const arr = [];
-      snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-      callback(arr);
-    });
-  },
-
-  /**
-   * Busca romaneios (one-shot).
-   */
-  async list(filters) {
-    const conds = [];
-    if (filters?.onlyActive) {
-      conds.push(where("status", "==", "ativo"));
-    }
-    if (filters?.eventId) {
-      conds.push(where("eventId", "==", filters.eventId));
-    }
-
-    let q = query(collection(db, COL_ROMANEIOS), orderBy("createdAt", "desc"));
-    if (conds.length) {
-      q = query(collection(db, COL_ROMANEIOS), ...conds, orderBy("createdAt", "desc"));
-    }
-
-    const snap = await getDocs(q);
-    const arr = [];
-    snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-    return arr;
-  },
-
-  /**
-   * Exporta para CSV (compatível com Excel).
-   * @param {Array<any>} rows
-   * @param {string} filename
-   */
-  exportToCSV(rows, filename = "romaneios.csv") {
-    const headers = [
-      "status",
-      "eventId",
-      "eventName",
-      "allProjects",
-      "projectIds",
-      "motivo",
-      "setoresResp",
-      "veiculoTipo",
-      "placa",
-      "fornecedor",
-      "dataSaidaDate",
-      "departedAt",
-      "deliveredAt",
-      "tiposItens",
-      "itensEstruturados",
-      "linkedTicketId",
-      "linkedTicketTitulo",
-      "driverLinkToken",
-      "createdAt",
-      "updatedAt",
-    ];
-
-    const lines = [headers.join(";")];
-
-    rows.forEach((r) => {
-      const line = [
-        r.status ?? "",
-        r.eventId ?? "",
-        r.eventName ?? "",
-        r.allProjects ? "SIM" : "NÃO",
-        (r.projectIds || []).join("|"),
-        r.motivo ?? "",
-        (r.setoresResp || []).join("|"),
-        r.veiculoTipo ?? "",
-        r.placa ?? "",
-        r.fornecedor ?? "",
-        r.dataSaidaDate ?? "",
-        r.departedAt ? new Date(r.departedAt.seconds * 1000).toISOString() : "",
-        r.deliveredAt ? new Date(r.deliveredAt.seconds * 1000).toISOString() : "",
-        (r.tiposItens || []).join("|"),
-        (r.itensEstruturados || []).join(" | "),
-        r.linkedTicket?.id ?? "",
-        r.linkedTicket?.titulo ?? "",
-        r.driverLinkToken ?? "",
-        r.createdAt ? new Date(r.createdAt.seconds * 1000).toISOString() : "",
-        r.updatedAt ? new Date(r.updatedAt.seconds * 1000).toISOString() : "",
-      ];
-      lines.push(line.map((v) => String(v).replace(/[\r\n;]+/g, " ")).join(";"));
-    });
-
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  },
-
-  /* ============================
-     Auxiliares para o formulário
-  ============================ */
-
-  /**
-   * Busca projetos de um evento (para o select).
-   * Ajuste o campo usado para relacionar evento/projeto (eventId, eventoId, etc.)
-   */
-  async fetchProjectsByEvent(eventId, max = 200) {
-    if (!eventId) return [];
-    const qy = query(
-      collection(db, COL_PROJETOS),
-      where("eventId", "==", eventId),
-      orderBy("createdAt", "desc"),
-      limit(max)
-    );
-    const snap = await getDocs(qy);
-    const arr = [];
-    snap.forEach((d) => {
-      const data = d.data();
-      arr.push({
-        id: d.id,
-        name: data?.name || data?.titulo || data?.nome || "(sem nome)",
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `romaneios_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        resolve();
       });
     });
-    return arr;
-  },
-
-  /**
-   * Busca chamados de logística (para vincular no romaneio).
-   * Ajuste os campos conforme seu schema (ex.: areaDestino, status, titulo).
-   */
-  async fetchLogisticaTickets(max = 200) {
-    const conds = [where("areaDestino", "==", "logistica")];
-    let qy = query(
-      collection(db, COL_CHAMADOS),
-      ...conds,
-      orderBy("createdAt", "desc"),
-      limit(max)
-    );
-    const snap = await getDocs(qy);
-
-    const arr = [];
-    snap.forEach((d) => {
-      const data = d.data();
-      arr.push({
-        id: d.id,
-        titulo: data?.titulo || data?.title || `(Chamado ${d.id})`,
-        projectId: data?.projectId || data?.projetoId || null,
-      });
-    });
-    return arr;
   },
 };
 
