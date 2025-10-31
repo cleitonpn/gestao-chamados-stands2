@@ -19,7 +19,7 @@ import OperationalDashboard from './pages/OperationalDashboard';
 import OperationalPanel from './pages/OperationalPanel';
 import TVPanel from './pages/TVPanel';
 import CronogramaPage from './pages/CronogramaPage';
-import AdminPanelPage from './pages/AdminPanelPage'];
+import AdminPanelPage from './pages/AdminPanelPage';
 import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';
 import EventsPage from './pages/EventsPage';
 import GamingPage from './pages/GamingPage';
@@ -28,7 +28,7 @@ import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
 
-// === Logística - Romaneios ===
+// Logística - Romaneios
 import RomaneiosPage from "./pages/RomaneiosPage";
 import RomaneioDriverPage from "./pages/RomaneioDriverPage";
 
@@ -53,18 +53,15 @@ async function registerServiceWorkerAndSubscribe() {
       return;
     }
 
-    // pede permissão
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.warn('[push] Permissão negada.');
       return;
     }
 
-    // registra o SW (arquivo está em /public/firebase-messaging-sw.js)
     const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
     await navigator.serviceWorker.ready;
 
-    // assinatura
     let subscription = await reg.pushManager.getSubscription();
     if (!subscription) {
       if (!VAPID_PUBLIC_KEY) {
@@ -77,7 +74,6 @@ async function registerServiceWorkerAndSubscribe() {
       });
     }
 
-    // envia para o backend salvar
     const json = subscription.toJSON ? subscription.toJSON() : {
       endpoint: subscription.endpoint,
       keys: subscription.keys || null,
@@ -98,7 +94,6 @@ async function registerServiceWorkerAndSubscribe() {
 }
 
 function App() {
-  // registra e assina push uma única vez
   useEffect(() => {
     registerServiceWorkerAndSubscribe();
   }, []);
@@ -290,7 +285,7 @@ function App() {
                 }
               />
 
-              {/* === Logística / Romaneios === */}
+              {/* Logística / Romaneios */}
               <Route
                 path="/logistica/romaneios"
                 element={
@@ -299,7 +294,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              {/* Link público para motorista (via link/QR) */}
+              {/* Link público para motorista */}
               <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} />
               {/* Rota alternativa para administradores */}
               <Route
