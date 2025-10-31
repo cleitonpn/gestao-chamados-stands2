@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import * as RomSrv from "../services/romaneioService"; // import robusto
+import * as RomSrv from "../services/romaneioService";
 import { projectService } from "../services/projectService";
 
 import {
@@ -42,8 +42,8 @@ const RS = RomSrv.romaneioService ?? RomSrv.default ?? RomSrv;
 
 if (typeof RS.listenAll !== "function") {
   RS.listenAll = (cb) => {
-    const q = query(collection(db, "romaneios"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snap) => {
+    const qRef = query(collection(db, "romaneios"), orderBy("createdAt", "desc"));
+    return onSnapshot(qRef, (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       cb(list);
     });
@@ -125,6 +125,7 @@ export default function RomaneiosPage() {
   const isAdmin = funcao === "administrador" || funcao === "admin";
   const isGerente = funcao === "gerente";
   const isOperadorLog = funcao === "operador" && area === "logistica";
+  const canCreate = isAdmin || isGerente || isOperadorLog;
 
   const [romaneios, setRomaneios] = useState([]);
   const [ativosVisiveis, setAtivosVisiveis] = useState(true);
@@ -152,7 +153,6 @@ export default function RomaneiosPage() {
 
   const [projetosDoEvento, setProjetosDoEvento] = useState([]);
   const [ticketsLogistica, setTicketsLogistica] = useState([]);
-  const canCreate = isAdmin || isGerente || isOperadorLog;
 
   // Eventos
   useEffect(() => {
@@ -216,26 +216,21 @@ export default function RomaneiosPage() {
     })();
   }, [form.eventoId]);
 
-  // Chamados de logística (para vincular)
+  // Chamados de logística
   useEffect(() => {
     (async () => {
       try {
         const lists = [];
-
-        // 4 consultas simples para evitar problemas com IN e acentuação
         const q1 = query(collection(db, "chamados"), where("area", "==", "logistica"));
         const q2 = query(collection(db, "chamados"), where("area", "==", "logística"));
         const q3 = query(collection(db, "chamados"), where("areaDestino", "==", "logistica"));
         const q4 = query(collection(db, "chamados"), where("areaDestino", "==", "logística"));
-
         for (const qy of [q1, q2, q3, q4]) {
           try {
             const snap = await getDocs(qy);
             lists.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() })));
           } catch {}
         }
-
-        // dedupe por id
         const map = new Map();
         for (const it of lists) map.set(it.id, it);
         setTicketsLogistica([...map.values()]);
@@ -252,27 +247,18 @@ export default function RomaneiosPage() {
 
   const ticketsOptions = useMemo(() => {
     let list = [...(ticketsLogistica || [])];
-
-    // quando houver evento escolhido, filtrar por:
-    // - ID do evento OU
-    // - NOME do evento (campo "evento"/"eventoNome") OU
-    // - ter projetos vinculados
     if (form.eventoId || form.eventoNome) {
       const alvoNome = normalize(form.eventoNome || "");
       list = list.filter((t) => {
-        const tNome =
-          normalize(t.evento || t.eventoNome || t.event || "");
+        const tNome = normalize(t.evento || t.eventoNome || t.event || "");
         const tId = t.eventoId || t.eventId;
         const temProjeto = Array.isArray(t.projetoIds) && t.projetoIds.some(Boolean);
         return tId === form.eventoId || (alvoNome && tNome === alvoNome) || temProjeto;
       });
     }
-
     return list.map(t => ({
       value: t.id,
-      label: `${t.titulo || t.title || "Chamado"} — ${
-        t.projetoNome || t.projectName || t.projeto || t.project || t.evento || ""
-      }`.trim(),
+      label: `${t.titulo || t.title || "Chamado"} — ${t.projetoNome || t.projectName || t.projeto || t.project || t.evento || ""}`.trim(),
     }));
   }, [ticketsLogistica, form.eventoId, form.eventoNome]);
 
@@ -301,34 +287,31 @@ export default function RomaneiosPage() {
   };
 
   const addLinhaItem = () => setForm((p) => ({ ...p, itensLinhas: [...p.itensLinhas, ""] }));
-  const setLinhaItem = (idx, val) =>
-    setForm((p) => {
-      const arr = [...p.itensLinhas];
-      arr[idx] = val;
-      return { ...p, itensLinhas: arr };
-    });
-  const removeLinhaItem = (idx) =>
-    setForm((p) => {
-      const arr = p.itensLinhas.filter((_, i) => i !== idx);
-      return { ...p, itensLinhas: arr.length ? arr : [""] };
-    });
+  const setLinhaItem = (idx, val) => setForm((p) => {
+    const arr = [...p.itensLinhas];
+    arr[idx] = val;
+    return { ...p, itensLinhas: arr };
+  });
+  const removeLinhaItem = (idx) => setForm((p) => {
+    const arr = p.itensLinhas.filter((_, i) => i !== idx);
+    return { ...p, itensLinhas: arr.length ? arr : [""] };
+  });
 
-  const limparForm = () =>
-    setForm({
-      eventoId: undefined,
-      eventoNome: "",
-      projetoIds: [],
-      allProjectsOfEvent: false,
-      motivo: undefined,
-      setoresResp: [],
-      tipoVeiculo: undefined,
-      fornecedor: "interno",
-      placa: "",
-      dataSaida: "",
-      tiposDeItens: [],
-      itensLinhas: [""],
-      vincularChamadoId: "",
-    });
+  const limparForm = () => setForm({
+    eventoId: undefined,
+    eventoNome: "",
+    projetoIds: [],
+    allProjectsOfEvent: false,
+    motivo: undefined,
+    setoresResp: [],
+    tipoVeiculo: undefined,
+    fornecedor: "interno",
+    placa: "",
+    dataSaida: "",
+    tiposDeItens: [],
+    itensLinhas: [""],
+    vincularChamadoId: "",
+  });
 
   const salvar = async () => {
     if (!form.eventoId) return alert("Selecione um evento");
@@ -366,7 +349,7 @@ export default function RomaneiosPage() {
 
   const exportar = async () => {
     try {
-      await (RS.exportExcel?.() ?? Promise.reject(new Error("Export indisponível")));
+      await RS.exportExcel();
     } catch (e) {
       console.error("Export falhou", e);
       alert("Falha ao exportar.");
@@ -395,21 +378,16 @@ export default function RomaneiosPage() {
   };
 
   const romaneiosFiltrados = useMemo(() => {
-    let base = [...romaneios].sort(
-      (a, b) =>
-        new Date(b.createdAt?.seconds ? b.createdAt.seconds * 1000 : b.createdAt || 0) -
-        new Date(a.createdAt?.seconds ? a.createdAt.seconds * 1000 : a.createdAt || 0)
-    );
+    let base = [...romaneios].sort((a, b) => (new Date(b.createdAt?.seconds ? b.createdAt.seconds*1000 : b.createdAt || 0)) - (new Date(a.createdAt?.seconds ? a.createdAt.seconds*1000 : a.createdAt || 0)));
     if (ativosVisiveis) base = base.filter((r) => r.status !== "entregue");
     if (filtroEvento !== "todos") base = base.filter((r) => r.eventoId === filtroEvento);
     return base;
   }, [romaneios, ativosVisiveis, filtroEvento]);
 
-  // cor do card por status
   const cardClasses = (r) => {
     if (r.status === "entregue") return "border-green-500 bg-green-50";
     if (r.status === "em_transito" || r.departedAt) return "border-purple-400 bg-purple-50";
-    return "border-amber-400 bg-amber-50"; // ativo (sem saída)
+    return "border-amber-400 bg-amber-50";
   };
 
   return (
@@ -426,27 +404,25 @@ export default function RomaneiosPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={exportar}>
-            <Download className="h-4 w-4 mr-2" />
-            Exportar CSV
-          </Button>
-          {canCreate ? (
-            <Button onClick={() => setOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Novo romaneio
-            </Button>
-          ) : null}
+          {canCreate && (
+            <>
+              <Button variant="outline" onClick={exportar}>
+                <Download className="h-4 w-4 mr-2" />
+                Exportar Excel
+              </Button>
+              <Button onClick={() => setOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Novo romaneio
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
       <Card className="mb-4">
         <CardContent className="p-4 flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-2">
-            <Checkbox
-              checked={ativosVisiveis}
-              onCheckedChange={(c) => setAtivosVisiveis(!!c)}
-              id="cb-ativos"
-            />
+            <Checkbox checked={ativosVisiveis} onCheckedChange={(c) => setAtivosVisiveis(!!c)} id="cb-ativos" />
             <Label htmlFor="cb-ativos">Mostrar apenas ativos</Label>
           </div>
 
@@ -460,9 +436,7 @@ export default function RomaneiosPage() {
               <SelectContent>
                 <SelectItem value="todos">Todos os eventos</SelectItem>
                 {(eventos || []).map((ev) => (
-                  <SelectItem key={ev.id} value={ev.id}>
-                    {ev.nome || ev.titulo || ev.name || "Evento"}
-                  </SelectItem>
+                  <SelectItem key={ev.id} value={ev.id}>{ev.nome || ev.titulo || ev.name || "Evento"}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -487,40 +461,27 @@ export default function RomaneiosPage() {
               )}
             </CardHeader>
             <CardContent className="space-y-2">
-              <div className="text-sm">
-                <b>Evento:</b> {r.eventoNome || r.eventoId}
-              </div>
-              <div className="text-sm">
-                <b>Projetos:</b>{" "}
-                {Array.isArray(r.projetoIds) ? r.projetoIds.length : r.projetoIds === "ALL" ? "Todos" : "0"}
-              </div>
-              <div className="text-sm">
-                <b>Motivo:</b> {r.motivo}
-              </div>
-              <div className="text-sm">
-                <b>Setor(es):</b> {(r.setoresResp || []).join(", ")}
-              </div>
-              <div className="text-sm">
-                <b>Veículo:</b> {r.tipoVeiculo} — Placa: {r.placa || "-"}
-              </div>
-              <div className="text-sm">
-                <b>Fornecedor:</b> {r.fornecedor}
-              </div>
+              <div className="text-sm"><b>Evento:</b> {r.eventoNome || r.eventoId}</div>
+              <div className="text-sm"><b>Projetos:</b> {Array.isArray(r.projetoIds) ? r.projetoIds.length : r.projetoIds === "ALL" ? "Todos" : "0"}</div>
+              <div className="text-sm"><b>Motivo:</b> {r.motivo}</div>
+              <div className="text-sm"><b>Setor(es):</b> {(r.setoresResp || []).join(", ")}</div>
+              <div className="text-sm"><b>Veículo:</b> {r.tipoVeiculo} — Placa: {r.placa || "-"}</div>
+              <div className="text-sm"><b>Fornecedor:</b> {r.fornecedor}</div>
               <Separator />
               <details className="text-sm">
-                <summary className="cursor-pointer text-gray-700">
-                  Itens ({(r.itens || []).length})
-                </summary>
+                <summary className="cursor-pointer text-gray-700">Itens ({(r.itens || []).length})</summary>
                 <ul className="list-disc ml-5 mt-1">
-                  {(r.itens || []).map((t, i) => (
-                    <li key={i}>{t}</li>
-                  ))}
+                  {(r.itens || []).map((t, i) => <li key={i}>{t}</li>)}
                 </ul>
               </details>
 
               <div className="flex flex-wrap gap-2 mt-2">
                 {r.status !== "entregue" && !r.departedAt && (
-                  <Button variant="outline" onClick={() => registrarSaida(r.id)} title="Carimbar hora de saída">
+                  <Button
+                    variant="outline"
+                    onClick={() => registrarSaida(r.id)}
+                    title="Carimbar hora de saída"
+                  >
                     <Send className="h-4 w-4 mr-2" /> Registrar saída
                   </Button>
                 )}
@@ -528,7 +489,10 @@ export default function RomaneiosPage() {
                   <LinkIcon className="h-4 w-4 mr-2" /> Gerar link motorista
                 </Button>
                 {r.status !== "entregue" && (
-                  <Button variant="default" onClick={() => RS.marcarEntregue(r.id)}>
+                  <Button
+                    variant="default"
+                    onClick={() => RS.marcarEntregue(r.id)}
+                  >
                     <CheckCircle2 className="h-4 w-4 mr-2" />
                     Marcar como entregue
                   </Button>
@@ -547,7 +511,6 @@ export default function RomaneiosPage() {
         )}
       </div>
 
-      {/* Modal de criação */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[720px]">
           <DialogHeader>
@@ -560,14 +523,8 @@ export default function RomaneiosPage() {
               <Select
                 value={form.eventoId}
                 onValueChange={(v) => {
-                  const ev = (eventos || []).find((e) => e.id === v);
-                  setForm((p) => ({
-                    ...p,
-                    eventoId: v,
-                    eventoNome: ev?.nome || ev?.titulo || ev?.name || "",
-                    projetoIds: [],
-                    allProjectsOfEvent: false,
-                  }));
+                  const ev = (eventos || []).find(e => e.id === v);
+                  setForm((p) => ({ ...p, eventoId: v, eventoNome: ev?.nome || ev?.titulo || ev?.name || "", projetoIds: [], allProjectsOfEvent: false }));
                 }}
               >
                 <SelectTrigger className="h-9">
@@ -575,9 +532,7 @@ export default function RomaneiosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {(eventos || []).map((ev) => (
-                    <SelectItem key={ev.id} value={ev.id}>
-                      {ev.nome || ev.titulo || ev.name || "Evento"}
-                    </SelectItem>
+                    <SelectItem key={ev.id} value={ev.id}>{ev.nome || ev.titulo || ev.name || "Evento"}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -591,9 +546,7 @@ export default function RomaneiosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {motivoOptions.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -607,9 +560,7 @@ export default function RomaneiosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {veiculos.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -623,9 +574,7 @@ export default function RomaneiosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {fornecedores.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -633,11 +582,7 @@ export default function RomaneiosPage() {
 
             <div className="space-y-2">
               <Label>Placa</Label>
-              <Input
-                value={form.placa}
-                onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value }))}
-                placeholder="ABC1D23"
-              />
+              <Input value={form.placa} onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value }))} placeholder="ABC1D23" />
             </div>
 
             <div className="space-y-2">
@@ -661,9 +606,7 @@ export default function RomaneiosPage() {
               </div>
               {!form.allProjectsOfEvent && (
                 <div className="rounded border p-2 max-h-40 overflow-auto space-y-1">
-                  {projetosDoEvento.length === 0 && (
-                    <div className="text-sm text-gray-500">Selecione um evento para listar os projetos.</div>
-                  )}
+                  {projetosDoEvento.length === 0 && <div className="text-sm text-gray-500">Selecione um evento para listar os projetos.</div>}
                   {projetosDoEvento.map((proj) => (
                     <div key={proj.id} className="flex items-center gap-2">
                       <Checkbox
@@ -671,9 +614,7 @@ export default function RomaneiosPage() {
                         checked={form.projetoIds.includes(proj.id)}
                         onCheckedChange={() => toggleProjeto(proj.id)}
                       />
-                      <Label htmlFor={`p-${proj.id}`} className="text-sm">
-                        {proj.nome || proj.titulo || proj.name}
-                      </Label>
+                      <Label htmlFor={`p-${proj.id}`} className="text-sm">{proj.nome || proj.titulo || proj.name}</Label>
                     </div>
                   ))}
                 </div>
@@ -722,14 +663,10 @@ export default function RomaneiosPage() {
                       onChange={(e) => setLinhaItem(idx, e.target.value)}
                       placeholder={`Item ${idx + 1}`}
                     />
-                    <Button type="button" variant="ghost" onClick={() => removeLinhaItem(idx)}>
-                      Remover
-                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => removeLinhaItem(idx)}>Remover</Button>
                   </div>
                 ))}
-                <Button type="button" variant="secondary" onClick={addLinhaItem}>
-                  Adicionar linha
-                </Button>
+                <Button type="button" variant="secondary" onClick={addLinhaItem}>Adicionar linha</Button>
               </div>
             </div>
 
@@ -744,9 +681,7 @@ export default function RomaneiosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {ticketsOptions.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -754,12 +689,8 @@ export default function RomaneiosPage() {
           </div>
 
           <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={salvar} disabled={saving}>
-              {saving ? "Salvando..." : "Salvar romaneio"}
-            </Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button onClick={salvar} disabled={saving}>{saving ? "Salvando..." : "Salvar romaneio"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
