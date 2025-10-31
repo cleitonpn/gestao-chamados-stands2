@@ -1,3 +1,4 @@
+// src/services/romaneioService.js
 import { db } from "../config/firebase";
 import {
   addDoc,
@@ -24,10 +25,10 @@ export const romaneioService = {
       eventNames: payload.eventNames || [],
       projectIds: payload.projectIds || [],
       projectNames: payload.projectNames || [],
-      motivo: payload.motivo,
+      motivo: payload.motivo || "",
       setores: payload.setores || [],
-      tipoVeiculo: payload.tipoVeiculo,
-      fornecedor: payload.fornecedor,
+      tipoVeiculo: payload.tipoVeiculo || "",
+      fornecedor: payload.fornecedor || "",
       placa: payload.placa || "",
       dataSaida: payload.dataSaida ? Timestamp.fromDate(new Date(payload.dataSaida)) : null,
       tiposItens: payload.tiposItens || [],
