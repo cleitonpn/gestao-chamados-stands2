@@ -1,4 +1,4 @@
-import { db, serverTimestamp } from "../config/firebase";
+import { db } from "../config/firebase";
 import {
   addDoc,
   collection,
@@ -11,6 +11,7 @@ import {
   where,
   Timestamp,
   limit,
+  serverTimestamp,
 } from "firebase/firestore";
 
 const COL = "romaneios";
