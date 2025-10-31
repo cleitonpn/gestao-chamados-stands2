@@ -5,8 +5,11 @@ on:
   push:
     branches: [ main ]
     paths:
+      # Gatilhos originais:
       - "functions/**"
       - ".github/workflows/deploy-functions.yml"
+      # ⬇️ GATILHO ADICIONADO:
+      - "firebase.json"
 
 jobs:
   deploy:
@@ -24,14 +27,12 @@ jobs:
       - name: Install Firebase CLI
         run: npm i -g firebase-tools@13
 
-      # Opcional: instalar deps da pasta functions (evita warnings no deploy)
       - name: Install Functions deps
         run: |
           cd functions
           npm install --no-audit --no-fund
           cd ..
 
-      # ⬇️⬇️ ETAPA CORRIGIDA (SINTAXE DO 'run' MUDOU) ⬇️⬇️
       - name: Set Firebase Secrets (VAPID)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
@@ -40,12 +41,10 @@ jobs:
           WEBPUSH_PUBLIC_KEY:  ${{ secrets.WEBPUSH_PUBLIC_KEY }}
           WEBPUSH_SUBJECT:     ${{ secrets.WEBPUSH_SUBJECT }}
         run: |
-          # Usamos 'echo' e o pipe '|' para enviar o valor ao Firebase
           echo "$WEBPUSH_PRIVATE_KEY" | firebase functions:secrets:set WEBPUSH_PRIVATE_KEY --project "$FIREBASE_PROJECT_ID" --non-interactive
           echo "$WEBPUSH_PUBLIC_KEY" | firebase functions:secrets:set WEBPUSH_PUBLIC_KEY --project "$FIREBASE_PROJECT_ID" --non-interactive
           echo "$WEBPUSH_SUBJECT" | firebase functions:secrets:set WEBPUSH_SUBJECT --project "$FIREBASE_PROJECT_ID" --non-interactive
 
-      # Esta etapa já estava corrigida para enviar TODAS as functions
       - name: Deploy ALL Functions (v2)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
