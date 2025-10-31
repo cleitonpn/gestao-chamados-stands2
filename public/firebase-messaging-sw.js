@@ -1,56 +1,55 @@
 // public/firebase-messaging-sw.js
 
-// Importa os scripts do Firebase
+// Importa os scripts do Firebase (versão compat)
 importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
 
-// ⚠️ COLOQUE AQUI A CONFIGURAÇÃO DO SEU FIREBASE
+// ⚠️ COLE A CONFIGURAÇÃO DO SEU FIREBASE AQUI
 // (A mesma que você usa no seu app React)
 const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_AUTH_DOMAIN",
+  projectId: "SEU_PROJECT_ID",
+  storageBucket: "SEU_STORAGE_BUCKET",
+  messagingSenderId: "SEU_MESSAGING_SENDER_ID",
+  appId: "SEU_APP_ID"
 };
 
 firebase.initializeApp(firebaseConfig);
-
 const messaging = firebase.messaging();
 
-// Este é o handler que recebe o push quando o app está fechado ou em 2º plano
+// Handler para receber a notificação com o app em 2º plano ou fechado
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Mensagem recebida em 2º plano: ', payload);
+  console.log('[firebase-messaging-sw.js] Mensagem recebida: ', payload);
 
-  // Extrai o título e corpo da notificação
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
     icon: payload.notification.icon || '/icons/icon-192x192.png',
     badge: payload.notification.badge || '/icons/badge-72x72.png',
-    data: payload.data, // Guarda os dados (ex: URL)
+    data: payload.data, // Guarda a URL e outros dados
   };
 
-  // Exibe a notificação
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// Evento de clique na notificação
+// Handler para o clique na notificação
 self.addEventListener('notificationclick', (event) => {
   event.notification.close(); // Fecha a notificação
-  
-  // Abre a URL que foi enviada no 'data' (ou a home)
+
+  // Abre a URL que veio em 'data.url' ou a home '/'
   const urlToOpen = event.notification.data.url || '/';
-  
+
   event.waitUntil(
     clients.matchAll({ type: 'window' }).then((clientList) => {
+      // Tenta focar em uma aba já aberta
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
         if (client.url === urlToOpen && 'focus' in client) {
           return client.focus();
         }
       }
+      // Se não houver, abre uma nova janela
       if (clients.openWindow) {
         return clients.openWindow(urlToOpen);
       }
