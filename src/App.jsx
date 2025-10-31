@@ -28,6 +28,10 @@ import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
 
+// === NEW (Logística - Romaneios) ===
+import RomaneiosPage from "./pages/RomaneiosPage";
+import RomaneioDriverPage from "./pages/RomaneioDriverPage";
+
 import './App.css';
 
 // === HELPERS para Web Push ===
@@ -284,6 +288,21 @@ function App() {
                     <AllDiariesPage />
                   </ProtectedRoute>
                 }
+              />
+
+              {/* === NEW ROUTES: Logística / Romaneios === */}
+              <Route
+                path="/logistica/romaneios"
+                element={
+                  <ProtectedRoute requiredArea="logistica">
+                    <RomaneiosPage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Link público para motorista (via link/QR) */}
+              <Route
+                path="/logistica/romaneios/:id/driver"
+                element={<RomaneioDriverPage />}
               />
 
               {/* Redirecionamentos */}
