@@ -25,7 +25,7 @@ import {
   LogOut, Plus, AlertCircle, Clock, CheckCircle, Users, FolderOpen, BarChart3,
   Menu, X, Calendar, ChevronDown, ChevronRight, BellRing, ArrowUp, Hourglass,
   User as UserIcon, FileText, Eye, Filter, Archive, List as ListIcon, LayoutGrid, Lock,
-  SlidersHorizontal, Trophy, BookOpen
+  SlidersHorizontal, Trophy, BookOpen, Truck
 } from 'lucide-react';
 
 const LOCAL_STORAGE_FILTERS_KEY = 'dashboard_saved_filters_v2';
@@ -562,6 +562,12 @@ const DashboardPage = () => {
     );
   }
 
+  // helper para rota dos Romaneios conforme perfil
+  const goToRomaneios = () => {
+    if (isAdmin) navigate('/admin/romaneios');
+    else navigate('/logistica/romaneios');
+  };
+
   // --------- Painel de filtros reutilizável ---------
   const FiltersPanel = ({ variant = 'mobile' }) => {
     const isDesktop = variant === 'desktop';
@@ -913,7 +919,7 @@ const DashboardPage = () => {
           </button>
         </div>
 
-                <nav className="mt-6 px-3">
+        <nav className="mt-6 px-3">
           <div className="space-y-1">
             {(userProfile?.funcao === 'produtor' || userProfile?.funcao === 'consultor' || userProfile?.funcao === 'administrador' ||
               (userProfile?.funcao === 'operador' && ['operacional','comunicacao_visual','almoxarifado','logistica'].includes(userProfile?.area))) && (
@@ -943,6 +949,14 @@ const DashboardPage = () => {
               <Button onClick={() => navigate('/cronograma')} variant="ghost" className="w-full justify-start">
                 <Calendar className="h-4 w-4 mr-3" />
                 Cronograma
+              </Button>
+            )}
+
+            {/* === NOVO: Romaneios (Logística) === */}
+            {(isAdmin || isGerente || (userProfile?.funcao === 'operador' && (userProfile?.area || '').toLowerCase() === 'logistica')) && (
+              <Button onClick={goToRomaneios} variant="ghost" className="w-full justify-start">
+                <Truck className="h-4 w-4 mr-3" />
+                Romaneios (Logística)
               </Button>
             )}
 
