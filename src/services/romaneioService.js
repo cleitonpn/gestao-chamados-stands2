@@ -1,9 +1,11 @@
 // src/services/romaneioService.js
+import { db } from "../config/firebase";
 import {
   addDoc,
   collection,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -11,173 +13,96 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "../config/firebase";
+import * as XLSX from "xlsx";
 
-// util simples
-const nowTs = () => serverTimestamp();
+const COL = "romaneios";
+const LINKS_COL = "romaneio_links";
 
-// gera token curto e legível
-const genToken = () =>
-  Math.random().toString(36).slice(2, 10) +
-  Math.random().toString(36).slice(2, 10);
-
-/**
- * Service de Romaneios (Logística)
- * - named export e default export (para evitar problemas de bundling)
- */
 export const romaneioService = {
-  /**
-   * Cria um novo romaneio
-   * payload esperado:
-   * {
-   *   eventoId, eventoNome,
-   *   projetoIds: string[] | "ALL",
-   *   motivo, setoresResp: string[],
-   *   tipoVeiculo, fornecedor, placa,
-   *   dataSaidaDate: "YYYY-MM-DD",
-   *   tiposDeItens: string[], itens: string[],
-   *   vincularChamadoId: string|null,
-   *   status: "ativo"
-   * }
-   */
-  async create(payload) {
-    const col = collection(db, "romaneios");
-    await addDoc(col, {
-      ...payload,
-      createdAt: nowTs(),
-      lastModified: nowTs(),
-      departedAt: null, // ainda não saiu
-      deliveredAt: null,
-      status: payload?.status || "ativo",
-    });
-  },
-
-  /**
-   * Observa todos os romaneios (ordenados pela criação desc)
-   */
   listenAll(cb) {
-    const q = query(collection(db, "romaneios"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, COL), orderBy("createdAt", "desc"));
     return onSnapshot(q, (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       cb(list);
     });
   },
 
-  /**
-   * Carimba a saída (em trânsito)
-   */
-  async registrarSaida(romaneioId) {
-    const ref = doc(db, "romaneios", romaneioId);
+  async create(payload) {
+    const data = {
+      ...payload,
+      createdAt: serverTimestamp(),
+      status: payload.status || "ativo",
+    };
+    await addDoc(collection(db, COL), data);
+  },
+
+  async registrarSaida(id) {
+    const ref = doc(db, COL, id);
     await updateDoc(ref, {
-      departedAt: nowTs(),
+      departedAt: serverTimestamp(),
       status: "em_transito",
-      lastModified: nowTs(),
     });
   },
 
-  /**
-   * Marca como entregue
-   */
-  async marcarEntregue(romaneioId) {
-    const ref = doc(db, "romaneios", romaneioId);
+  async marcarEntregue(id) {
+    const ref = doc(db, COL, id);
     await updateDoc(ref, {
-      deliveredAt: nowTs(),
+      deliveredAt: serverTimestamp(),
       status: "entregue",
-      lastModified: nowTs(),
     });
   },
 
-  /**
-   * Garante um token público para o motorista acessar o romaneio
-   * - tabela auxiliar: romaneio_links/{token} => { romaneioId }
-   * - também salva no documento do romaneio para reuso
-   */
-  async ensureDriverToken(romaneioId) {
-    const ref = doc(db, "romaneios", romaneioId);
+  async ensureDriverToken(id) {
+    const ref = doc(db, COL, id);
     const snap = await getDoc(ref);
-    if (!snap.exists()) throw new Error("Romaneio não encontrado");
+    const exists = snap.exists() ? snap.data() : null;
+    if (exists?.driverLinkToken) return exists.driverLinkToken;
 
-    const data = snap.data();
-    if (data?.driverLinkToken) return data.driverLinkToken;
-
-    const token = genToken();
-    const linkRef = doc(db, "romaneio_links", token);
-    await setDoc(linkRef, {
-      romaneioId,
-      createdAt: nowTs(),
+    const tokenRef = doc(collection(db, LINKS_COL));
+    await setDoc(tokenRef, {
+      romaneioId: id,
+      createdAt: serverTimestamp(),
     });
-
-    await updateDoc(ref, {
-      driverLinkToken: token,
-      lastModified: nowTs(),
-    });
-
-    return token;
+    await updateDoc(ref, { driverLinkToken: tokenRef.id });
+    return tokenRef.id;
   },
 
-  /**
-   * Exporta CSV simples com os principais campos
-   */
   async exportExcel() {
-    // usa on-demand leitura única da coleção
-    return new Promise((resolve, reject) => {
-      const unsubscribe = this.listenAll(async (list) => {
-        try {
-          unsubscribe?.();
-        } catch (_) {}
+    const q = query(collection(db, COL), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    const rows = snap.docs.map((d) => {
+      const r = d.data();
+      const toDate = (ts) =>
+        !ts ? "" : ts?.toDate ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : "";
+      const fmt = (dt) =>
+        dt instanceof Date && !isNaN(dt) ? dt.toLocaleString("pt-BR") : "";
 
-        const header = [
-          "id",
-          "evento",
-          "dataSaida",
-          "status",
-          "departedAt",
-          "deliveredAt",
-          "veiculo",
-          "placa",
-          "fornecedor",
-          "motivo",
-          "qtdProjetos",
-          "qtdItens",
-        ];
-        const rows = list.map((r) => [
-          r.id,
-          r.eventoNome || r.eventoId || "",
-          r.dataSaidaDate || "",
-          r.status || "",
-          r.departedAt?.seconds ? new Date(r.departedAt.seconds * 1000).toISOString() : "",
-          r.deliveredAt?.seconds ? new Date(r.deliveredAt.seconds * 1000).toISOString() : "",
-          r.tipoVeiculo || "",
-          r.placa || "",
-          r.fornecedor || "",
-          r.motivo || "",
-          Array.isArray(r.projetoIds) ? r.projetoIds.length : r.projetoIds === "ALL" ? "ALL" : "0",
-          Array.isArray(r.itens) ? r.itens.length : "0",
-        ]);
-
-        const csv = [header, ...rows]
-          .map((arr) =>
-            arr
-              .map((v) => {
-                const s = String(v ?? "");
-                return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-              })
-              .join(";")
-          )
-          .join("\n");
-
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `romaneios_${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        resolve();
-      });
+      return {
+        ID: d.id,
+        Evento: r.eventoNome || r.eventoId || "",
+        "Projetos (qtd)": Array.isArray(r.projetoIds)
+          ? r.projetoIds.length
+          : r.projetoIds === "ALL"
+          ? "Todos"
+          : 0,
+        Motivo: r.motivo || "",
+        Setores: (r.setoresResp || []).join(", "),
+        Veículo: r.tipoVeiculo || "",
+        Placa: r.placa || "",
+        Fornecedor: r.fornecedor || "",
+        "Data Saída": r.dataSaidaDate || "",
+        "Criado em": fmt(toDate(r.createdAt)),
+        "Saiu em": fmt(toDate(r.departedAt)),
+        "Entregue em": fmt(toDate(r.deliveredAt)),
+        Status: r.status || "",
+        "Itens (qtd)": (r.itens || []).length,
+      };
     });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Romaneios");
+    XLSX.writeFile(wb, `romaneios_${new Date().toISOString().slice(0,10)}.xlsx`);
   },
 };
 
