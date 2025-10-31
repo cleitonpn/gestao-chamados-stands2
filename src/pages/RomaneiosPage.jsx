@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { cn } from "../lib/utils";
-import { Download, Plus, ChevronDown, ExternalLink, Truck } from "lucide-react";
+import { Download, ChevronDown, ExternalLink, Truck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const STATUS_BADGE = {
@@ -132,7 +132,10 @@ function NovoRomaneioModal({ onCreated }) {
   const [itens, setItens] = useState([]);
   const [ticketId, setTicketId] = useState("");
 
-  const canCreate = ["gerente", "operador"].includes(profile?.funcao) && profile?.area === "logistica";
+  // permitir: administrador OU (gerente/operador da área de logística)
+  const isAdmin = profile?.funcao === "administrador";
+  const isLogisticaOp = ["gerente", "operador"].includes(profile?.funcao) && profile?.area === "logistica";
+  const canCreate = isAdmin || isLogisticaOp;
 
   useEffect(() => {
     (async () => {
@@ -425,8 +428,6 @@ export default function RomaneiosPage() {
   const [ativos, setAtivos] = useState([]);
   const [entregues, setEntregues] = useState([]);
 
-  const canCreate = ["gerente", "operador"].includes(profile?.funcao) && profile?.area === "logistica";
-
   useEffect(() => {
     (async () => {
       const list = await eventService.getActiveEvents?.() || await eventService.listActive?.();
@@ -465,7 +466,8 @@ export default function RomaneiosPage() {
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={exportar} className="gap-2"><Download className="h-4 w-4"/> Exportar CSV</Button>
-          {canCreate && <NovoRomaneioModal onCreated={()=>{}}/>}
+          {/* Botão habilita para admin ou logística (gerente/operador) */}
+          <NovoRomaneioModal onCreated={()=>{}}/>
         </div>
       </div>
 
