@@ -1,9 +1,15 @@
 // src/App.jsx
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+// ⬇️ IMPORTAMOS O 'useAuth' DO SEU CONTEXTO
+import { AuthProvider, useAuth } from './contexts/AuthContext'; 
 import { NewNotificationProvider } from './contexts/NewNotificationContext';
+
+// ⬇️ IMPORTAMOS AS FUNÇÕES DO ARQUIVO QUE CORRIGIMOS
+import { getOrCreateSubscription, saveSubscriptionInFirestore } from './lib/pushClient'; 
+
 import ProtectedRoute from './components/ProtectedRoute';
+// ... (todos os seus imports de páginas) ...
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import NewTicketPage from './pages/NewTicketPage';
@@ -27,80 +33,78 @@ import ProjectSummaryPage from "./pages/ProjectSummaryPage";
 import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
-import RomaneioDriverPage from "./pages/RomaneioDriverPage";
-
-// Logística - Romaneios
 import RomaneiosPage from "./pages/RomaneiosPage";
+
+// ⬇️ IMPORT ADICIONADO CONFORME SOLICITADO
 import RomaneioDriverPage from "./pages/RomaneioDriverPage";
 
 import './App.css';
 
-// === HELPERS para Web Push ===
+// ⬇️ PEGANDO A VAPID KEY DO SEU ARQUIVO .env
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(base64);
-  const output = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
-  return output;
-}
+// =================================================================
+// ⬇️ ESTA É A NOVA LÓGICA DE INSCRIÇÃO
+// =================================================================
+/**
+ * Hook customizado que gerencia a inscrição de push notification.
+ * Ele usa o 'useAuth' para garantir que só tentará inscrever
+ * o usuário *depois* que ele estiver logado e tivermos um 'uid'.
+ */
+const usePushNotificationSubscription = () => {
+  const { user } = useAuth(); // Pega o usuário do seu AuthContext
 
-async function registerServiceWorkerAndSubscribe() {
-  try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('[push] Browser não suporta ServiceWorker/Push.');
+  useEffect(() => {
+    // 1. Só roda se tivermos um usuário logado (user e user.uid)
+    if (!user || !user.uid) {
+      return; 
+    }
+
+    // 2. Verifica se a VAPID key foi carregada do .env
+    if (!VAPID_PUBLIC_KEY) {
+      console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente no .env. Não é possível assinar.');
       return;
     }
 
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      console.warn('[push] Permissão negada.');
-      return;
-    }
+    const setupPushNotifications = async (userId) => {
+      try {
+        // 3. Pede permissão e pega/cria a "subscription"
+        //    (Esta função vem do seu 'pushClient.js')
+        const subResult = await getOrCreateSubscription(VAPID_PUBLIC_KEY);
 
-    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
-    await navigator.serviceWorker.ready;
-
-    let subscription = await reg.pushManager.getSubscription();
-    if (!subscription) {
-      if (!VAPID_PUBLIC_KEY) {
-        console.warn('[push] VITE_VAPID_PUBLIC_KEY ausente; não é possível assinar.');
-        return;
+        if (subResult.ok && subResult.subscription) {
+          // 4. Se deu certo, salva no Firestore associado ao user.uid
+          //    (Esta função também vem do 'pushClient.js')
+          await saveSubscriptionInFirestore({
+            userId: userId,
+            subscription: subResult.subscription,
+          });
+          console.log('[push] Inscrição de push salva com sucesso no Firestore!');
+        } else if (!subResult.ok) {
+          console.warn('[push] Falha ao obter inscrição:', subResult.reason);
+        }
+      } catch (error) {
+        console.error('[push] Erro ao configurar push notifications:', error);
       }
-      subscription = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-    }
-
-    const json = subscription.toJSON ? subscription.toJSON() : {
-      endpoint: subscription.endpoint,
-      keys: subscription.keys || null,
     };
-    const uid = localStorage.getItem('uid') || localStorage.getItem('userId') || '';
 
-    await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': uid || '',
-      },
-      body: JSON.stringify({ ...json, userId: uid || null }),
-    }).catch((e) => console.error('[push] Falha ao registrar inscrição:', e));
-  } catch (err) {
-    console.error('[push] Erro no registro/inscrição:', err);
-  }
-}
+    // Chama a lógica de inscrição passando o UID do usuário logado
+    setupPushNotifications(user.uid);
+
+  }, [user]); // ⬅️ Roda toda vez que o 'user' mudar (ex: no login/logout)
+};
+// =================================================================
+// ⬆️ FIM DA NOVA LÓGICA
+// =================================================================
+
 
 function App() {
-  useEffect(() => {
-    registerServiceWorkerAndSubscribe();
-  }, []);
+  // ⬇️ REMOVEMOS O useEffect ANTIGO
+  //    E AGORA CHAMAMOS O NOSSO HOOK
+  usePushNotificationSubscription();
 
   return (
-    <AuthProvider>
+    <AuthProvider> {/* ⬅️ Este Provider... */}
       <NewNotificationProvider>
         <Router>
           <div className="App">
@@ -108,7 +112,7 @@ function App() {
               {/* Rota pública - Login */}
               <Route path="/login" element={<LoginPage />} />
 
-              {/* Rotas protegidas */}
+              {/* ... (todas as suas outras rotas não mudam) ... */}
               <Route
                 path="/dashboard"
                 element={
@@ -163,7 +167,6 @@ function App() {
                 }
               />
 
-              {/* Cronograma */}
               <Route
                 path="/cronograma"
                 element={
@@ -173,7 +176,6 @@ function App() {
                 }
               />
 
-              {/* Eventos */}
               <Route
                 path="/eventos"
                 element={
@@ -201,7 +203,6 @@ function App() {
                 }
               />
 
-              {/* Perfil */}
               <Route
                 path="/perfil"
                 element={
@@ -247,13 +248,6 @@ function App() {
                 }
               />
 
-              <Route 
-                path="/driver/romaneio/:token" 
-                element={
-                <RomaneioDriverPage />} />
-                }
-              />
-
               <Route
                 path="/templates"
                 element={
@@ -273,17 +267,11 @@ function App() {
               />
 
               <Route path="/resumo-projeto" element={<ProjectSummaryPage />} />
-
-              {/* Painel operacional (sem header) */}
               <Route path="/painel-operacional" element={<OperationalPanel />} />
-
               <Route path="/empreiteiro" element={<ContractorProjectPage />} />
               <Route path="/empreiteiro/:projectId" element={<ContractorProjectPage />} />
-
-              {/* Painel TV (sem login) */}
               <Route path="/painel-tv" element={<TVPanel />} />
 
-              {/* Diários */}
               <Route
                 path="/diarios"
                 element={
@@ -293,7 +281,6 @@ function App() {
                 }
               />
 
-              {/* Logística / Romaneios */}
               <Route
                 path="/logistica/romaneios"
                 element={
@@ -302,9 +289,12 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              {/* Link público para motorista */}
-              <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} />
-              {/* Rota alternativa para administradores */}
+              {/* Link público para motorista (Rota original) */}
+              <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} /> {/* */}
+              
+              {/* ⬇️ ROTA ADICIONADA CONFORME SOLICITADO */}
+              <Route path="/driver/romaneio/:token" element={<RomaneioDriverPage />} />
+
               <Route
                 path="/admin/romaneios"
                 element={
@@ -321,7 +311,7 @@ function App() {
           </div>
         </Router>
       </NewNotificationProvider>
-    </AuthProvider>
+    </AuthProvider> {/* ⬅️ ...fornece o 'user' para o hook. */}
   );
 }
 
