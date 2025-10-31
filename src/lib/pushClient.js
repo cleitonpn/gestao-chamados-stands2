@@ -1,5 +1,9 @@
 // src/lib/pushClient.js
 
+// ⬇️ IMPORTAÇÕES DO FIRESTORE (SDK CLIENTE)
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../config/firebase'; // ⚠️ Confirme se este é o caminho correto para seu 'db'
+
 // ---------------- utils ----------------
 function encodeKey(key) {
   if (!key) return null;
@@ -75,25 +79,57 @@ export async function getOrCreateSubscription(vapidPublicKey) {
 }
 
 /**
- * SALVAR subscription (stub seguro)
- * Troque pelo seu write real (Firestore SDK no cliente OU endpoint/Function HTTP).
+ * SALVAR subscription (VERSÃO REAL)
+ * Salva o token na subcoleção 'tokens' do usuário,
+ * que é onde sua Cloud Function 'getUserTokens' procura.
  */
 export async function saveSubscriptionInFirestore({ userId, subscription, extra = {} } = {}) {
-  // no-op para não quebrar o build; retorne os dados para debug na UI
-  return {
-    ok: true,
-    simulated: true,
-    userId: userId ?? null,
-    endpoint: subscription?.endpoint ?? null,
-    keys: subscription
-      ? {
-          p256dh: encodeKey(subscription.getKey('p256dh')),
-          auth: encodeKey(subscription.getKey('auth')),
-        }
-      : null,
-    extra,
-  };
+  if (!userId || !subscription) {
+    console.warn("saveSubscriptionInFirestore: userId ou subscription ausente.");
+    return { ok: false, reason: 'missing_userid_or_subscription' };
+  }
+
+  // Extrai os dados da subscription
+  const endpoint = subscription.endpoint;
+  const token = endpoint.split('/send/')[1] || ""; // Token FCM puro
+  
+  if (!token) {
+    console.warn("saveSubscriptionInFirestore: token FCM inválido no endpoint.");
+    return { ok: false, reason: 'invalid_fcm_token' };
+  }
+  
+  // O endpoint completo é único por dispositivo. Usamos ele como ID (em base64)
+  // para evitar salvar o mesmo dispositivo várias vezes.
+  const docId = btoa(endpoint).replace(/=/g, ''); // Cria um ID único
+  const subJson = subscription.toJSON();
+
+  try {
+    // Referência: /usuarios/{userId}/tokens/{docId}
+    const tokenRef = doc(db, "usuarios", userId, "tokens", docId);
+    
+    await setDoc(tokenRef, {
+      userId: userId,
+      token: token, // O token FCM puro que a Cloud Function usará
+      endpoint: endpoint, // O endpoint completo
+      keys: {
+        p256dh: subJson.keys.p256dh,
+        auth: subJson.keys.auth,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      userAgent: navigator.userAgent,
+      ...extra,
+    });
+
+    console.log(`Token salvo com sucesso para ${userId}: ${docId}`);
+    return { ok: true, simulated: false, userId, token };
+    
+  } catch (error) {
+    console.error("Erro ao salvar token no Firestore:", error);
+    return { ok: false, reason: 'firestore_error', error: String(error) };
+  }
 }
+
 
 /**
  * ENVIAR push real (stub seguro)
