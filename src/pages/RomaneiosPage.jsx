@@ -70,7 +70,7 @@ export default function RomaneiosPage() {
   const area = normalize(userProfile?.area);
   const isAdmin = funcao === "administrador" || funcao === "admin";
   const isGerente = funcao === "gerente";
-  const isOperadorLog = funcao === "operador" and area === "logistica";
+  const isOperadorLog = funcao === "operador" && area === "logistica";
 
   // --- estado lista/consulta
   const [romaneios, setRomaneios] = useState([]);
