@@ -1,0 +1,11 @@
+# .eslintignore
+
+# Ignora a pasta 'public' (onde estão os Service Workers)
+public/
+
+# Ignora a pasta de build
+dist/
+build/
+
+# Ignora node_modules
+node_modules/
