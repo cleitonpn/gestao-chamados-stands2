@@ -1,16 +1,17 @@
 // functions/index.js
-// ARQUIVO MESCLADO: Contém as funções de Push e as funções do App (upload, updates)
+// ARQUIVO MESCLADO E CORRIGIDO (serverTimestamp)
 
 // ==========================================================
-// IMPORTS (COMBINADOS DE AMBOS OS ARQUIVOS)
+// IMPORTS (COMBINADOS E CORRIGIDOS)
 // ==========================================================
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import { getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore, serverTimestamp } from "firebase-admin/firestore";
+// ⬇️ CORREÇÃO APLICADA AQUI: Trocamos 'serverTimestamp' por 'FieldValue'
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-import { getStorage } from "firebase-admin/storage"; // Importado para o uploadImage
+import { getStorage } from "firebase-admin/storage";
 
 // ==========================================================
 // INICIALIZAÇÃO DO FIREBASE (Estilo modular v2)
@@ -146,7 +147,7 @@ async function pushAndPersist({ recipientId, title, body, data }) {
     body,
     data: data || {},
     read: false,
-    createdAt: new Date(),
+    createdAt: new Date(), // Usamos 'new Date()' para o in-app, está OK.
   });
   const tokens = await getUserTokens(recipientId);
   if (!tokens.length) {
@@ -314,8 +315,9 @@ export const createFinancialTicket = onCall({ cors: true }, async (request) => {
             executadoEm: null,
             historicoStatus: [],
             imagens: [],
-            criadoEm: serverTimestamp(), // Convertido de FieldValue
-            updatedAt: serverTimestamp(), // Convertido de FieldValue
+            // ⬇️ CORREÇÃO APLICADA AQUI ⬇️
+            criadoEm: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         };
         const newTicketRef = await db.collection('chamados').add(newFinancialTicket);
         await newTicketRef.update({ id: newTicketRef.id });
@@ -475,7 +477,8 @@ async function handleTicketExecuted(ticket, project) {
             const updateData = {
                 status: 'executado_aguardando_validacao_operador',
                 responsavelAtual: ticket.criadoPor,
-                updatedAt: serverTimestamp() // Convertido
+                // ⬇️ CORREÇÃO APLICADA AQUI ⬇️
+                updatedAt: FieldValue.serverTimestamp()
             };
             if (creatorData?.area) {
                 updateData.area = creatorData.area;
@@ -521,7 +524,7 @@ export const uploadImage = onCall(async (request) => {
     }
     try {
         const buffer = Buffer.from(imageData, "base64");
-        const bucket = storage.bucket(); // Convertido de admin.storage()
+        const bucket = storage.bucket();
         const file = bucket.file(`chamados/${ticketId}/${fileName}`);
         await file.save(buffer, {
             metadata: {
