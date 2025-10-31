@@ -4,71 +4,78 @@ import {
   addDoc,
   collection,
   doc,
-  getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
-  where,
-  Timestamp,
-  limit,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 
+// Coleção padrão
 const COL = "romaneios";
+
+function mapSnap(docSnap) {
+  const d = docSnap.data() || {};
+  return { id: docSnap.id, ...d };
+}
 
 export const romaneioService = {
   async create(payload) {
-    const ref = await addDoc(collection(db, COL), {
-      status: payload.status ?? "agendado",
-      eventIds: payload.eventIds || [],
-      eventNames: payload.eventNames || [],
-      projectIds: payload.projectIds || [],
-      projectNames: payload.projectNames || [],
-      motivo: payload.motivo || "",
-      setores: payload.setores || [],
-      tipoVeiculo: payload.tipoVeiculo || "",
-      fornecedor: payload.fornecedor || "",
-      placa: payload.placa || "",
-      dataSaida: payload.dataSaida ? Timestamp.fromDate(new Date(payload.dataSaida)) : null,
-      tiposItens: payload.tiposItens || [],
-      itens: payload.itens || [],
-      ticketId: payload.ticketId || null,
-      createdBy: payload.createdBy || null,
+    const data = {
+      ...payload,
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+    };
+    const colRef = collection(db, COL);
+    await addDoc(colRef, data);
+  },
+
+  // listener de todos os romaneios (sem filtro no server)
+  listenAll(callback) {
+    const colRef = collection(db, COL);
+    // ordenar por createdAt quando disponível; se não houver, o onSnapshot retorna sem ordenação garantida
+    let q = query(colRef);
+    try {
+      q = query(colRef, orderBy("createdAt", "desc"));
+    } catch (_) {}
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map(mapSnap);
+        callback(list);
+      },
+      (err) => {
+        console.error("[romaneioService.listenAll] onSnapshot error:", err);
+      }
+    );
+    return unsub;
+  },
+
+  async listOnce() {
+    const snap = await getDocs(collection(db, COL));
+    return snap.docs.map(mapSnap);
+  },
+
+  async marcarEntregue(id) {
+    const ref = doc(db, COL, id);
+    await updateDoc(ref, {
+      status: "entregue",
+      deliveredAt: serverTimestamp(),
     });
-    return ref.id;
   },
 
-  async getById(id) {
-    const snap = await getDoc(doc(db, COL, id));
-    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
-  },
-
-  async setStatus(id, status) {
-    await updateDoc(doc(db, COL, id), { status, updatedAt: serverTimestamp() });
-  },
-
-  async setDelivered(id) {
-    await updateDoc(doc(db, COL, id), { status: "entregue", updatedAt: serverTimestamp() });
-  },
-
-  async linkTicket(id, ticketId) {
-    await updateDoc(doc(db, COL, id), { ticketId, updatedAt: serverTimestamp() });
-  },
-
-  subscribeList({ eventId, statusArr, orderDesc = true, onlyRecent = true }, cb) {
-    const cons = [collection(db, COL)];
-    const wh = [];
-    if (eventId) wh.push(where("eventIds", "array-contains", eventId));
-    if (statusArr?.length) wh.push(where("status", "in", statusArr));
-    const ord = orderBy("dataSaida", orderDesc ? "desc" : "asc");
-    const lim = onlyRecent ? limit(200) : undefined;
-    const q = query(...cons, ...wh, ord, ...(lim ? [lim] : []));
-    return onSnapshot(q, (snap) => {
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      cb(rows);
-    });
+  // Export simples para XLSX (precisa do pacote xlsx no projeto)
+  async exportExcel() {
+    try {
+      const rows = await this.listOnce();
+      const { utils, writeFile } = await import("xlsx");
+      const sheet = utils.json_to_sheet(rows);
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, sheet, "Romaneios");
+      writeFile(wb, "romaneios.xlsx");
+    } catch (e) {
+      console.error("[romaneioService.exportExcel] erro:", e);
+      throw e;
+    }
   },
 };
