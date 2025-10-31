@@ -1,3 +1,4 @@
+// src/pages/RomaneiosPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { romaneioService } from "../services/romaneioService";
@@ -33,8 +34,8 @@ const tiposItensOptions = ["marcenaria", "tapeçaria", "balcões", "comunicaçã
 
 function dateToYMD(d) {
   if (!d) return "";
-  const dt = d.seconds ? new Date(d.seconds * 1000) : new Date(d);
-  return dt.toISOString().slice(0, 10);
+  const dt = d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
+  return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
 }
 
 function toCSV(rows) {
@@ -132,7 +133,6 @@ function NovoRomaneioModal({ onCreated }) {
   const [itens, setItens] = useState([]);
   const [ticketId, setTicketId] = useState("");
 
-  // permitir: administrador OU (gerente/operador da área de logística)
   const isAdmin = profile?.funcao === "administrador";
   const isLogisticaOp = ["gerente", "operador"].includes(profile?.funcao) && profile?.area === "logistica";
   const canCreate = isAdmin || isLogisticaOp;
@@ -252,7 +252,7 @@ function NovoRomaneioModal({ onCreated }) {
             </Select>
           </div>
 
-          <MultiSelect label="Setor responsável" options={setoresOptions} values={setores} onChange={setSetores} />
+          <MultiSelect label="Setor responsável" options={setoresOptions} values={setSetores} onChange={setSetores} />
 
           <div>
             <Label className="text-xs">Tipo de veículo</Label>
@@ -466,7 +466,6 @@ export default function RomaneiosPage() {
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={exportar} className="gap-2"><Download className="h-4 w-4"/> Exportar CSV</Button>
-          {/* Botão habilita para admin ou logística (gerente/operador) */}
           <NovoRomaneioModal onCreated={()=>{}}/>
         </div>
       </div>
