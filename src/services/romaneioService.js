@@ -10,9 +10,10 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  where,
+  limit,
 } from "firebase/firestore";
 
-// Coleção padrão
 const COL = "romaneios";
 
 function mapSnap(docSnap) {
@@ -30,10 +31,8 @@ export const romaneioService = {
     await addDoc(colRef, data);
   },
 
-  // listener de todos os romaneios (sem filtro no server)
   listenAll(callback) {
     const colRef = collection(db, COL);
-    // ordenar por createdAt quando disponível; se não houver, o onSnapshot retorna sem ordenação garantida
     let q = query(colRef);
     try {
       q = query(colRef, orderBy("createdAt", "desc"));
@@ -56,6 +55,11 @@ export const romaneioService = {
     return snap.docs.map(mapSnap);
   },
 
+  async registrarSaida(id) {
+    const ref = doc(db, COL, id);
+    await updateDoc(ref, { departedAt: serverTimestamp() });
+  },
+
   async marcarEntregue(id) {
     const ref = doc(db, COL, id);
     await updateDoc(ref, {
@@ -64,7 +68,44 @@ export const romaneioService = {
     });
   },
 
-  // Export simples para XLSX (precisa do pacote xlsx no projeto)
+  async ensureDriverToken(id) {
+    // se já existir, retorna
+    try {
+      const colRef = collection(db, COL);
+      const snap = await getDocs(query(colRef, where("__name__", "==", id)));
+      if (!snap.empty) {
+        const docData = snap.docs[0];
+        const data = docData.data() || {};
+        if (data.driverLinkToken) return data.driverLinkToken;
+      }
+    } catch {}
+
+    // cria token e salva
+    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const ref = doc(db, COL, id);
+    await updateDoc(ref, {
+      driverLinkToken: token,
+      driverLinkCreatedAt: serverTimestamp(),
+    });
+    return token;
+  },
+
+  async getByDriverToken(token) {
+    const colRef = collection(db, COL);
+    const snap = await getDocs(query(colRef, where("driverLinkToken", "==", token), limit(1)));
+    if (snap.empty) return null;
+    return mapSnap(snap.docs[0]);
+  },
+
+  async marcarEntregueByToken(token) {
+    const colRef = collection(db, COL);
+    const snap = await getDocs(query(colRef, where("driverLinkToken", "==", token), limit(1)));
+    if (snap.empty) return false;
+    const ref = doc(db, COL, snap.docs[0].id);
+    await updateDoc(ref, { status: "entregue", deliveredAt: serverTimestamp() });
+    return true;
+  },
+
   async exportExcel() {
     try {
       const rows = await this.listOnce();
