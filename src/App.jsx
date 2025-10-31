@@ -305,7 +305,18 @@ function App() {
                 element={<RomaneioDriverPage />}
               />
 
-              {/* Redirecionamentos */}
+              {
+              {/* === Admin acesso aos Romaneios === */}
+              <Route
+                path="/admin/romaneios"
+                element={
+                  <ProtectedRoute requiredRole="administrador">
+                    <RomaneiosPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              /* Redirecionamentos */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
