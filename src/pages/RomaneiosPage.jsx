@@ -116,7 +116,7 @@ export default function RomaneiosPage() {
     dataSaida: "", // YYYY-MM-DD
     tiposDeItens: [],
     itensLinhas: [""],
-    vincularChamadoId: "",
+    vincularChamadoId: undefined, // importantíssimo: evitar "" no Select
   });
 
   const [projetosDoEvento, setProjetosDoEvento] = useState([]);
@@ -138,9 +138,16 @@ export default function RomaneiosPage() {
     })();
   }, []);
 
+  // 🔄 Assinatura em tempo real (troca listenAll → subscribe)
   useEffect(() => {
-    const unsub = romaneioService.listenAll((list) => setRomaneios(list));
-    return () => unsub && unsub();
+    const unsubscribe = romaneioService.subscribe(
+      {},
+      (list) => setRomaneios(list),
+      (err) => console.error("[Romaneios] subscribe error:", err)
+    );
+    return () => {
+      try { typeof unsubscribe === "function" && unsubscribe(); } catch {}
+    };
   }, []);
 
   useEffect(() => {
@@ -266,7 +273,7 @@ export default function RomaneiosPage() {
     dataSaida: "",
     tiposDeItens: [],
     itensLinhas: [""],
-    vincularChamadoId: "",
+    vincularChamadoId: undefined,
   });
 
   const salvar = async () => {
@@ -289,7 +296,7 @@ export default function RomaneiosPage() {
         dataSaidaDate: form.dataSaida,
         tiposDeItens: form.tiposDeItens,
         itens: form.itensLinhas.filter((l) => l.trim() !== ""),
-        vincularChamadoId: form.vincularChamadoId.trim() || null,
+        vincularChamadoId: form.vincularChamadoId ?? null,
         status: "ativo",
       };
       await romaneioService.create(payload);
@@ -312,19 +319,20 @@ export default function RomaneiosPage() {
     }
   };
 
+  // ⏱ carimbar saída agora (novo nome no service)
   const registrarSaida = async (id) => {
     try {
-      await romaneioService.registrarSaida(id);
+      await romaneioService.markShippedNow(id);
     } catch (e) {
       console.error("Erro ao registrar saída", e);
       alert("Falha ao registrar saída.");
     }
   };
 
+  // 🔗 link do motorista (service já retorna a URL completa)
   const gerarLinkMotorista = async (id) => {
     try {
-      const token = await romaneioService.ensureDriverToken(id);
-      const url = `${window.location.origin}/#/driver/romaneio/${token}`;
+      const url = await romaneioService.ensureDriverLinkUrl(id);
       await navigator.clipboard.writeText(url);
       alert(`Link copiado:\n${url}`);
     } catch (e) {
@@ -334,7 +342,11 @@ export default function RomaneiosPage() {
   };
 
   const romaneiosFiltrados = useMemo(() => {
-    let base = [...romaneios].sort((a, b) => (new Date(b.createdAt?.seconds ? b.createdAt.seconds*1000 : b.createdAt || 0)) - (new Date(a.createdAt?.seconds ? a.createdAt.seconds*1000 : a.createdAt || 0)));
+    let base = [...romaneios].sort(
+      (a, b) =>
+        (new Date(b.createdAt?.seconds ? b.createdAt.seconds * 1000 : b.createdAt || 0)) -
+        (new Date(a.createdAt?.seconds ? a.createdAt.seconds * 1000 : a.createdAt || 0))
+    );
     if (ativosVisiveis) base = base.filter((r) => r.status !== "entregue");
     if (filtroEvento !== "todos") base = base.filter((r) => r.eventoId === filtroEvento);
     return base;
@@ -430,7 +442,7 @@ export default function RomaneiosPage() {
                 {r.status !== "entregue" && (
                   <Button
                     variant="default"
-                    onClick={() => romaneioService.marcarEntregue(r.id)}
+                    onClick={() => romaneioService.markDelivered(r.id)}
                   >
                     <CheckCircle2 className="h-4 w-4 mr-2" />
                     Marcar como entregue
@@ -612,7 +624,7 @@ export default function RomaneiosPage() {
             <div className="space-y-2 md:col-span-2">
               <Label>Vincular a chamado (opcional)</Label>
               <Select
-                value={form.vincularChamadoId || ""}
+                value={form.vincularChamadoId ?? undefined}
                 onValueChange={(v) => setForm((p) => ({ ...p, vincularChamadoId: v }))}
               >
                 <SelectTrigger className="h-9">
