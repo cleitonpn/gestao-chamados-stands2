@@ -1,31 +1,35 @@
 // functions/index.js
-// ARQUIVO MESCLADO E CORRIGIDO (serverTimestamp)
+// ARQUIVO FINAL MESCLADO (Push + App) E CORRIGIDO (onProjetoCreated)
 
 // ==========================================================
-// IMPORTS (COMBINADOS E CORRIGIDOS)
+// IMPORTS
 // ==========================================================
 import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import { getApps, initializeApp } from "firebase-admin/app";
-// ⬇️ CORREÇÃO APLICADA AQUI: Trocamos 'serverTimestamp' por 'FieldValue'
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getStorage } from "firebase-admin/storage";
 
 // ==========================================================
-// INICIALIZAÇÃO DO FIREBASE (Estilo modular v2)
+// INICIALIZAÇÃO DO FIREBASE
 // ==========================================================
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 const storage = getStorage();
 
-// Constantes do index (10).js
+// Constantes
 const APP_URL = 'https://nbzeukei.manus.space';
 const SENDGRID_SERVICE_URL = 'https://p9hwiqcl8p89.manus.space';
+const MESSAGES_COLLECTION = "mensagens";
+const TICKETS_COLLECTION = "tickets";
+const USERS_COLLECTION = "usuarios";
+const NOTIFICATIONS_COLL = "notifications";
+const PROJETOS_COLLECTION = "projetos";
 
 // ==========================================================
-// HELPER FUNCTIONS (Do index (10).js - Lógica do App)
+// HELPER FUNCTIONS (Lógica do App)
 // ==========================================================
 async function getProjectData(projectId) {
     try {
@@ -110,14 +114,8 @@ async function sendEmailViaSendGrid(recipients, subject, eventType, ticketData, 
 }
 
 // ==========================================================
-// HELPER FUNCTIONS (Do index (17).js - Push)
+// HELPER FUNCTIONS (Push)
 // ==========================================================
-const MESSAGES_COLLECTION = "mensagens";
-const TICKETS_COLLECTION = "tickets";
-const USERS_COLLECTION = "usuarios";
-const NOTIFICATIONS_COLL = "notifications";
-const PROJETOS_COLLECTION = "projetos";
-
 async function getUserTokens(uid) {
   if (!uid) return [];
   try {
@@ -147,7 +145,7 @@ async function pushAndPersist({ recipientId, title, body, data }) {
     body,
     data: data || {},
     read: false,
-    createdAt: new Date(), // Usamos 'new Date()' para o in-app, está OK.
+    createdAt: new Date(),
   });
   const tokens = await getUserTokens(recipientId);
   if (!tokens.length) {
@@ -173,7 +171,7 @@ async function pushAndPersist({ recipientId, title, body, data }) {
 // ||        ✅ EXPORTS DAS FUNÇÕES (TODAS JUNTAS)         ||
 // =================================================================
 
-// --- Funções de Notificação Push (do index (17).js) ---
+// --- Funções de Notificação Push ---
 
 export const notify = onRequest({ cors: true }, async (req, res) => {
   try {
@@ -234,6 +232,7 @@ export const onMensagemCreated = onDocumentCreated(
   }
 );
 
+// ⬇️⬇️ FUNÇÃO onProjetoCreated CORRIGIDA ⬇️⬇️
 export const onProjetoCreated = onDocumentCreated(
   `${PROJETOS_COLLECTION}/{projetoId}`,
   async (event) => {
@@ -241,17 +240,24 @@ export const onProjetoCreated = onDocumentCreated(
     if (!snap) return;
     const projeto = snap.data();
     logger.info(`Novo projeto detectado: ${snap.id}`, projeto);
-    const comercialId = projeto.comercialId || projeto.comercial;
-    const produtorId = projeto.produtorId || projeto.produtor;
-    if (!comercialId && !produtorId) {
-      logger.warn("Projeto criado sem 'comercialId' ou 'produtorId'. Nenhuma notificação enviada.");
+
+    // CORREÇÃO: Procurando por 'consultorId' e 'produtorId'
+    const consultorId = projeto.consultorId || projeto.consultorUid;
+    const produtorId = projeto.produtorId || projeto.produtorUid;
+
+    if (!consultorId && !produtorId) {
+      // Log corrigido
+      logger.warn("Projeto criado sem 'consultorId' ou 'produtorId'. Nenhuma notificação enviada.");
       return;
     }
+    
     const titulo = "Novo Projeto Criado!";
     const body = `Você foi associado ao projeto: ${projeto.nome || snap.id}`;
+    
     const recipientIds = new Set();
-    if (comercialId) recipientIds.add(comercialId);
+    if (consultorId) recipientIds.add(consultorId);
     if (produtorId) recipientIds.add(produtorId);
+    
     await Promise.all(
       [...recipientIds].map((uid) =>
         pushAndPersist({
@@ -315,7 +321,6 @@ export const createFinancialTicket = onCall({ cors: true }, async (request) => {
             executadoEm: null,
             historicoStatus: [],
             imagens: [],
-            // ⬇️ CORREÇÃO APLICADA AQUI ⬇️
             criadoEm: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
         };
@@ -477,7 +482,6 @@ async function handleTicketExecuted(ticket, project) {
             const updateData = {
                 status: 'executado_aguardando_validacao_operador',
                 responsavelAtual: ticket.criadoPor,
-                // ⬇️ CORREÇÃO APLICADA AQUI ⬇️
                 updatedAt: FieldValue.serverTimestamp()
             };
             if (creatorData?.area) {
@@ -525,7 +529,7 @@ export const uploadImage = onCall(async (request) => {
     try {
         const buffer = Buffer.from(imageData, "base64");
         const bucket = storage.bucket();
-        const file = bucket.file(`chamados/${ticketId}/${fileName}`);
+        const file = bucket.file(`chamados/${ticketId}/${fileName`);
         await file.save(buffer, {
             metadata: {
                 contentType: "image/jpeg",
