@@ -15,10 +15,6 @@ import {
 } from "firebase/firestore";
 import { db } from "@/config/firebase";
 
-// Se você já usa nanoid no projeto:
-import { customAlphabet } from "nanoid/non-secure";
-const nanoid = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 24);
-
 const COL_ROMANEIOS = "romaneios";
 const COL_LINKS = "romaneio_links";
 
@@ -30,11 +26,10 @@ function linksRef() {
 }
 
 async function create(payload) {
-  // createdAt + status padronizados
   const data = {
     ...payload,
     createdAt: serverTimestamp(),
-    status: payload?.status || "ativo", // "ativo" até sair
+    status: payload?.status || "ativo", // padrão: ativo
   };
   const ref = await addDoc(romaneiosRef(), data);
   return ref.id;
@@ -53,7 +48,7 @@ async function registrarSaida(romaneioId) {
   const ref = doc(db, COL_ROMANEIOS, romaneioId);
   await updateDoc(ref, {
     departedAt: serverTimestamp(),
-    status: "em_transito", // para pintar “roxo/lilás”
+    status: "em_transito", // para colorir roxo/lilás
   });
 }
 
@@ -66,22 +61,21 @@ async function marcarEntregue(romaneioId) {
 }
 
 /**
- * Garante um token público para o motorista acessar (URL curta).
- * Se já existir token para esse romaneio, reaproveita.
- * Estrutura: /romaneio_links/{token} => { romaneioId, createdAt }
+ * Garante um token público (ID) para o motorista acessar.
+ * Usa ID automático do Firestore (sem nanoid).
  */
 async function ensureDriverToken(romaneioId) {
-  // tenta reaproveitar (busca por romaneioId):
+  // Reutiliza se já existir
   const q = query(linksRef(), where("romaneioId", "==", romaneioId));
   const snap = await getDocs(q);
   if (!snap.empty) {
-    const first = snap.docs[0];
-    return first.id; // token
+    return snap.docs[0].id; // token existente
   }
 
-  // cria novo token
-  const token = nanoid();
-  await setDoc(doc(db, COL_LINKS, token), {
+  // Cria novo token usando ID automático
+  const linkDocRef = doc(linksRef()); // gera ID
+  const token = linkDocRef.id;
+  await setDoc(linkDocRef, {
     romaneioId,
     createdAt: serverTimestamp(),
   });
@@ -89,30 +83,27 @@ async function ensureDriverToken(romaneioId) {
 }
 
 /**
- * Lê o romaneio através do token do motorista.
- * Fluxo:
- *   1) /romaneio_links/{token} => { romaneioId }
- *   2) /romaneios/{romaneioId}
+ * Busca romaneio via token do motorista.
+ * 1) /romaneio_links/{token} => { romaneioId }
+ * 2) /romaneios/{romaneioId}
  */
 async function getByDriverToken(token) {
   if (!token) throw new Error("Token ausente.");
   const linkSnap = await getDoc(doc(db, COL_LINKS, token));
-  if (!linkSnap.exists()) {
-    throw new Error("Link inválido ou expirado.");
-  }
+  if (!linkSnap.exists()) throw new Error("Link inválido ou expirado.");
+
   const { romaneioId } = linkSnap.data() || {};
   if (!romaneioId) throw new Error("Link inválido (sem romaneioId).");
 
   const romSnap = await getDoc(doc(db, COL_ROMANEIOS, romaneioId));
-  if (!romSnap.exists()) {
-    throw new Error("Romaneio não encontrado.");
-  }
+  if (!romSnap.exists()) throw new Error("Romaneio não encontrado.");
+
   return { id: romSnap.id, ...romSnap.data() };
 }
 
 /**
- * Exporta para Excel (.xlsx) — requer 'xlsx' no projeto:
- *   pnpm add xlsx
+ * Exporta em Excel (.xlsx)
+ * Necessário ter o pacote 'xlsx' instalado (pnpm add xlsx).
  */
 async function exportExcel() {
   const rows = [];
@@ -133,20 +124,19 @@ async function exportExcel() {
     });
   });
 
-  const xlsx = await import("xlsx"); // code-split se quiser
+  const xlsx = await import("xlsx");
   const ws = xlsx.utils.json_to_sheet(rows);
   const wb = xlsx.utils.book_new();
   xlsx.utils.book_append_sheet(wb, ws, "Romaneios");
   const wbout = xlsx.write(wb, { bookType: "xlsx", type: "array" });
 
   const blob = new Blob([wbout], {
-    type:
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `romaneios_${new Date().toISOString().slice(0,10)}.xlsx`;
+  a.download = `romaneios_${new Date().toISOString().slice(0, 10)}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -157,6 +147,6 @@ export const romaneioService = {
   registrarSaida,
   marcarEntregue,
   ensureDriverToken,
-  getByDriverToken,      // <-- ESTE É O QUE A TELA DO MOTORISTA VAI USAR
+  getByDriverToken,
   exportExcel,
 };
