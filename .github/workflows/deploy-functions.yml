@@ -31,7 +31,7 @@ jobs:
           npm install --no-audit --no-fund
           cd ..
 
-      # injeta/chaveia os Secrets do repositório -> Secret Manager do Firebase
+      # ⬇️⬇️ ETAPA CORRIGIDA (SINTAXE DO 'run' MUDOU) ⬇️⬇️
       - name: Set Firebase Secrets (VAPID)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
@@ -40,16 +40,15 @@ jobs:
           WEBPUSH_PUBLIC_KEY:  ${{ secrets.WEBPUSH_PUBLIC_KEY }}
           WEBPUSH_SUBJECT:     ${{ secrets.WEBPUSH_SUBJECT }}
         run: |
-          firebase functions:secrets:set WEBPUSH_PRIVATE_KEY --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_PRIVATE_KEY" --force
-          firebase functions:secrets:set WEBPUSH_PUBLIC_KEY  --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_PUBLIC_KEY"  --force
-          firebase functions:secrets:set WEBPUSH_SUBJECT     --project "$FIREBASE_PROJECT_ID" --data "$WEBPUSH_SUBJECT"     --force
+          # Usamos 'echo' e o pipe '|' para enviar o valor ao Firebase
+          echo "$WEBPUSH_PRIVATE_KEY" | firebase functions:secrets:set WEBPUSH_PRIVATE_KEY --project "$FIREBASE_PROJECT_ID" --non-interactive
+          echo "$WEBPUSH_PUBLIC_KEY" | firebase functions:secrets:set WEBPUSH_PUBLIC_KEY --project "$FIREBASE_PROJECT_ID" --non-interactive
+          echo "$WEBPUSH_SUBJECT" | firebase functions:secrets:set WEBPUSH_SUBJECT --project "$FIREBASE_PROJECT_ID" --non-interactive
 
-      # ⬇️⬇️ ETAPA CORRIGIDA ⬇️⬇️
+      # Esta etapa já estava corrigida para enviar TODAS as functions
       - name: Deploy ALL Functions (v2)
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          # Removemos o filtro "--only" específico
-          # Agora ele envia TODAS as functions do seu index.js
           firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive --force
