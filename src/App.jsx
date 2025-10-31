@@ -19,7 +19,7 @@ import OperationalDashboard from './pages/OperationalDashboard';
 import OperationalPanel from './pages/OperationalPanel';
 import TVPanel from './pages/TVPanel';
 import CronogramaPage from './pages/CronogramaPage';
-import AdminPanelPage from './pages/AdminPanelPage';
+import AdminPanelPage from './pages/AdminPanelPage'];
 import ChamadosFiltradosPage from './pages/ChamadosFiltradosPage';
 import EventsPage from './pages/EventsPage';
 import GamingPage from './pages/GamingPage';
@@ -28,7 +28,7 @@ import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
 
-// === NEW (Logística - Romaneios) ===
+// === Logística - Romaneios ===
 import RomaneiosPage from "./pages/RomaneiosPage";
 import RomaneioDriverPage from "./pages/RomaneioDriverPage";
 
@@ -290,7 +290,7 @@ function App() {
                 }
               />
 
-              {/* === NEW ROUTES: Logística / Romaneios === */}
+              {/* === Logística / Romaneios === */}
               <Route
                 path="/logistica/romaneios"
                 element={
@@ -300,13 +300,8 @@ function App() {
                 }
               />
               {/* Link público para motorista (via link/QR) */}
-              <Route
-                path="/logistica/romaneios/:id/driver"
-                element={<RomaneioDriverPage />}
-              />
-
-              {
-              {/* === Admin acesso aos Romaneios === */}
+              <Route path="/logistica/romaneios/:id/driver" element={<RomaneioDriverPage />} />
+              {/* Rota alternativa para administradores */}
               <Route
                 path="/admin/romaneios"
                 element={
@@ -316,7 +311,7 @@ function App() {
                 }
               />
 
-              /* Redirecionamentos */}
+              {/* Redirecionamentos */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
