@@ -27,6 +27,7 @@ import ProjectSummaryPage from "./pages/ProjectSummaryPage";
 import ContractorProjectPage from "./pages/ContractorProjectPage";
 import AllDiariesPage from './pages/AllDiariesPage';
 import UserProfilePage from "./pages/UserProfilePage";
+import RomaneioDriverPage from "./pages/RomaneioDriverPage";
 
 // Logística - Romaneios
 import RomaneiosPage from "./pages/RomaneiosPage";
@@ -245,6 +246,12 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
+              <Route 
+                path="/driver/romaneio/:token" 
+                element={
+                <RomaneioDriverPage />} />
+
 
               <Route
                 path="/templates"
