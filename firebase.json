@@ -32,6 +32,7 @@
       ".git",
       ".github",
       "**/lib/**"
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",
@@ -41,4 +42,3 @@
     "rules": "storage.rules"
   }
 }
-
