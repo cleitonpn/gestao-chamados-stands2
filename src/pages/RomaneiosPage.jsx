@@ -4,7 +4,6 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { romaneioService } from "../services/romaneioService";
 import { projectService } from "../services/projectService";
-// Firestore direto para eventos/projetos/chamados (fallbacks)
 import { db } from "../config/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 
@@ -19,10 +18,35 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Download, Plus, Truck, CheckCircle2, Filter } from "lucide-react";
+import { Download, Plus, Truck, CheckCircle2, Filter, Send, Link as LinkIcon } from "lucide-react";
 
 function normalize(s) {
-  return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return (s || "").toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
+function tsToDate(ts) {
+  try {
+    if (!ts) return null;
+    if (typeof ts.toDate === "function") return ts.toDate();
+    if (ts.seconds) return new Date(ts.seconds * 1000);
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
+function formatDateBR(dateStr) {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("pt-BR");
+}
+
+function formatTimeBR(ts) {
+  const d = tsToDate(ts);
+  if (!d) return "-";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 const motivoOptions = [
@@ -89,46 +113,36 @@ export default function RomaneiosPage() {
     tipoVeiculo: undefined,
     fornecedor: "interno",
     placa: "",
-    dataSaida: "",
+    dataSaida: "", // YYYY-MM-DD
     tiposDeItens: [],
     itensLinhas: [""],
     vincularChamadoId: "",
   });
 
   const [projetosDoEvento, setProjetosDoEvento] = useState([]);
-  const [ticketsLogistica, setTicketsLogistica] = useState([]); // para vínculo
+  const [ticketsLogistica, setTicketsLogistica] = useState([]);
   const canCreate = isAdmin || isGerente || isOperadorLog;
 
-  // === Carrega EVENTOS diretamente de 'eventos' ===
   useEffect(() => {
     (async () => {
       try {
-        const colRef = collection(db, "eventos");
-        const q = query(colRef, where("ativo", "==", true));
-        const snap = await getDocs(q);
+        const qy = query(collection(db, "eventos"), where("ativo", "==", true));
+        const snap = await getDocs(qy);
         let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         list = list.filter((e) => e.arquivado !== true);
         list.sort((a, b) => (a?.nome || "").localeCompare(b?.nome || "", undefined, { sensitivity: "base" }));
         setEventos(list);
-        console.debug("[Romaneios] Eventos carregados:", list.length);
       } catch (e) {
         console.error("[Romaneios] Falha ao carregar eventos:", e);
-        setEventos([]);
       }
     })();
   }, []);
 
-  // === Listener de romaneios ===
   useEffect(() => {
-    try {
-      const unsub = romaneioService.listenAll((list) => setRomaneios(list));
-      return () => unsub && unsub();
-    } catch (e) {
-      console.error("Falha ao escutar romaneios", e);
-    }
+    const unsub = romaneioService.listenAll((list) => setRomaneios(list));
+    return () => unsub && unsub();
   }, []);
 
-  // === Carrega projetos quando evento muda (usa projectService e fallback Firestore) ===
   useEffect(() => {
     (async () => {
       if (!form.eventoId) {
@@ -136,14 +150,11 @@ export default function RomaneiosPage() {
         return;
       }
       try {
-        // 1) tenta via service padrão
         let projs = [];
         try {
           projs = await projectService.getProjectsByEvent(form.eventoId);
-        } catch (_) {}
-        // 2) fallback direto no Firestore, cobrindo 'projetos' e 'projects' e campos 'eventoId'/'eventId'
+        } catch {}
         if (!projs || projs.length === 0) {
-          let list = [];
           const tries = [
             { col: "projetos", field: "eventoId" },
             { col: "projetos", field: "eventId" },
@@ -152,67 +163,55 @@ export default function RomaneiosPage() {
           ];
           for (const t of tries) {
             try {
-              const colRef = collection(db, t.col);
-              const q = query(colRef, where(t.field, "==", form.eventoId));
-              const snap = await getDocs(q);
-              list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-              if (list.length) break;
-            } catch (_) {}
+              const qy = query(collection(db, t.col), where(t.field, "==", form.eventoId));
+              const snap = await getDocs(qy);
+              const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              if (list.length) { projs = list; break; }
+            } catch {}
           }
-          projs = list;
         }
-        // ordena por nome
         projs = (projs || []).sort((a, b) => (a?.nome || "").localeCompare(b?.nome || "", undefined, { sensitivity: "base" }));
         setProjetosDoEvento(projs || []);
       } catch (e) {
-        console.error("Falha ao carregar projetos do evento", e);
+        console.error("Falha ao carregar projetos", e);
       }
     })();
   }, [form.eventoId]);
 
-  // === Carrega chamados de logística para vínculo ===
   useEffect(() => {
     (async () => {
       try {
         let list = [];
         const areas = ["logistica", "logística", "Logistica", "Logística"];
-        const statuses = ["aberto", "em_tratativa", "aberta", "open"];
-        // tenta 'chamados'
         try {
-          const colRef = collection(db, "chamados");
-          const q = query(colRef, where("areaDestino", "in", areas));
-          const snap = await getDocs(q);
+          const qy = query(collection(db, "chamados"), where("areaDestino", "in", areas));
+          const snap = await getDocs(qy);
           list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        } catch (_) {}
-        // fallback 'tickets'
+        } catch {}
         if (list.length === 0) {
           try {
-            const colRef = collection(db, "tickets");
-            const q = query(colRef, where("areaDestino", "in", areas));
-            const snap = await getDocs(q);
+            const qy = query(collection(db, "tickets"), where("areaDestino", "in", areas));
+            const snap = await getDocs(qy);
             list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          } catch (_) {}
+          } catch {}
         }
-        // filtra status e, se houver evento selecionado, prioriza os daquele evento
-        list = list.filter((t) => !t.status || statuses.includes(normalize(t.status)));
-        // guarda
         setTicketsLogistica(list);
       } catch (e) {
-        console.error("Falha ao carregar chamados p/ vínculo", e);
-        setTicketsLogistica([]);
+        console.error("Falha ao carregar chamados", e);
       }
     })();
-  }, [form.eventoId]); // atualiza quando escolher evento
+  }, [form.eventoId]);
 
-  const eventosOptions = useMemo(() => (eventos || []).map(ev => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" })), [eventos]);
+  const eventosOptions = useMemo(
+    () => (eventos || []).map(ev => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" })),
+    [eventos]
+  );
 
-  // tickets mostrados: se tiver evento escolhido, filtramos pelos que batem no eventoId se existir campo; senão mostra todos
   const ticketsOptions = useMemo(() => {
     let list = [...(ticketsLogistica || [])];
     if (form.eventoId) {
       list = list.filter(t => (t.eventoId || t.eventId) === form.eventoId || (Array.isArray(t.projetoIds) && t.projetoIds.some(Boolean)));
     }
-    // label amigável
     return list.map(t => ({
       value: t.id,
       label: `${t.titulo || t.title || "Chamado"} — ${t.projetoNome || t.projectName || t.projeto || t.project || ""}`.trim(),
@@ -274,7 +273,7 @@ export default function RomaneiosPage() {
     if (!form.eventoId) return alert("Selecione um evento");
     if (!form.motivo) return alert("Selecione um motivo");
     if (!form.tipoVeiculo) return alert("Selecione o tipo de veículo");
-    if (!form.dataSaida) return alert("Informe a data/hora de saída");
+    if (!form.dataSaida) return alert("Informe a DATA de saída");
 
     setSaving(true);
     try {
@@ -287,7 +286,7 @@ export default function RomaneiosPage() {
         tipoVeiculo: form.tipoVeiculo,
         fornecedor: form.fornecedor,
         placa: form.placa.trim(),
-        dataSaida: form.dataSaida,
+        dataSaidaDate: form.dataSaida,
         tiposDeItens: form.tiposDeItens,
         itens: form.itensLinhas.filter((l) => l.trim() !== ""),
         vincularChamadoId: form.vincularChamadoId.trim() || null,
@@ -313,8 +312,29 @@ export default function RomaneiosPage() {
     }
   };
 
+  const registrarSaida = async (id) => {
+    try {
+      await romaneioService.registrarSaida(id);
+    } catch (e) {
+      console.error("Erro ao registrar saída", e);
+      alert("Falha ao registrar saída.");
+    }
+  };
+
+  const gerarLinkMotorista = async (id) => {
+    try {
+      const token = await romaneioService.ensureDriverToken(id);
+      const url = `${window.location.origin}/#/driver/romaneio/${token}`;
+      await navigator.clipboard.writeText(url);
+      alert(`Link copiado:\n${url}`);
+    } catch (e) {
+      console.error("Erro ao gerar link do motorista", e);
+      alert("Falha ao gerar link do motorista.");
+    }
+  };
+
   const romaneiosFiltrados = useMemo(() => {
-    let base = [...romaneios].sort((a, b) => (new Date(b.dataSaida || 0)) - (new Date(a.dataSaida || 0)));
+    let base = [...romaneios].sort((a, b) => (new Date(b.createdAt?.seconds ? b.createdAt.seconds*1000 : b.createdAt || 0)) - (new Date(a.createdAt?.seconds ? a.createdAt.seconds*1000 : a.createdAt || 0)));
     if (ativosVisiveis) base = base.filter((r) => r.status !== "entregue");
     if (filtroEvento !== "todos") base = base.filter((r) => r.eventoId === filtroEvento);
     return base;
@@ -331,12 +351,12 @@ export default function RomaneiosPage() {
             <Download className="h-4 w-4 mr-2" />
             Exportar Excel
           </Button>
-          {canCreate && (
+          {isAdmin || isGerente || isOperadorLog ? (
             <Button onClick={() => setOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Novo romaneio
             </Button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -369,7 +389,10 @@ export default function RomaneiosPage() {
         {romaneiosFiltrados.map((r) => (
           <Card key={r.id} className={`${r.status === "entregue" ? "border-green-400" : ""}`}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-base">Saída: {r.dataSaida ? new Date(r.dataSaida).toLocaleString("pt-BR") : "-"}</CardTitle>
+              <CardTitle className="text-base">
+                Saída (data): {formatDateBR(r.dataSaidaDate)}
+                {r.departedAt && <span> — Hora: {formatTimeBR(r.departedAt)}</span>}
+              </CardTitle>
               {r.status === "entregue" ? (
                 <Badge className="bg-green-600">Entregue</Badge>
               ) : (
@@ -391,16 +414,29 @@ export default function RomaneiosPage() {
                 </ul>
               </details>
 
-              {r.status !== "entregue" && (
-                <Button
-                  variant="outline"
-                  className="mt-2"
-                  onClick={() => romaneioService.marcarEntregue(r.id)}
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Marcar como entregue
+              <div className="flex flex-wrap gap-2 mt-2">
+                {r.status !== "entregue" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => registrarSaida(r.id)}
+                    title="Carimbar hora de saída"
+                  >
+                    <Send className="h-4 w-4 mr-2" /> Registrar saída
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => gerarLinkMotorista(r.id)}>
+                  <LinkIcon className="h-4 w-4 mr-2" /> Gerar link motorista
                 </Button>
-              )}
+                {r.status !== "entregue" && (
+                  <Button
+                    variant="default"
+                    onClick={() => romaneioService.marcarEntregue(r.id)}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    Marcar como entregue
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -489,9 +525,9 @@ export default function RomaneiosPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Data/hora de saída</Label>
+              <Label>Data de saída</Label>
               <Input
-                type="datetime-local"
+                type="date"
                 value={form.dataSaida}
                 onChange={(e) => setForm((p) => ({ ...p, dataSaida: e.target.value }))}
               />
