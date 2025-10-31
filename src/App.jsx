@@ -251,7 +251,8 @@ function App() {
                 path="/driver/romaneio/:token" 
                 element={
                 <RomaneioDriverPage />} />
-
+                }
+              />
 
               <Route
                 path="/templates"
