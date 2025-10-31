@@ -1,7 +1,5 @@
 // src/services/romaneioService.js
 // Serviço de Romaneios (Logística) – Firebase v9 modular
-// — cria/edita romaneios, exporta CSV, gera token público,
-//   registra saída, confirma entrega por token e busca projetos/chamados.
 
 import { db } from "../config/firebase";
 import {
@@ -26,7 +24,7 @@ import {
 const COL_ROMANEIOS = "romaneios";
 const COL_LINKS = "romaneio_links";   // token público -> romaneioId
 const COL_PROJETOS = "projetos";       // projetos vinculados a eventos
-const COL_CHAMADOS = "chamados";       // chamados (para vincular no romaneio)
+const COL_CHAMADOS = "chamados";       // chamados (para vincular)
 
 /* ============================
    Helpers
@@ -46,7 +44,7 @@ function randomToken() {
 /* ============================
    API
 ============================ */
-const romaneioService = {
+export const romaneioService = {
   /**
    * Cria um romaneio.
    * @param {{
@@ -55,13 +53,13 @@ const romaneioService = {
    *  allProjects?: boolean,
    *  projectIds?: string[],
    *  motivo: 'montagem'|'apoio'|'extra'|'desmontagem'|'operacional',
-   *  setoresResp?: string[],           // USET, SP GROUP, etc. (múltipla)
-   *  veiculoTipo?: string,             // bau|carreta|hr|guincho|outros
+   *  setoresResp?: string[],
+   *  veiculoTipo?: string,
    *  placa?: string,
    *  fornecedor?: 'interno'|'terceirizado',
    *  dataSaidaDate: string,            // 'YYYY-MM-DD' (somente data)
-   *  tiposItens?: string[],            // marcenaria|tapeçaria|...
-   *  itensEstruturados?: string[],     // linhas estruturadas
+   *  tiposItens?: string[],
+   *  itensEstruturados?: string[],
    *  linkedTicket?: { id: string, titulo?: string } | null
    * }} payload
    */
@@ -187,7 +185,6 @@ const romaneioService = {
 
   /**
    * Lê romaneio por token (tela pública do motorista).
-   * Requer regra permitindo GET quando existir driverLinkToken.
    */
   async getByDriverToken(token) {
     if (!token) return null;
@@ -205,8 +202,6 @@ const romaneioService = {
 
   /**
    * Confirma entrega por token (público).
-   * Regras devem permitir update limitado (status, deliveredAt e driverLinkToken)
-   * e conferir que o token enviado confere com o salvo no documento.
    */
   async marcarEntregueByToken(token) {
     if (!token) throw new Error("Token ausente.");
@@ -242,7 +237,6 @@ const romaneioService = {
 
     let q = query(collection(db, COL_ROMANEIOS), orderBy("createdAt", "desc"));
     if (conds.length) {
-      // aplica os where (recria o query de forma encadeada)
       q = query(collection(db, COL_ROMANEIOS), ...conds, orderBy("createdAt", "desc"));
     }
 
@@ -376,10 +370,12 @@ const romaneioService = {
    */
   async fetchLogisticaTickets(max = 200) {
     const conds = [where("areaDestino", "==", "logistica")];
-    // opcional evitar cancelados:
-    // conds.push(where("status", "!=", "cancelado")); (atenção a índices/limitações)
-
-    let qy = query(collection(db, COL_CHAMADOS), ...conds, orderBy("createdAt", "desc"), limit(max));
+    let qy = query(
+      collection(db, COL_CHAMADOS),
+      ...conds,
+      orderBy("createdAt", "desc"),
+      limit(max)
+    );
     const snap = await getDocs(qy);
 
     const arr = [];
