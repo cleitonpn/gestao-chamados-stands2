@@ -4,15 +4,15 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { romaneioService } from "../services/romaneioService";
 import { projectService } from "../services/projectService";
-import { eventService } from "../services/eventService";
-import { ticketService } from "../services/ticketService";
+// Firestore direto para eventos
+import { db } from "../config/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -21,7 +21,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Plus, Truck, CheckCircle2, Filter } from "lucide-react";
 
-// Helpers para normalizar role/area
 function normalize(s) {
   return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
@@ -64,7 +63,6 @@ const tiposItem = [
 
 export default function RomaneiosPage() {
   const { userProfile } = useAuth();
-  console.debug("[Romaneios] init");
   const navigate = useNavigate();
 
   const funcao = normalize(userProfile?.funcao);
@@ -73,59 +71,62 @@ export default function RomaneiosPage() {
   const isGerente = funcao === "gerente";
   const isOperadorLog = funcao === "operador" && area === "logistica";
 
-  // --- estado lista/consulta
   const [romaneios, setRomaneios] = useState([]);
   const [ativosVisiveis, setAtivosVisiveis] = useState(true);
-  const [filtroEvento, setFiltroEvento] = useState("todos"); // NUNCA vazio
+  const [filtroEvento, setFiltroEvento] = useState("todos");
   const [eventos, setEventos] = useState([]);
 
-  // --- modal criar/editar
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // campos do formulário — evite "" em Select.value; use undefined para sem seleção
   const [form, setForm] = useState({
-    eventoId: undefined,            // Select controla undefined como “sem seleção”
-    projetoIds: [],                 // múltipla escolha
+    eventoId: undefined,
+    projetoIds: [],
     allProjectsOfEvent: false,
     motivo: undefined,
     setoresResp: [],
     tipoVeiculo: undefined,
     fornecedor: "interno",
     placa: "",
-    dataSaida: "",                  // ISO yyyy-mm-ddTHH:mm
-    tiposDeItens: [],               // múltipla escolha
-    itensLinhas: [""],              // linhas estruturadas
-    vincularChamadoId: "",          // opcional
+    dataSaida: "",
+    tiposDeItens: [],
+    itensLinhas: [""],
+    vincularChamadoId: "",
   });
 
-  // dependentes de evento/projeto
   const [projetosDoEvento, setProjetosDoEvento] = useState([]);
-
-  // permissões
   const canCreate = isAdmin || isGerente || isOperadorLog;
 
-  // carregar eventos e romaneios
+  // === Carrega EVENTOS diretamente de 'eventos' ===
   useEffect(() => {
     (async () => {
       try {
-        console.debug("[Romaneios] Carregando eventos ativos...");
-        const evs = await eventService.getActiveEvents();
-        console.debug("[Romaneios] Eventos carregados:", (evs||[]).length);
-        setEventos(evs || []);
+        const colRef = collection(db, "eventos");
+        const q = query(colRef, where("ativo", "==", true));
+        const snap = await getDocs(q);
+        let list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        list = list.filter((e) => e.arquivado !== true);
+        list.sort((a, b) => (a?.nome || "").localeCompare(b?.nome || "", undefined, { sensitivity: "base" }));
+        setEventos(list);
+        console.debug("[Romaneios] Eventos carregados:", list.length);
       } catch (e) {
-        console.error("Falha ao carregar eventos", e);
-      }
-      try {
-        const unsub = romaneioService.listenAll((list) => setRomaneios(list));
-        return () => unsub && unsub();
-      } catch (e) {
-        console.error("Falha ao escutar romaneios", e);
+        console.error("[Romaneios] Falha ao carregar eventos:", e);
+        setEventos([]);
       }
     })();
   }, []);
 
-  // ao escolher evento no formulário, carregar os projetos
+  // === Listener de romaneios ===
+  useEffect(() => {
+    try {
+      const unsub = romaneioService.listenAll((list) => setRomaneios(list));
+      return () => unsub && unsub();
+    } catch (e) {
+      console.error("Falha ao escutar romaneios", e);
+    }
+  }, []);
+
+  // === Carrega projetos quando evento muda ===
   useEffect(() => {
     (async () => {
       if (!form.eventoId) {
@@ -141,11 +142,8 @@ export default function RomaneiosPage() {
     })();
   }, [form.eventoId]);
 
-  const eventosOptions = useMemo(() => {
-    return (eventos || []).map((ev) => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" }));
-  }, [eventos]);
+  const eventosOptions = useMemo(() => (eventos || []).map(ev => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" })), [eventos]);
 
-  // handlers
   const toggleTipoItem = (val) => {
     setForm((prev) => {
       const set = new Set(prev.tiposDeItens);
@@ -181,21 +179,20 @@ export default function RomaneiosPage() {
     return { ...p, itensLinhas: arr.length ? arr : [""] };
   });
 
-  const limparForm = () =>
-    setForm({
-      eventoId: undefined,
-      projetoIds: [],
-      allProjectsOfEvent: false,
-      motivo: undefined,
-      setoresResp: [],
-      tipoVeiculo: undefined,
-      fornecedor: "interno",
-      placa: "",
-      dataSaida: "",
-      tiposDeItens: [],
-      itensLinhas: [""],
-      vincularChamadoId: "",
-    });
+  const limparForm = () => setForm({
+    eventoId: undefined,
+    projetoIds: [],
+    allProjectsOfEvent: false,
+    motivo: undefined,
+    setoresResp: [],
+    tipoVeiculo: undefined,
+    fornecedor: "interno",
+    placa: "",
+    dataSaida: "",
+    tiposDeItens: [],
+    itensLinhas: [""],
+    vincularChamadoId: "",
+  });
 
   const salvar = async () => {
     if (!form.eventoId) return alert("Selecione um evento");
@@ -281,7 +278,6 @@ export default function RomaneiosPage() {
                 <SelectValue placeholder="Todos os eventos" />
               </SelectTrigger>
               <SelectContent>
-                {/* NUNCA usar value="" */}
                 <SelectItem value="todos">Todos os eventos</SelectItem>
                 {eventosOptions.map((ev) => (
                   <SelectItem key={ev.value} value={ev.value}>{ev.label}</SelectItem>
@@ -292,7 +288,6 @@ export default function RomaneiosPage() {
         </CardContent>
       </Card>
 
-      {/* Lista de cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {romaneiosFiltrados.map((r) => (
           <Card key={r.id} className={`${r.status === "entregue" ? "border-green-400" : ""}`}>
@@ -342,7 +337,6 @@ export default function RomaneiosPage() {
         )}
       </div>
 
-      {/* === Modal de criação === */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[720px]">
           <DialogHeader>
