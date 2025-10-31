@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { romaneioService } from "../services/romaneioService";
 import { projectService } from "../services/projectService";
-// Firestore direto para eventos
+// Firestore direto para eventos/projetos/chamados (fallbacks)
 import { db } from "../config/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 
@@ -81,6 +81,7 @@ export default function RomaneiosPage() {
 
   const [form, setForm] = useState({
     eventoId: undefined,
+    eventoNome: "",
     projetoIds: [],
     allProjectsOfEvent: false,
     motivo: undefined,
@@ -95,6 +96,7 @@ export default function RomaneiosPage() {
   });
 
   const [projetosDoEvento, setProjetosDoEvento] = useState([]);
+  const [ticketsLogistica, setTicketsLogistica] = useState([]); // para vínculo
   const canCreate = isAdmin || isGerente || isOperadorLog;
 
   // === Carrega EVENTOS diretamente de 'eventos' ===
@@ -126,7 +128,7 @@ export default function RomaneiosPage() {
     }
   }, []);
 
-  // === Carrega projetos quando evento muda ===
+  // === Carrega projetos quando evento muda (usa projectService e fallback Firestore) ===
   useEffect(() => {
     (async () => {
       if (!form.eventoId) {
@@ -134,7 +136,33 @@ export default function RomaneiosPage() {
         return;
       }
       try {
-        const projs = await projectService.getProjectsByEvent(form.eventoId);
+        // 1) tenta via service padrão
+        let projs = [];
+        try {
+          projs = await projectService.getProjectsByEvent(form.eventoId);
+        } catch (_) {}
+        // 2) fallback direto no Firestore, cobrindo 'projetos' e 'projects' e campos 'eventoId'/'eventId'
+        if (!projs || projs.length === 0) {
+          let list = [];
+          const tries = [
+            { col: "projetos", field: "eventoId" },
+            { col: "projetos", field: "eventId" },
+            { col: "projects", field: "eventoId" },
+            { col: "projects", field: "eventId" },
+          ];
+          for (const t of tries) {
+            try {
+              const colRef = collection(db, t.col);
+              const q = query(colRef, where(t.field, "==", form.eventoId));
+              const snap = await getDocs(q);
+              list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              if (list.length) break;
+            } catch (_) {}
+          }
+          projs = list;
+        }
+        // ordena por nome
+        projs = (projs || []).sort((a, b) => (a?.nome || "").localeCompare(b?.nome || "", undefined, { sensitivity: "base" }));
         setProjetosDoEvento(projs || []);
       } catch (e) {
         console.error("Falha ao carregar projetos do evento", e);
@@ -142,7 +170,54 @@ export default function RomaneiosPage() {
     })();
   }, [form.eventoId]);
 
+  // === Carrega chamados de logística para vínculo ===
+  useEffect(() => {
+    (async () => {
+      try {
+        let list = [];
+        const areas = ["logistica", "logística", "Logistica", "Logística"];
+        const statuses = ["aberto", "em_tratativa", "aberta", "open"];
+        // tenta 'chamados'
+        try {
+          const colRef = collection(db, "chamados");
+          const q = query(colRef, where("areaDestino", "in", areas));
+          const snap = await getDocs(q);
+          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (_) {}
+        // fallback 'tickets'
+        if (list.length === 0) {
+          try {
+            const colRef = collection(db, "tickets");
+            const q = query(colRef, where("areaDestino", "in", areas));
+            const snap = await getDocs(q);
+            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } catch (_) {}
+        }
+        // filtra status e, se houver evento selecionado, prioriza os daquele evento
+        list = list.filter((t) => !t.status || statuses.includes(normalize(t.status)));
+        // guarda
+        setTicketsLogistica(list);
+      } catch (e) {
+        console.error("Falha ao carregar chamados p/ vínculo", e);
+        setTicketsLogistica([]);
+      }
+    })();
+  }, [form.eventoId]); // atualiza quando escolher evento
+
   const eventosOptions = useMemo(() => (eventos || []).map(ev => ({ value: ev.id, label: ev.nome || ev.titulo || ev.name || "Evento" })), [eventos]);
+
+  // tickets mostrados: se tiver evento escolhido, filtramos pelos que batem no eventoId se existir campo; senão mostra todos
+  const ticketsOptions = useMemo(() => {
+    let list = [...(ticketsLogistica || [])];
+    if (form.eventoId) {
+      list = list.filter(t => (t.eventoId || t.eventId) === form.eventoId || (Array.isArray(t.projetoIds) && t.projetoIds.some(Boolean)));
+    }
+    // label amigável
+    return list.map(t => ({
+      value: t.id,
+      label: `${t.titulo || t.title || "Chamado"} — ${t.projetoNome || t.projectName || t.projeto || t.project || ""}`.trim(),
+    }));
+  }, [ticketsLogistica, form.eventoId]);
 
   const toggleTipoItem = (val) => {
     setForm((prev) => {
@@ -181,6 +256,7 @@ export default function RomaneiosPage() {
 
   const limparForm = () => setForm({
     eventoId: undefined,
+    eventoNome: "",
     projetoIds: [],
     allProjectsOfEvent: false,
     motivo: undefined,
@@ -204,6 +280,7 @@ export default function RomaneiosPage() {
     try {
       const payload = {
         eventoId: form.eventoId,
+        eventoNome: form.eventoNome,
         projetoIds: form.allProjectsOfEvent ? "ALL" : form.projetoIds,
         motivo: form.motivo,
         setoresResp: form.setoresResp,
@@ -279,8 +356,8 @@ export default function RomaneiosPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todos">Todos os eventos</SelectItem>
-                {eventosOptions.map((ev) => (
-                  <SelectItem key={ev.value} value={ev.value}>{ev.label}</SelectItem>
+                {(eventos || []).map((ev) => (
+                  <SelectItem key={ev.id} value={ev.id}>{ev.nome || ev.titulo || ev.name || "Evento"}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -348,14 +425,17 @@ export default function RomaneiosPage() {
               <Label>Evento</Label>
               <Select
                 value={form.eventoId}
-                onValueChange={(v) => setForm((p) => ({ ...p, eventoId: v, projetoIds: [], allProjectsOfEvent: false }))}
+                onValueChange={(v) => {
+                  const ev = (eventos || []).find(e => e.id === v);
+                  setForm((p) => ({ ...p, eventoId: v, eventoNome: ev?.nome || ev?.titulo || ev?.name || "", projetoIds: [], allProjectsOfEvent: false }));
+                }}
               >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Selecione um evento" />
                 </SelectTrigger>
                 <SelectContent>
-                  {eventosOptions.map((ev) => (
-                    <SelectItem key={ev.value} value={ev.value}>{ev.label}</SelectItem>
+                  {(eventos || []).map((ev) => (
+                    <SelectItem key={ev.id} value={ev.id}>{ev.nome || ev.titulo || ev.name || "Evento"}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -437,7 +517,7 @@ export default function RomaneiosPage() {
                         checked={form.projetoIds.includes(proj.id)}
                         onCheckedChange={() => toggleProjeto(proj.id)}
                       />
-                      <Label htmlFor={`p-${proj.id}`} className="text-sm">{proj.nome}</Label>
+                      <Label htmlFor={`p-${proj.id}`} className="text-sm">{proj.nome || proj.titulo || proj.name}</Label>
                     </div>
                   ))}
                 </div>
@@ -495,11 +575,19 @@ export default function RomaneiosPage() {
 
             <div className="space-y-2 md:col-span-2">
               <Label>Vincular a chamado (opcional)</Label>
-              <Input
-                value={form.vincularChamadoId}
-                onChange={(e) => setForm((p) => ({ ...p, vincularChamadoId: e.target.value }))}
-                placeholder="ID do chamado"
-              />
+              <Select
+                value={form.vincularChamadoId || ""}
+                onValueChange={(v) => setForm((p) => ({ ...p, vincularChamadoId: v }))}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecione um chamado (Logística)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ticketsOptions.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
